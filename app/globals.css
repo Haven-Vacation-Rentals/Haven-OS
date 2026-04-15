@@ -1,0 +1,155 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------
+ * Haven OS — Design Tokens
+ *
+ * Values are R G B triples (no commas) so they compose with Tailwind's
+ * `<color> / <alpha>` syntax:  bg-foreground/80, text-accent/50, etc.
+ * ------------------------------------------------------------------ */
+
+@layer base {
+  :root {
+    /* Surfaces */
+    --background: 255 255 255;   /* Haven white */
+    --surface:    255 255 255;
+    --surface-alt: 237 240 238;  /* Sage Mist */
+    --muted:      241 243 242;
+    --muted-foreground: 115 120 118;
+
+    /* Ink */
+    --foreground: 66 66 66;      /* Charcoal */
+    --ink-alt:    51 51 51;
+
+    /* Accent (Haven Coral) */
+    --accent:           255 86 78;
+    --accent-foreground: 255 255 255;
+    --accent-soft:      255 228 226;
+
+    /* Structural */
+    --border: 226 228 226;
+    --ring:   255 86 78;
+  }
+
+  .dark {
+    --background: 22 24 23;
+    --surface:    28 31 30;
+    --surface-alt: 36 40 38;
+    --muted:      40 44 42;
+    --muted-foreground: 160 167 163;
+
+    --foreground: 237 240 238;   /* Sage Mist as soft white */
+    --ink-alt:    200 205 202;
+
+    --accent:           255 118 111;
+    --accent-foreground: 24 25 24;
+    --accent-soft:      80 36 34;
+
+    --border: 50 54 52;
+    --ring:   255 118 111;
+  }
+
+  * {
+    border-color: rgb(var(--border));
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: rgb(var(--background));
+    color: rgb(var(--foreground));
+    font-family: var(--font-raleway), Helvetica, Arial, sans-serif;
+    font-weight: 500;
+    font-size: 15px;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "futura-pt", "Futura", ui-sans-serif, system-ui, sans-serif;
+    font-weight: 700;
+    color: rgb(var(--foreground));
+    letter-spacing: -0.01em;
+  }
+}
+
+/* ------------------------------------------------------------------
+ * Component primitives — used directly in JSX via @apply.
+ * ------------------------------------------------------------------ */
+@layer components {
+  .haven-btn-cta {
+    @apply inline-flex items-center justify-center gap-2
+           rounded-pill bg-accent px-5 py-2.5
+           text-[14px] font-black uppercase tracking-cta
+           text-accent-foreground
+           transition-all duration-150
+           hover:brightness-95 active:brightness-90
+           focus-visible:outline-none focus-visible:shadow-ring
+           disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .haven-card {
+    @apply rounded-card border border-border bg-surface
+           shadow-card transition-shadow;
+  }
+
+  .haven-card-hover {
+    @apply hover:shadow-card-hover;
+  }
+
+  .haven-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full
+           bg-surface-alt px-2.5 py-0.5 text-xs font-semibold
+           text-foreground/80;
+  }
+
+  .haven-kbd {
+    @apply inline-flex items-center justify-center rounded-md
+           border border-border bg-surface-alt px-1.5
+           font-mono text-[10px] font-semibold text-foreground/70
+           min-w-[20px] h-[20px];
+  }
+
+  /* Uppercase Raleway label — echoes site's CTAs/labels */
+  .haven-eyebrow {
+    @apply text-[11px] font-bold uppercase tracking-[0.14em]
+           text-muted-foreground;
+  }
+}
+
+/* ------------------------------------------------------------------
+ * Topographic motif — subtle SVG-in-CSS texture for empty states
+ * and the login screen. Hand-tuned so it reads as warmth, not noise.
+ * ------------------------------------------------------------------ */
+.haven-topo {
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    rgba(66, 66, 66, 0.06) 1px,
+    transparent 0
+  );
+  background-size: 22px 22px;
+}
+
+.dark .haven-topo {
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    rgba(237, 240, 238, 0.05) 1px,
+    transparent 0
+  );
+}
+
+/* Scrollbar — quiet, on-brand */
+@media (pointer: fine) {
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--border));
+    border-radius: 10px;
+    border: 2px solid rgb(var(--background));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--muted-foreground) / 0.5);
+  }
+}
