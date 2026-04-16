@@ -53,7 +53,7 @@ const sections: NavSection[] = [
   {
     heading: "Operations",
     items: [
-      { label: "Properties", href: "/properties", icon: Home, soon: true },
+      { label: "Properties", href: "/properties", icon: Home },
       { label: "Onboarding", href: "/onboarding", icon: LogIn, soon: true },
       { label: "Offboarding", href: "/offboarding", icon: DoorOpen, soon: true },
       { label: "Maintenance", href: "/maintenance", icon: Wrench, soon: true },

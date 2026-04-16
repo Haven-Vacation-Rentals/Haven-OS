@@ -1,20 +1,26 @@
-import { Home } from "lucide-react";
-import { SoonPage } from "@/components/soon";
+import { getProperties, getPropertyFacets } from "@/lib/properties/actions";
+import { PropertiesView } from "@/components/properties/properties-view";
 
-export default function PropertiesPage() {
+export default async function PropertiesPage() {
+  const [properties, facets] = await Promise.all([
+    getProperties(),
+    getPropertyFacets(),
+  ]);
+
   return (
-    <SoonPage
-      icon={Home}
-      eyebrow="Operations"
-      title="Properties"
-      phase="Phase 3"
-      description="The source of truth for every cabin: lifecycle stage, revenue, onboarding checklist, offboarding plan, linen + access codes, and recurring maintenance."
-      bullets={[
-        "Lifecycle: Lead → Quote → Onboarding → Active → Offboarding",
-        "Per-property revenue & margin",
-        "Onboarding + offboarding checklists",
-        "Linen, access codes, AC filters",
-      ]}
-    />
+    <div className="flex flex-col gap-4">
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <h1 className="font-heading text-display-3 font-bold tracking-tight">
+            Properties
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Haven&apos;s rental portfolio — {properties.length} units across the Smokies
+          </p>
+        </div>
+      </div>
+
+      <PropertiesView properties={properties} facets={facets} />
+    </div>
   );
 }
