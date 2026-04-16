@@ -12,12 +12,12 @@ import {
   Search,
   Sparkles,
   Users,
-  Wifi,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { StatusBadge, TierBadge } from "./property-badges";
+import { PropertyTable } from "./property-table";
 import type {
   Property,
   PropertyStatus,
@@ -222,7 +222,7 @@ export function PropertiesView({
       ) : view === "grid" ? (
         <PropertyGrid properties={filtered} />
       ) : (
-        <PropertyTable properties={filtered} />
+        <PropertyTable properties={filtered} facets={facets} />
       )}
     </div>
   );
@@ -434,90 +434,3 @@ function Stat({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Table view — compact list
-// ---------------------------------------------------------------------------
-
-function PropertyTable({ properties }: { properties: Property[] }) {
-  return (
-    <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card">
-      <div className="overflow-x-auto">
-        <table className="w-full text-[13px]">
-          <thead className="border-b border-border bg-surface-alt/40 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="sticky left-0 bg-inherit px-3 py-2 text-left">Property</th>
-              <th className="px-3 py-2 text-left">Status</th>
-              <th className="px-3 py-2 text-left">Tier</th>
-              <th className="px-3 py-2 text-left">Region</th>
-              <th className="px-3 py-2 text-center">Beds</th>
-              <th className="px-3 py-2 text-center">Baths</th>
-              <th className="px-3 py-2 text-center">Guests</th>
-              <th className="px-3 py-2 text-left">Account Manager</th>
-              <th className="px-3 py-2 text-left">Airbnb</th>
-              <th className="px-3 py-2 text-left">Wifi</th>
-            </tr>
-          </thead>
-          <tbody>
-            {properties.map((p, i) => (
-              <tr
-                key={p.id}
-                className={cn(
-                  "border-b border-border/30 transition-colors hover:bg-surface-alt/50",
-                  i === properties.length - 1 && "border-b-0",
-                )}
-              >
-                <td className="sticky left-0 bg-inherit px-3 py-2">
-                  <Link
-                    href={`/properties/${p.id}` as never}
-                    className="flex flex-col gap-0.5 hover:text-accent"
-                  >
-                    <span className="font-semibold leading-tight">{p.name}</span>
-                    {p.address ? (
-                      <span className="truncate text-[11px] text-muted-foreground">
-                        {p.address}
-                      </span>
-                    ) : null}
-                  </Link>
-                </td>
-                <td className="px-3 py-2">
-                  <StatusBadge status={p.status} />
-                </td>
-                <td className="px-3 py-2">
-                  <TierBadge tier={p.tier} />
-                </td>
-                <td className="px-3 py-2 text-muted-foreground">{p.region ?? "—"}</td>
-                <td className="px-3 py-2 text-center tabular-nums">
-                  {p.bedroom_count ?? "—"}
-                </td>
-                <td className="px-3 py-2 text-center tabular-nums">
-                  {p.bathroom_count_full != null
-                    ? `${p.bathroom_count_full}${p.bathroom_count_half ? "." + p.bathroom_count_half : ""}`
-                    : "—"}
-                </td>
-                <td className="px-3 py-2 text-center tabular-nums">
-                  {p.max_guests ?? "—"}
-                </td>
-                <td className="px-3 py-2 text-foreground/80">
-                  {p.account_manager ?? "—"}
-                </td>
-                <td className="px-3 py-2 text-muted-foreground">
-                  {p.airbnb_account ?? "—"}
-                </td>
-                <td className="px-3 py-2">
-                  {p.wifi_login ? (
-                    <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
-                      <Wifi className="h-3 w-3" />
-                      <span className="text-[11px] font-semibold">Set</span>
-                    </span>
-                  ) : (
-                    <span className="text-[11px] text-muted-foreground/40">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
