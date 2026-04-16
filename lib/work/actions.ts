@@ -473,6 +473,150 @@ export async function deleteTask(id: string): Promise<void> {
   revalidatePath("/work", "layout");
 }
 
+// ---------------------------------------------------------------------------
+// LIST-LEVEL VIEW DATA
+// ---------------------------------------------------------------------------
+
+/**
+ * TaskWithSubtasks — extends TaskWithRelations with done subtask count
+ * and the full subtask array for inline rendering.
+ */
+export type TaskWithSubtasks = TaskWithRelations & {
+  subtasks_done: number;
+  subtask_list: TaskWithRelations[];
+};
+
+/**
+ * Fetch ALL tasks (parents + subtasks) for a list-level view.
+ * Returns parent tasks with their subtask_list populated.
+ * Also used for the grouped list-view table.
+ */
+export async function getTasksForListView(
+  listId: string,
+): Promise<TaskWithSubtasks[]> {
+  const supabase = await db();
+
+  // Fetch ALL tasks (including subtasks) in one query
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(
+      `
+      *,
+      status:statuses(*),
+      subtasks:tasks!parent_id(id, status_id, status:statuses(category))
+    `,
+    )
+    .eq("list_id", listId)
+    .is("archived_at", null)
+    .order("order");
+
+  if (error) throw error;
+
+  // Resolve assignee profiles
+  const allAssigneeIds = [
+    ...new Set((data ?? []).flatMap((t: Task) => t.assignee_ids)),
+  ];
+  let profileMap: Record<
+    string,
+    { id: string; full_name: string | null; avatar_url: string | null }
+  > = {};
+
+  if (allAssigneeIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, full_name, avatar_url")
+      .in("id", allAssigneeIds);
+    if (profiles) {
+      profileMap = Object.fromEntries(profiles.map((p) => [p.id, p]));
+    }
+  }
+
+  const enriched = (data ?? []).map((t: Record<string, unknown>) => {
+    const rawSubs = Array.isArray(t.subtasks)
+      ? (t.subtasks as Array<Record<string, unknown>>)
+      : [];
+    const subtasks_done = rawSubs.filter((s) => {
+      const st = s.status as { category: string } | null;
+      return st?.category === "done" || st?.category === "closed";
+    }).length;
+    return {
+      ...t,
+      status: t.status ?? null,
+      subtask_count: rawSubs.length,
+      subtasks_done,
+      subtask_list: [] as TaskWithRelations[], // will be populated below
+      assignees: ((t.assignee_ids ?? []) as string[])
+        .map((id: string) => profileMap[id])
+        .filter(Boolean),
+    };
+  }) as TaskWithSubtasks[];
+
+  // For subtasks, also create a map and attach to parents
+  // The query above returns ALL tasks — separate parents vs subtasks
+  // Note: `data` flat array has parent_id field
+  const byId = new Map<string, TaskWithSubtasks>();
+  for (const t of enriched) {
+    byId.set(t.id, t);
+  }
+
+  // Attach subtasks as subtask_list to their parents
+  for (const t of enriched) {
+    if (t.parent_id && byId.has(t.parent_id)) {
+      byId.get(t.parent_id)!.subtask_list.push(t as unknown as TaskWithRelations);
+    }
+  }
+
+  // Return only top-level (parent_id === null) tasks
+  return enriched.filter((t) => !t.parent_id);
+}
+
+/**
+ * Duplicate a task (copies title, status, priority, due_date, description).
+ */
+export async function duplicateTask(taskId: string): Promise<Task> {
+  const supabase = await db();
+  const userId = await currentUserId();
+
+  const { data: src, error: srcErr } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("id", taskId)
+    .single();
+  if (srcErr || !src) throw srcErr ?? new Error("Task not found");
+
+  const { data: maxOrder } = await supabase
+    .from("tasks")
+    .select("order")
+    .eq("list_id", src.list_id)
+    .is("parent_id", src.parent_id ?? null)
+    .order("order", { ascending: false })
+    .limit(1)
+    .single();
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .insert({
+      list_id: src.list_id,
+      status_id: src.status_id,
+      parent_id: src.parent_id,
+      title: src.title + " (copy)",
+      description: src.description,
+      priority: src.priority,
+      due_date: src.due_date,
+      start_date: src.start_date,
+      time_estimate: src.time_estimate,
+      custom_fields: src.custom_fields,
+      tags: src.tags,
+      order: (maxOrder?.order ?? -1) + 1,
+      created_by: userId,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  revalidatePath("/work", "layout");
+  return data;
+}
+
 /**
  * Fetch all tasks (including subtasks) for a list and return a flat array
  * with depth info for rendering a hierarchical list view.
