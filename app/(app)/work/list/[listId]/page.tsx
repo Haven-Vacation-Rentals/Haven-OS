@@ -1,13 +1,21 @@
 import { notFound } from "next/navigation";
 import {
   getList,
-  getTasks,
   getStatuses,
   getCustomFieldDefs,
+  getListMembers,
+  getMembers,
+  getTasksForListView,
 } from "@/lib/work/actions";
-import { ListView } from "@/components/work/list-view";
-import { Badge } from "@/components/ui/badge";
+import { ListViewTable } from "@/components/work/list-view-table";
 
+/**
+ * List-level page — server component.
+ *
+ * Fetches all data in parallel and passes down to the client-interactive
+ * ListViewTable component. No layout overhead here — the (app) layout
+ * already wraps this in the sidebar/shell.
+ */
 export default async function ListPage({
   params,
 }: {
@@ -15,48 +23,33 @@ export default async function ListPage({
 }) {
   const { listId } = await params;
 
-  const [list, tasks, statuses, fieldDefs] = await Promise.all([
-    getList(listId),
-    getTasks(listId),
-    getStatuses(listId),
-    getCustomFieldDefs(listId),
-  ]);
+  // Fetch everything in parallel
+  const [list, tasks, statuses, fieldDefs, listMembers, allMembers] =
+    await Promise.all([
+      getList(listId),
+      getTasksForListView(listId),
+      getStatuses(listId),
+      getCustomFieldDefs(listId),
+      getListMembers(listId),
+      getMembers(),
+    ]);
 
   if (!list) notFound();
 
-  const total = tasks.length;
-  const done = tasks.filter(
-    (t) =>
-      t.status?.category === "done" || t.status?.category === "closed",
-  ).length;
+  // Build the member array combining list members with all profile data
+  // (list members have the color, but allMembers has full_name + avatar_url)
+  const memberIdSet = new Set(listMembers.map((m) => m.profile_id));
+  const members = allMembers.filter((m) => memberIdSet.has(m.id));
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* List header */}
-      <div className="flex items-center gap-3">
-        <h1 className="font-heading text-display-4 font-bold tracking-tight">
-          {list.name}
-        </h1>
-        <Badge tone="neutral">
-          {done}/{total} done
-        </Badge>
-      </div>
-
-      {list.description ? (
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          {list.description}
-        </p>
-      ) : null}
-
-      {/* Task list */}
-      <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card">
-        <ListView
-          list={list}
-          tasks={tasks}
-          statuses={statuses}
-          fieldDefs={fieldDefs}
-        />
-      </div>
+    <div className="flex h-full flex-col overflow-hidden rounded-card border border-border bg-surface shadow-card">
+      <ListViewTable
+        list={list}
+        tasks={tasks}
+        statuses={statuses}
+        fieldDefs={fieldDefs}
+        members={members}
+      />
     </div>
   );
 }
