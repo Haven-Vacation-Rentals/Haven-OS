@@ -78,6 +78,72 @@ In Google Cloud Console → **OAuth consent screen** → set **User type = Inter
 
 ---
 
+## Deploy to Vercel
+
+~5 minutes end-to-end once Supabase is set up.
+
+### 1. Import the repo
+1. <https://vercel.com/new> → **Import Git Repository** → select `haven-vacation-rentals/haven-os`.
+2. Framework Preset → **Next.js** (auto-detected).
+3. Root Directory → leave as `.` Build + Output settings → leave as defaults.
+4. **Don't click Deploy yet** — add env vars first (next step).
+
+### 2. Environment variables
+Open **Settings → Environment Variables** and add each of these. For each one, tick the environments it applies to.
+
+| Variable | Production | Preview | Development | Notes |
+|---|:-:|:-:|:-:|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | ✅ | ✅ | From Supabase → Settings → API |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | ✅ | ✅ | Same screen |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | ✅ | ✅ | Server-only. Same screen. |
+| `NEXT_PUBLIC_APP_URL` | ✅ | — | — | Set to your custom domain (e.g. `https://os.havenvacationrentals.com`). Leave blank on Preview so each preview redirects to itself via `VERCEL_URL`. |
+| `ANTHROPIC_API_KEY` | ✅ | ✅ | — | Only required once the Haven Assistant lands. |
+
+Then hit **Deploy**. First build takes about 60 seconds.
+
+### 3. Tell Supabase about your Vercel URLs
+Still in the Supabase dashboard → **Authentication → URL Configuration**:
+
+- **Site URL** → your production URL (e.g. `https://os.havenvacationrentals.com`).
+- **Redirect URLs** → add *all* of these:
+  ```
+  http://localhost:3000/auth/callback
+  https://os.havenvacationrentals.com/auth/callback   # or your vercel.app URL
+  https://haven-os-*-haven.vercel.app/auth/callback   # optional: wildcard for previews
+  ```
+  > The wildcard is only needed if you want Google sign-in to work on preview deployments. For an internal tool, many teams skip it and only auth-test on prod.
+
+### 4. (Optional but recommended) Custom domain
+1. Vercel → **Settings → Domains** → add `os.havenvacationrentals.com`.
+2. Add the CNAME record Vercel shows you to the Haven DNS.
+3. Update `NEXT_PUBLIC_APP_URL` (Production only) to the custom domain.
+4. In Supabase → URL Configuration, update **Site URL** and the Redirect URL list to use the custom domain.
+5. In Google Cloud → OAuth Client → **Authorized JavaScript origins**, add the custom domain.
+
+### 5. Restrict access (internal-only tool)
+Two layers of defense in depth:
+
+- **Google Workspace**: Google Cloud Console → **OAuth consent screen** → User type = **Internal**. Only `@havenvacationrentals.com` accounts can complete sign-in.
+- **Vercel Password Protection**: Vercel → **Settings → Deployment Protection** → enable *Vercel Authentication* on Preview environments so random preview URLs aren't crawlable. Production sits behind the Google Workspace check above, which is enough.
+
+### 6. Verify
+After the first deploy:
+
+```bash
+curl https://os.havenvacationrentals.com/api/health
+```
+
+Should return JSON like:
+```json
+{"ok":true,"app":"haven-os","env":"production","commit":"5c5835f","supabase":"configured"}
+```
+
+If `supabase: "missing"` the env vars didn't take — go re-check step 2 and redeploy.
+
+---
+
+---
+
 ## Roadmap
 
 | Phase | Scope | Status |
@@ -85,6 +151,7 @@ In Google Cloud Console → **OAuth consent screen** → set **User type = Inter
 | 0 | Scaffold + design system | ✅ |
 | 1 | App shell, ⌘K, dashboard mock | ✅ |
 | 1.5 | Supabase Auth (Google OAuth), profiles table, RLS, gated routes | ✅ |
+| 1.6 | Vercel-ready: health probe, robots, VERCEL_URL-aware OAuth | ✅ |
 | 2 | **Work** — data model, Spaces/Lists/Tasks, List + Board + Calendar, custom fields, saved views | ⏭️ next |
 | 3 | Work power features — Timeline/Gantt, dependencies, recurring, Docs, time tracking | |
 | 4 | **Haven Assistant** — Claude Agent SDK in ⌘J drawer, context-aware, tool-use on Haven data | |

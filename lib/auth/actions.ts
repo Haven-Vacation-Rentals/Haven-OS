@@ -49,13 +49,31 @@ export async function signOut(): Promise<void> {
 }
 
 /**
- * Best-effort origin for OAuth redirect. Prefers NEXT_PUBLIC_APP_URL
- * (stable across envs), falls back to the request host, finally
- * localhost.
+ * Best-effort origin for OAuth redirect. Precedence:
+ *   1. Vercel preview/dev deployments → use that deployment's URL
+ *      (so a branch deploy redirects back to itself, not prod).
+ *   2. Vercel production with NEXT_PUBLIC_APP_URL set → use the custom
+ *      domain (e.g. https://os.havenvacationrentals.com).
+ *   3. Vercel production without custom domain → use VERCEL_URL.
+ *   4. Local dev → NEXT_PUBLIC_APP_URL or the request host headers.
+ *   5. Absolute fallback → http://localhost:3000.
+ *
+ * The returned URL is ALWAYS one that must be in Supabase's redirect
+ * allowlist (Authentication → URL Configuration) or Supabase will
+ * refuse the OAuth handshake.
  */
 async function resolveOrigin(): Promise<string> {
+  const vercelEnv = process.env.VERCEL_ENV; // "production" | "preview" | "development"
+  const vercelUrl = process.env.VERCEL_URL; // e.g. "haven-os-abc.vercel.app"
+
+  if (vercelEnv === "preview" && vercelUrl) {
+    return `https://${vercelUrl}`;
+  }
+
   const explicit = process.env.NEXT_PUBLIC_APP_URL;
   if (explicit) return explicit.replace(/\/$/, "");
+
+  if (vercelUrl) return `https://${vercelUrl}`;
 
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host");
