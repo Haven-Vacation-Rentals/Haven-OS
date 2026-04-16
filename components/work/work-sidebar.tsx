@@ -9,25 +9,44 @@ import {
   Folder as FolderIcon,
   List as ListIcon,
   Plus,
-  MoreHorizontal,
+  CheckSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import type { SpaceTree } from "@/lib/work/types";
+import type { SpaceTree, ListType } from "@/lib/work/types";
 import {
   createSpace,
   createFolder,
   createList,
 } from "@/lib/work/actions";
 import { SpaceSettingsButton } from "@/components/work/space-settings";
+import { ListTypeIcon } from "@/components/work/list-type-icon";
 
 /**
  * Work sidebar tree — Spaces, Folders, Lists. Lives in the work
  * layout as a secondary panel inside the main sidebar area.
  */
 export function WorkSidebar({ tree }: { tree: SpaceTree[] }) {
+  const pathname = usePathname();
+  const allTasksActive = pathname === "/work/tasks";
+
   return (
     <div className="flex flex-col gap-1 py-2">
+      {/* Top-level All Tasks link */}
+      <Link
+        href="/work/tasks"
+        className={cn(
+          "mx-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] font-semibold transition-colors",
+          "hover:bg-surface-alt",
+          allTasksActive
+            ? "bg-accent-soft text-haven-coral-700 dark:text-haven-coral"
+            : "text-foreground/80",
+        )}
+      >
+        <CheckSquare className="h-3.5 w-3.5 shrink-0" />
+        All Tasks
+      </Link>
+
       {tree.map((space) => (
         <SpaceNode key={space.id} space={space} />
       ))}
@@ -138,10 +157,11 @@ function ListNode({
   list,
   pathname,
 }: {
-  list: { id: string; name: string };
+  list: { id: string; name: string; type?: ListType };
   pathname: string;
 }) {
   const active = pathname === `/work/list/${list.id}`;
+  const listType = list.type ?? "shared";
   return (
     <Link
       href={`/work/list/${list.id}` as never}
@@ -153,7 +173,7 @@ function ListNode({
           : "text-foreground/70",
       )}
     >
-      <ListIcon className="h-3.5 w-3.5 shrink-0" />
+      <ListTypeIcon type={listType} className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span className="truncate">{list.name}</span>
     </Link>
   );
@@ -205,8 +225,20 @@ function AddFolderListButton({ spaceId }: { spaceId: string }) {
               setShowMenu(false);
               const name = prompt("List name:");
               if (!name?.trim()) return;
+              const typeRaw = prompt(
+                "List type (private / shared / public):",
+                "shared",
+              );
+              const type =
+                typeRaw === "private" || typeRaw === "public"
+                  ? typeRaw
+                  : "shared";
               start(async () => {
-                await createList({ space_id: spaceId, name: name.trim() });
+                await createList({
+                  space_id: spaceId,
+                  name: name.trim(),
+                  type: type as ListType,
+                });
               });
             }}
           >
@@ -249,11 +281,18 @@ function AddListInFolderButton({
       onClick={() => {
         const name = prompt("List name:");
         if (!name?.trim()) return;
+        const typeRaw = prompt(
+          "List type (private / shared / public):",
+          "shared",
+        );
+        const type =
+          typeRaw === "private" || typeRaw === "public" ? typeRaw : "shared";
         start(async () => {
           await createList({
             space_id: spaceId,
             folder_id: folderId,
             name: name.trim(),
+            type: type as ListType,
           });
         });
       }}
