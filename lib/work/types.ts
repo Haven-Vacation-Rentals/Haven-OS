@@ -29,6 +29,26 @@ export type CustomFieldType =
   | "people"
   | "labels";
 
+/** All distinct action strings that can appear in task_activity.action */
+export type ActivityAction =
+  | "created"
+  | "status_changed"
+  | "assignee_added"
+  | "assignee_removed"
+  | "priority_changed"
+  | "title_changed"
+  | "description_changed"
+  | "due_date_changed"
+  | "start_date_changed"
+  | "comment_added"
+  | "comment_deleted"
+  | "attachment_added"
+  | "attachment_deleted"
+  | "checklist_added"
+  | "checklist_item_completed"
+  | "archived"
+  | "unarchived";
+
 // --- Core entities -----------------------------------------------------------
 
 export type SpacePrivacy = "team" | "private";
@@ -127,6 +147,18 @@ export interface CustomFieldDef {
   created_at: string;
 }
 
+/** Alias for CustomFieldDef — used in spec references to FieldDef */
+export type FieldDef = CustomFieldDef;
+
+/**
+ * Generic wrapper for a typed custom field value stored in tasks.custom_fields.
+ * T is the JS type of the field (string, number, boolean, string[], etc.)
+ */
+export interface FieldValue<T> {
+  field_def_id: string;
+  value: T;
+}
+
 export interface Task {
   id: string;
   list_id: string;
@@ -156,6 +188,60 @@ export interface Comment {
   body: string;
   created_at: string;
   updated_at: string;
+}
+
+// --- ClickUp-parity entities -------------------------------------------------
+
+export interface Checklist {
+  id: string;
+  task_id: string;
+  name: string;
+  order: number;
+  created_at: string;
+}
+
+export interface ChecklistItem {
+  id: string;
+  checklist_id: string;
+  content: string;
+  completed: boolean;
+  assignee_id: string | null;
+  order: number;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface TimeEntry {
+  id: string;
+  task_id: string;
+  user_id: string;
+  description: string | null;
+  started_at: string;
+  ended_at: string | null;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+export interface TaskActivity {
+  id: string;
+  task_id: string;
+  actor_id: string | null;
+  action: ActivityAction | string; // string fallback for future/unknown actions
+  from_value: Record<string, unknown> | null;
+  to_value: Record<string, unknown> | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface TaskAttachment {
+  id: string;
+  task_id: string;
+  uploader_id: string | null;
+  file_name: string;
+  file_size: number;
+  mime_type: string | null;
+  storage_path: string;
+  created_at: string;
 }
 
 // --- Composite / view types --------------------------------------------------
