@@ -19,6 +19,7 @@ import {
   createFolder,
   createList,
 } from "@/lib/work/actions";
+import { SpaceSettingsButton } from "@/components/work/space-settings";
 
 /**
  * Work sidebar tree — Spaces, Folders, Lists. Lives in the work
@@ -61,6 +62,7 @@ function SpaceNode({ space }: { space: SpaceTree }) {
         <span className="flex-1 truncate text-[13px] font-semibold text-foreground">
           {space.name}
         </span>
+        <SpaceSettingsButton space={space} />
         <AddFolderListButton spaceId={space.id} />
       </div>
 

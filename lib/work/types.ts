@@ -27,6 +27,10 @@ export type CustomFieldType =
 
 // --- Core entities -----------------------------------------------------------
 
+export type SpacePrivacy = "team" | "private";
+
+export type SpaceMemberRole = "admin" | "member" | "viewer";
+
 export interface Space {
   id: string;
   name: string;
@@ -34,10 +38,24 @@ export interface Space {
   color: string;
   icon: string;
   order: number;
+  privacy: SpacePrivacy;
   archived_at: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface SpaceMember {
+  space_id: string;
+  profile_id: string;
+  role: SpaceMemberRole;
+  added_at: string;
+  profile?: {
+    id: string;
+    full_name: string | null;
+    email: string;
+    avatar_url: string | null;
+  };
 }
 
 export interface Folder {

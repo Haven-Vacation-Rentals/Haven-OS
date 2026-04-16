@@ -2,19 +2,16 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import {
-  Calendar,
-  Flag,
-  Tag,
   X,
   Send,
   Trash2,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   getTask,
   getComments,
+  getMembers,
   updateTask,
   deleteTask,
   createComment,
@@ -26,6 +23,7 @@ import type {
   CustomFieldDef,
   TaskPriority,
 } from "@/lib/work/types";
+import { MentionInput, MentionText, type MentionUser } from "@/components/work/mention-input";
 
 const priorities: { value: TaskPriority; label: string; color: string }[] = [
   { value: "urgent", label: "Urgent", color: "text-rose-600" },
@@ -51,12 +49,20 @@ export function TaskDetailDrawer({
     (Comment & { author: { full_name: string | null; avatar_url: string | null } })[]
   >([]);
   const [commentBody, setCommentBody] = useState("");
+  const [description, setDescription] = useState("");
+  const [allUsers, setAllUsers] = useState<MentionUser[]>([]);
   const [pending, start] = useTransition();
 
   const load = useCallback(async () => {
-    const [t, c] = await Promise.all([getTask(taskId), getComments(taskId)]);
+    const [t, c, u] = await Promise.all([
+      getTask(taskId),
+      getComments(taskId),
+      getMembers(),
+    ]);
     setTask(t);
+    setDescription(t?.description ?? "");
     setComments(c);
+    setAllUsers(u);
   }, [taskId]);
 
   useEffect(() => {
@@ -252,16 +258,33 @@ export function TaskDetailDrawer({
         {/* Description */}
         <div className="mt-6">
           <label className="haven-eyebrow mb-1.5 block">Description</label>
-          <textarea
-            defaultValue={task.description ?? ""}
-            onBlur={(e) => {
-              const v = e.target.value;
-              if (v !== (task.description ?? "")) save({ description: v || null });
-            }}
-            placeholder="Add a description…"
+          <MentionInput
+            value={description}
+            onChange={setDescription}
+            users={allUsers}
+            placeholder="Add a description… (type @ to mention)"
             rows={4}
-            className="w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-[13px] outline-none focus:shadow-ring placeholder:text-muted-foreground/60"
+            className="resize-y py-2"
           />
+          {description !== (task.description ?? "") ? (
+            <div className="mt-1.5 flex gap-2">
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => save({ description: description || null })}
+                disabled={pending}
+              >
+                Save
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setDescription(task.description ?? "")}
+              >
+                Cancel
+              </Button>
+            </div>
+          ) : null}
         </div>
 
         {/* Comments */}
@@ -299,34 +322,31 @@ export function TaskDetailDrawer({
                       })}
                     </span>
                   </div>
-                  <p className="text-[13px] text-foreground/90">{c.body}</p>
+                  <MentionText text={c.body} className="text-[13px] text-foreground/90" />
                 </div>
               </div>
             ))}
           </div>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleComment();
-            }}
-            className="mt-3 flex gap-2"
-          >
-            <input
-              value={commentBody}
-              onChange={(e) => setCommentBody(e.target.value)}
-              placeholder="Write a comment…"
-              className="flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-[13px] outline-none focus:shadow-ring placeholder:text-muted-foreground/60"
-            />
+          <div className="mt-3 flex gap-2">
+            <div className="flex-1">
+              <MentionInput
+                value={commentBody}
+                onChange={setCommentBody}
+                users={allUsers}
+                placeholder="Write a comment… (type @ to mention)"
+                onSubmit={handleComment}
+              />
+            </div>
             <Button
-              type="submit"
               variant="primary"
               size="sm"
               disabled={!commentBody.trim() || pending}
+              onClick={handleComment}
             >
               <Send className="h-3.5 w-3.5" />
             </Button>
-          </form>
+          </div>
         </div>
       </div>
     </div>

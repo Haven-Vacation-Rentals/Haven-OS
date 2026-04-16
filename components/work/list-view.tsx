@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { TaskRow } from "./task-row";
+import { TaskRow, TaskRowHeader } from "./task-row";
 import { AddTaskRow } from "./add-task-row";
 import { TaskDetailDrawer } from "./task-detail-drawer";
 import type { TaskWithRelations, Status, CustomFieldDef, List } from "@/lib/work/types";
@@ -25,11 +25,14 @@ export function ListView({
   return (
     <div className="flex gap-0">
       {/* Main list */}
-      <div className="flex-1">
+      <div className="min-w-0 flex-1 overflow-x-auto">
+        {/* Column headers */}
+        <TaskRowHeader fieldDefs={fieldDefs} />
+
         {grouped.map((group) => (
-          <div key={group.status?.id ?? "none"} className="mb-4">
+          <div key={group.status?.id ?? "none"}>
             {/* Status group header */}
-            <div className="flex items-center gap-2 px-3 py-1.5">
+            <div className="flex items-center gap-2 bg-surface-alt/30 px-3 py-1.5">
               <span
                 className="h-2 w-2 rounded-full"
                 style={{
@@ -50,6 +53,7 @@ export function ListView({
                 key={task.id}
                 task={task}
                 statuses={statuses}
+                fieldDefs={fieldDefs}
                 onSelect={setSelectedTaskId}
               />
             ))}

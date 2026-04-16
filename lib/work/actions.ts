@@ -9,6 +9,9 @@ import type {
   CreateTaskInput,
   UpdateTaskInput,
   Space,
+  SpaceMember,
+  SpacePrivacy,
+  SpaceMemberRole,
   Folder,
   List,
   Task,
@@ -511,4 +514,74 @@ export async function getMembers(): Promise<
     .order("full_name");
   if (error) throw error;
   return data ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// SPACE MEMBERS & PRIVACY
+// ---------------------------------------------------------------------------
+
+export async function getSpaceMembers(spaceId: string): Promise<SpaceMember[]> {
+  const supabase = await db();
+  const { data, error } = await supabase
+    .from("space_members")
+    .select("*, profile:profiles!profile_id(id, full_name, email, avatar_url)")
+    .eq("space_id", spaceId)
+    .order("added_at");
+  if (error) throw error;
+  return (data ?? []) as SpaceMember[];
+}
+
+export async function addSpaceMember(
+  spaceId: string,
+  profileId: string,
+  role: SpaceMemberRole = "member",
+): Promise<void> {
+  const supabase = await db();
+  const { error } = await supabase
+    .from("space_members")
+    .upsert({ space_id: spaceId, profile_id: profileId, role });
+  if (error) throw error;
+  revalidatePath("/work", "layout");
+}
+
+export async function removeSpaceMember(
+  spaceId: string,
+  profileId: string,
+): Promise<void> {
+  const supabase = await db();
+  const { error } = await supabase
+    .from("space_members")
+    .delete()
+    .eq("space_id", spaceId)
+    .eq("profile_id", profileId);
+  if (error) throw error;
+  revalidatePath("/work", "layout");
+}
+
+export async function updateSpacePrivacy(
+  spaceId: string,
+  privacy: SpacePrivacy,
+): Promise<void> {
+  const supabase = await db();
+  const { error } = await supabase
+    .from("spaces")
+    .update({ privacy })
+    .eq("id", spaceId);
+  if (error) throw error;
+  revalidatePath("/work", "layout");
+}
+
+export async function updateSpaceMemberRole(
+  spaceId: string,
+  profileId: string,
+  role: SpaceMemberRole,
+): Promise<void> {
+  const supabase = await db();
+  const { error } = await supabase
+    .from("space_members")
+    .update({ role })
+    .eq("space_id", spaceId)
+    .eq("profile_id", profileId);
+  if (error) throw error;
+  revalidatePath("/work", "layout");
 }
