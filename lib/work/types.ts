@@ -140,6 +140,12 @@ export interface TaskWithRelations extends Task {
   assignees: { id: string; full_name: string | null; avatar_url: string | null }[];
 }
 
+/** Flat list item for the list view — includes depth for indentation */
+export interface FlatTask extends TaskWithRelations {
+  depth: number;
+  children: FlatTask[];
+}
+
 export interface SpaceTree extends Space {
   folders: (Folder & { lists: List[] })[];
   lists: List[]; // Lists directly under the space (no folder)

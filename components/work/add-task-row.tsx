@@ -29,7 +29,12 @@ export function AddTaskRow({ listId }: { listId: string }) {
           setActive(true);
           requestAnimationFrame(() => inputRef.current?.focus());
         }}
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-[13px] font-medium text-muted-foreground hover:bg-surface-alt/50 hover:text-foreground transition-colors"
+        className={cn(
+          "flex w-full items-center gap-2 py-2.5 text-[13px] font-medium",
+          "text-muted-foreground hover:bg-surface-alt/50 hover:text-foreground transition-colors",
+          /* Align with the task title: drag-handle(24) + expand(20) + status(22) + margin */
+          "pl-[72px]",
+        )}
       >
         <Plus className="h-4 w-4" />
         Add task
@@ -43,9 +48,9 @@ export function AddTaskRow({ listId }: { listId: string }) {
         e.preventDefault();
         submit();
       }}
-      className="flex items-center gap-2 border-b border-border/50 px-3 py-2"
+      className="flex items-center gap-2 border-b border-border/50 py-2 pl-[72px] pr-3"
     >
-      <Plus className="h-4 w-4 text-accent" />
+      <Plus className="h-4 w-4 text-accent shrink-0" />
       <input
         ref={inputRef}
         autoFocus
@@ -60,14 +65,15 @@ export function AddTaskRow({ listId }: { listId: string }) {
             setActive(false);
           }
         }}
-        placeholder="Task name — press Enter to add"
+        placeholder="Task name — press Enter to add, Esc to cancel"
         disabled={pending}
         className={cn(
           "flex-1 bg-transparent text-[13.5px] font-medium outline-none",
-          "placeholder:text-muted-foreground/60",
+          "placeholder:text-muted-foreground/50",
+          pending && "opacity-50",
         )}
       />
-      <span className="haven-kbd">↵</span>
+      <span className="haven-kbd text-[9px]">Enter</span>
     </form>
   );
 }

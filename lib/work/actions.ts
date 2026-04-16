@@ -19,6 +19,7 @@ import type {
   Comment,
   SpaceTree,
   TaskWithRelations,
+  FlatTask,
   CustomFieldDef,
 } from "./types";
 
@@ -435,6 +436,129 @@ export async function deleteTask(id: string): Promise<void> {
   const supabase = await db();
   const { error } = await supabase.from("tasks").delete().eq("id", id);
   if (error) throw error;
+  revalidatePath("/work", "layout");
+}
+
+/**
+ * Fetch all tasks (including subtasks) for a list and return a flat array
+ * with depth info for rendering a hierarchical list view.
+ */
+export async function getTasksWithHierarchy(
+  listId: string,
+): Promise<FlatTask[]> {
+  const supabase = await db();
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(
+      `
+      *,
+      status:statuses(*),
+      subtasks:tasks!parent_id(id)
+    `,
+    )
+    .eq("list_id", listId)
+    .is("archived_at", null)
+    .order("order");
+
+  if (error) throw error;
+
+  // Resolve assignee profiles
+  const allAssigneeIds = [
+    ...new Set((data ?? []).flatMap((t: Task) => t.assignee_ids)),
+  ];
+  let profileMap: Record<
+    string,
+    { id: string; full_name: string | null; avatar_url: string | null }
+  > = {};
+
+  if (allAssigneeIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, full_name, avatar_url")
+      .in("id", allAssigneeIds);
+    if (profiles) {
+      profileMap = Object.fromEntries(profiles.map((p) => [p.id, p]));
+    }
+  }
+
+  const enriched = (data ?? []).map((t: Record<string, unknown>) => ({
+    ...t,
+    status: t.status ?? null,
+    subtask_count: Array.isArray(t.subtasks)
+      ? (t.subtasks as unknown[]).length
+      : 0,
+    assignees: ((t.assignee_ids ?? []) as string[])
+      .map((id: string) => profileMap[id])
+      .filter(Boolean),
+  })) as TaskWithRelations[];
+
+  // Build tree
+  const map = new Map<string, FlatTask>();
+  for (const t of enriched) {
+    map.set(t.id, { ...t, depth: 0, children: [] });
+  }
+
+  const roots: FlatTask[] = [];
+  for (const t of map.values()) {
+    if (t.parent_id && map.has(t.parent_id)) {
+      const parent = map.get(t.parent_id)!;
+      t.depth = parent.depth + 1;
+      parent.children.push(t);
+    } else {
+      roots.push(t);
+    }
+  }
+
+  // Flatten tree depth-first
+  function flatten(nodes: FlatTask[]): FlatTask[] {
+    const result: FlatTask[] = [];
+    for (const n of nodes) {
+      result.push(n);
+      if (n.children.length > 0) {
+        result.push(...flatten(n.children));
+      }
+    }
+    return result;
+  }
+
+  return flatten(roots);
+}
+
+/**
+ * Reorder a task within its siblings and optionally reparent it.
+ */
+export async function reorderTask(
+  taskId: string,
+  newParentId: string | null,
+  newOrder: number,
+): Promise<void> {
+  const supabase = await db();
+  const { error } = await supabase
+    .from("tasks")
+    .update({ parent_id: newParentId, order: newOrder })
+    .eq("id", taskId);
+  if (error) throw error;
+  revalidatePath("/work", "layout");
+}
+
+/**
+ * Batch-update the order of multiple tasks at once (for DnD reordering).
+ */
+export async function reorderTasks(
+  updates: { id: string; order: number; parent_id?: string | null }[],
+): Promise<void> {
+  const supabase = await db();
+  // Run updates in parallel
+  const promises = updates.map((u) =>
+    supabase
+      .from("tasks")
+      .update({ order: u.order, ...(u.parent_id !== undefined ? { parent_id: u.parent_id } : {}) })
+      .eq("id", u.id),
+  );
+  const results = await Promise.all(promises);
+  const err = results.find((r) => r.error);
+  if (err?.error) throw err.error;
   revalidatePath("/work", "layout");
 }
 

@@ -140,6 +140,26 @@
   );
 }
 
+/* Drag-and-drop feedback */
+[data-dnd-dragging="true"] {
+  cursor: grabbing !important;
+}
+
+/* Smooth row highlight on drag over */
+.drag-insert-line {
+  position: relative;
+}
+.drag-insert-line::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 2px;
+  background: rgb(var(--accent));
+  border-radius: 1px;
+}
+
 /* Scrollbar — quiet, on-brand */
 @media (pointer: fine) {
   ::-webkit-scrollbar { width: 10px; height: 10px; }

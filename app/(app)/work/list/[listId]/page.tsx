@@ -49,7 +49,7 @@ export default async function ListPage({
       ) : null}
 
       {/* Task list */}
-      <div className="rounded-card border border-border bg-surface shadow-card">
+      <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card">
         <ListView
           list={list}
           tasks={tasks}
