@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/shell/sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { requireUser } from "@/lib/auth/user";
+import { Toaster } from "sonner";
 
 export default async function AppLayout({
   children,
@@ -20,6 +21,7 @@ export default async function AppLayout({
         <main className="flex-1 px-8 py-8">{children}</main>
       </div>
       <CommandPalette />
+      <Toaster richColors position="bottom-right" />
     </div>
   );
 }
