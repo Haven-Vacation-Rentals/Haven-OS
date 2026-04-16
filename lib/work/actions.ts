@@ -28,6 +28,12 @@ import type {
   CustomFieldDef,
   GlobalTask,
   GlobalTaskFilters,
+  Checklist,
+  ChecklistItem,
+  TimeEntry,
+  TaskActivity,
+  TaskAttachment,
+  TaskStatusCategory,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -1201,4 +1207,652 @@ export async function getGlobalTasks(
         return true;
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// STATUSES — CRUD + reorder (ClickUp-parity)
+// ---------------------------------------------------------------------------
+
+export interface CreateStatusInput {
+  name: string;
+  color: string;
+  category: TaskStatusCategory;
+  order?: number;
+}
+
+export async function createStatus(
+  listId: string,
+  input: CreateStatusInput,
+): Promise<Status> {
+  const supabase = await db();
+  await currentUserId();
+
+  // If order not provided, put it at the end
+  let order = input.order;
+  if (order === undefined) {
+    const { data: maxRow } = await supabase
+      .from("statuses")
+      .select("order")
+      .eq("list_id", listId)
+      .order("order", { ascending: false })
+      .limit(1)
+      .single();
+    order = (maxRow?.order ?? -1) + 1;
+  }
+
+  const { data, error } = await supabase
+    .from("statuses")
+    .insert({ list_id: listId, name: input.name, color: input.color, category: input.category, order })
+    .select()
+    .single();
+  if (error) throw error;
+  revalidatePath("/work");
+  return data as Status;
+}
+
+export async function updateStatus(
+  id: string,
+  patch: Partial<Pick<Status, "name" | "color" | "category" | "order">>,
+): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+  const { error } = await supabase.from("statuses").update(patch).eq("id", id);
+  if (error) throw error;
+  revalidatePath("/work");
+}
+
+export async function deleteStatus(
+  id: string,
+  reassignTo?: string,
+): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+
+  // Check if any tasks reference this status
+  const { count } = await supabase
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("status_id", id);
+
+  if ((count ?? 0) > 0) {
+    if (!reassignTo) {
+      throw new Error(
+        "Cannot delete status: tasks exist with this status. Provide reassignTo to move them first.",
+      );
+    }
+    // Move tasks to the replacement status
+    const { error: reassignError } = await supabase
+      .from("tasks")
+      .update({ status_id: reassignTo })
+      .eq("status_id", id);
+    if (reassignError) throw reassignError;
+  }
+
+  const { error } = await supabase.from("statuses").delete().eq("id", id);
+  if (error) throw error;
+  revalidatePath("/work");
+}
+
+export async function reorderStatuses(
+  listId: string,
+  idsInOrder: string[],
+): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+  const updates = idsInOrder.map((statusId, index) =>
+    supabase
+      .from("statuses")
+      .update({ order: index })
+      .eq("id", statusId)
+      .eq("list_id", listId),
+  );
+  const results = await Promise.all(updates);
+  const err = results.find((r) => r.error);
+  if (err?.error) throw err.error;
+  revalidatePath("/work");
+}
+
+// ---------------------------------------------------------------------------
+// CUSTOM FIELD DEFINITIONS — CRUD + reorder (ClickUp-parity)
+// ---------------------------------------------------------------------------
+
+export async function createFieldDef(
+  listId: string,
+  input: Pick<CustomFieldDef, "name" | "field_type"> & { config?: Record<string, unknown> },
+): Promise<CustomFieldDef> {
+  const supabase = await db();
+  await currentUserId();
+
+  const { data: maxRow } = await supabase
+    .from("custom_field_defs")
+    .select("order")
+    .eq("list_id", listId)
+    .order("order", { ascending: false })
+    .limit(1)
+    .single();
+
+  const { data, error } = await supabase
+    .from("custom_field_defs")
+    .insert({
+      list_id: listId,
+      name: input.name,
+      field_type: input.field_type,
+      config: input.config ?? {},
+      order: (maxRow?.order ?? -1) + 1,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  revalidatePath("/work");
+  return data as CustomFieldDef;
+}
+
+export async function updateFieldDef(
+  id: string,
+  patch: Partial<Pick<CustomFieldDef, "name" | "field_type" | "config" | "order">>,
+): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+  const { error } = await supabase
+    .from("custom_field_defs")
+    .update(patch)
+    .eq("id", id);
+  if (error) throw error;
+  revalidatePath("/work");
+}
+
+export async function deleteFieldDef(id: string): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+  const { error } = await supabase
+    .from("custom_field_defs")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
+  revalidatePath("/work");
+}
+
+export async function reorderFieldDefs(
+  listId: string,
+  idsInOrder: string[],
+): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+  const updates = idsInOrder.map((defId, index) =>
+    supabase
+      .from("custom_field_defs")
+      .update({ order: index })
+      .eq("id", defId)
+      .eq("list_id", listId),
+  );
+  const results = await Promise.all(updates);
+  const err = results.find((r) => r.error);
+  if (err?.error) throw err.error;
+  revalidatePath("/work");
+}
+
+/**
+ * Writes a single custom field value into tasks.custom_fields JSONB.
+ * Merges with existing values; pass `null` to clear a field.
+ */
+export async function setTaskFieldValue(
+  taskId: string,
+  fieldDefId: string,
+  value: unknown,
+): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+
+  // Fetch current custom_fields, merge in the new value
+  const { data: taskRow, error: fetchErr } = await supabase
+    .from("tasks")
+    .select("custom_fields")
+    .eq("id", taskId)
+    .single();
+  if (fetchErr) throw fetchErr;
+
+  const existing = (taskRow?.custom_fields as Record<string, unknown>) ?? {};
+  const updated: Record<string, unknown> = { ...existing };
+  if (value === null) {
+    delete updated[fieldDefId];
+  } else {
+    updated[fieldDefId] = value;
+  }
+
+  const { error } = await supabase
+    .from("tasks")
+    .update({ custom_fields: updated })
+    .eq("id", taskId);
+  if (error) throw error;
+  revalidatePath("/work");
+}
+
+// ---------------------------------------------------------------------------
+// CHECKLISTS
+// ---------------------------------------------------------------------------
+
+export async function createChecklist(
+  taskId: string,
+  name: string = "Checklist",
+): Promise<Checklist> {
+  const supabase = await db();
+  await currentUserId();
+
+  const { data: maxRow } = await supabase
+    .from("checklists")
+    .select("order")
+    .eq("task_id", taskId)
+    .order("order", { ascending: false })
+    .limit(1)
+    .single();
+
+  const { data, error } = await supabase
+    .from("checklists")
+    .insert({ task_id: taskId, name, order: (maxRow?.order ?? -1) + 1 })
+    .select()
+    .single();
+  if (error) throw error;
+  revalidatePath("/work");
+  return data as Checklist;
+}
+
+export async function renameChecklist(id: string, name: string): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+  const { error } = await supabase
+    .from("checklists")
+    .update({ name })
+    .eq("id", id);
+  if (error) throw error;
+  revalidatePath("/work");
+}
+
+export async function deleteChecklist(id: string): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+  const { error } = await supabase.from("checklists").delete().eq("id", id);
+  if (error) throw error;
+  revalidatePath("/work");
+}
+
+export async function getChecklists(taskId: string): Promise<
+  (Checklist & { items: ChecklistItem[] })[]
+> {
+  const supabase = await db();
+  const { data, error } = await supabase
+    .from("checklists")
+    .select("*, items:checklist_items(*)")
+    .eq("task_id", taskId)
+    .order("order");
+  if (error) throw error;
+  return (data ?? []) as (Checklist & { items: ChecklistItem[] })[];
+}
+
+export async function addChecklistItem(
+  checklistId: string,
+  content: string,
+): Promise<ChecklistItem> {
+  const supabase = await db();
+  await currentUserId();
+
+  const { data: maxRow } = await supabase
+    .from("checklist_items")
+    .select("order")
+    .eq("checklist_id", checklistId)
+    .order("order", { ascending: false })
+    .limit(1)
+    .single();
+
+  const { data, error } = await supabase
+    .from("checklist_items")
+    .insert({
+      checklist_id: checklistId,
+      content,
+      order: (maxRow?.order ?? -1) + 1,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  revalidatePath("/work");
+  return data as ChecklistItem;
+}
+
+export async function toggleChecklistItem(id: string): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+
+  const { data: item, error: fetchErr } = await supabase
+    .from("checklist_items")
+    .select("completed")
+    .eq("id", id)
+    .single();
+  if (fetchErr) throw fetchErr;
+
+  const nowCompleted = !item.completed;
+  const { error } = await supabase
+    .from("checklist_items")
+    .update({
+      completed: nowCompleted,
+      completed_at: nowCompleted ? new Date().toISOString() : null,
+    })
+    .eq("id", id);
+  if (error) throw error;
+  revalidatePath("/work");
+}
+
+export async function updateChecklistItemContent(
+  id: string,
+  content: string,
+): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+  const { error } = await supabase
+    .from("checklist_items")
+    .update({ content })
+    .eq("id", id);
+  if (error) throw error;
+  revalidatePath("/work");
+}
+
+export async function deleteChecklistItem(id: string): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+  const { error } = await supabase
+    .from("checklist_items")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
+  revalidatePath("/work");
+}
+
+export async function reorderChecklistItems(
+  checklistId: string,
+  idsInOrder: string[],
+): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+  const updates = idsInOrder.map((itemId, index) =>
+    supabase
+      .from("checklist_items")
+      .update({ order: index })
+      .eq("id", itemId)
+      .eq("checklist_id", checklistId),
+  );
+  const results = await Promise.all(updates);
+  const err = results.find((r) => r.error);
+  if (err?.error) throw err.error;
+  revalidatePath("/work");
+}
+
+// ---------------------------------------------------------------------------
+// TIME TRACKING
+// ---------------------------------------------------------------------------
+
+export async function startTimer(
+  taskId: string,
+  description?: string,
+): Promise<TimeEntry> {
+  const supabase = await db();
+  const userId = await currentUserId();
+
+  // Ensure no open timer exists for this user
+  const { data: open } = await supabase
+    .from("time_entries")
+    .select("id")
+    .eq("user_id", userId)
+    .is("ended_at", null)
+    .limit(1)
+    .maybeSingle();
+  if (open) {
+    throw new Error(
+      "A timer is already running. Stop it before starting a new one.",
+    );
+  }
+
+  const { data, error } = await supabase
+    .from("time_entries")
+    .insert({
+      task_id: taskId,
+      user_id: userId,
+      description: description ?? null,
+      started_at: new Date().toISOString(),
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  revalidatePath("/work");
+  return data as TimeEntry;
+}
+
+export async function stopTimer(entryId: string): Promise<TimeEntry> {
+  const supabase = await db();
+  await currentUserId();
+
+  const { data: entry, error: fetchErr } = await supabase
+    .from("time_entries")
+    .select("started_at")
+    .eq("id", entryId)
+    .single();
+  if (fetchErr) throw fetchErr;
+
+  const endedAt = new Date();
+  const startedAt = new Date(entry.started_at);
+  const durationMs = endedAt.getTime() - startedAt.getTime();
+
+  const { data, error } = await supabase
+    .from("time_entries")
+    .update({
+      ended_at: endedAt.toISOString(),
+      duration_ms: durationMs,
+    })
+    .eq("id", entryId)
+    .select()
+    .single();
+  if (error) throw error;
+  revalidatePath("/work");
+  return data as TimeEntry;
+}
+
+export async function addManualTimeEntry(
+  taskId: string,
+  input: { startedAt: string; endedAt: string; description?: string },
+): Promise<TimeEntry> {
+  const supabase = await db();
+  const userId = await currentUserId();
+
+  const startedAt = new Date(input.startedAt);
+  const endedAt = new Date(input.endedAt);
+  const durationMs = endedAt.getTime() - startedAt.getTime();
+  if (durationMs <= 0) throw new Error("endedAt must be after startedAt");
+
+  const { data, error } = await supabase
+    .from("time_entries")
+    .insert({
+      task_id: taskId,
+      user_id: userId,
+      description: input.description ?? null,
+      started_at: input.startedAt,
+      ended_at: input.endedAt,
+      duration_ms: durationMs,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  revalidatePath("/work");
+  return data as TimeEntry;
+}
+
+export async function deleteTimeEntry(id: string): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+  const { error } = await supabase.from("time_entries").delete().eq("id", id);
+  if (error) throw error;
+  revalidatePath("/work");
+}
+
+export async function getActiveTimer(userId: string): Promise<TimeEntry | null> {
+  const supabase = await db();
+  const { data, error } = await supabase
+    .from("time_entries")
+    .select("*")
+    .eq("user_id", userId)
+    .is("ended_at", null)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data ?? null) as TimeEntry | null;
+}
+
+export interface TaskTimeTotalResult {
+  task_id: string;
+  total_ms: number;
+  entries: TimeEntry[];
+}
+
+export async function getTaskTimeTotal(
+  taskId: string,
+): Promise<TaskTimeTotalResult> {
+  const supabase = await db();
+  const { data, error } = await supabase
+    .from("time_entries")
+    .select("*")
+    .eq("task_id", taskId)
+    .order("started_at", { ascending: false });
+  if (error) throw error;
+  const entries = (data ?? []) as TimeEntry[];
+  const total_ms = entries.reduce((sum, e) => sum + (e.duration_ms ?? 0), 0);
+  return { task_id: taskId, total_ms, entries };
+}
+
+// ---------------------------------------------------------------------------
+// ACTIVITY LOG
+// ---------------------------------------------------------------------------
+
+export interface TaskActivityWithActor extends TaskActivity {
+  actor?: {
+    id: string;
+    full_name: string | null;
+    avatar_url: string | null;
+  } | null;
+}
+
+export async function getTaskActivity(
+  taskId: string,
+  limit: number = 50,
+): Promise<TaskActivityWithActor[]> {
+  const supabase = await db();
+  const { data, error } = await supabase
+    .from("task_activity")
+    .select("*, actor:profiles!actor_id(id, full_name, avatar_url)")
+    .eq("task_id", taskId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as TaskActivityWithActor[];
+}
+
+// ---------------------------------------------------------------------------
+// COMMENTS (extend existing helpers)
+// ---------------------------------------------------------------------------
+
+export async function addComment(taskId: string, body: string): Promise<void> {
+  const supabase = await db();
+  const userId = await currentUserId();
+  const { error } = await supabase
+    .from("comments")
+    .insert({ task_id: taskId, author_id: userId, body });
+  if (error) throw error;
+  revalidatePath("/work");
+}
+
+export async function deleteComment(id: string): Promise<void> {
+  const supabase = await db();
+  const userId = await currentUserId();
+  // Only the author can delete (mirrors RLS policy)
+  const { error } = await supabase
+    .from("comments")
+    .delete()
+    .eq("id", id)
+    .eq("author_id", userId);
+  if (error) throw error;
+  revalidatePath("/work");
+}
+
+// ---------------------------------------------------------------------------
+// ATTACHMENTS
+// ---------------------------------------------------------------------------
+
+export async function uploadAttachment(
+  taskId: string,
+  file: File,
+): Promise<TaskAttachment> {
+  const supabase = await db();
+  const userId = await currentUserId();
+
+  // Storage path: {userId}/{taskId}/{filename} for namespacing
+  const storagePath = `${userId}/${taskId}/${Date.now()}_${file.name}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from("task-attachments")
+    .upload(storagePath, file, { upsert: false });
+  if (uploadError) throw uploadError;
+
+  const { data, error } = await supabase
+    .from("task_attachments")
+    .insert({
+      task_id: taskId,
+      uploader_id: userId,
+      file_name: file.name,
+      file_size: file.size,
+      mime_type: file.type || null,
+      storage_path: storagePath,
+    })
+    .select()
+    .single();
+  if (error) {
+    // Best-effort: remove the uploaded object if metadata insert fails
+    await supabase.storage.from("task-attachments").remove([storagePath]);
+    throw error;
+  }
+
+  revalidatePath("/work");
+  return data as TaskAttachment;
+}
+
+export async function getTaskAttachments(
+  taskId: string,
+): Promise<TaskAttachment[]> {
+  const supabase = await db();
+  const { data, error } = await supabase
+    .from("task_attachments")
+    .select("*")
+    .eq("task_id", taskId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as TaskAttachment[];
+}
+
+export async function deleteAttachment(id: string): Promise<void> {
+  const supabase = await db();
+  await currentUserId();
+
+  // Fetch storage path first so we can remove the object from Storage
+  const { data: attachment, error: fetchErr } = await supabase
+    .from("task_attachments")
+    .select("storage_path")
+    .eq("id", id)
+    .single();
+  if (fetchErr) throw fetchErr;
+
+  // Remove from storage (best-effort; ignore if already gone)
+  await supabase.storage
+    .from("task-attachments")
+    .remove([attachment.storage_path]);
+
+  const { error } = await supabase
+    .from("task_attachments")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
+  revalidatePath("/work");
 }
