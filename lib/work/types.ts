@@ -8,6 +8,10 @@
 
 export type TaskStatusCategory = "todo" | "in_progress" | "done" | "closed";
 
+export type ListType = "private" | "shared" | "public";
+export type ListMemberRole = "owner" | "member";
+export type AssigneeRole = "primary" | "secondary";
+
 export type TaskPriority = "urgent" | "high" | "normal" | "low" | "none";
 
 export type CustomFieldType =
@@ -76,10 +80,32 @@ export interface List {
   name: string;
   description: string | null;
   order: number;
+  type: ListType;
   archived_at: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ListMember {
+  list_id: string;
+  profile_id: string;
+  role: ListMemberRole;
+  color: string;
+  added_by: string | null;
+  added_at: string;
+  profile?: {
+    id: string;
+    full_name: string | null;
+    email: string;
+    avatar_url: string | null;
+  };
+}
+
+export interface TaskWatcher {
+  task_id: string;
+  profile_id: string;
+  added_at: string;
 }
 
 export interface Status {
@@ -140,6 +166,23 @@ export interface TaskWithRelations extends Task {
   assignees: { id: string; full_name: string | null; avatar_url: string | null }[];
 }
 
+export interface GlobalTask extends TaskWithRelations {
+  list: Pick<List, "id" | "name" | "type"> & { space_id: string };
+  space: Pick<Space, "id" | "name" | "color">;
+}
+
+export interface GlobalTaskFilters {
+  search?: string;
+  statuses?: string[]; // status names
+  priorities?: TaskPriority[];
+  assignee_ids?: string[];
+  list_ids?: string[];
+  space_ids?: string[];
+  due?: "all" | "overdue" | "today" | "this_week" | "none";
+  include_archived?: boolean;
+  include_completed?: boolean;
+}
+
 /** Flat list item for the list view — includes depth for indentation */
 export interface FlatTask extends TaskWithRelations {
   depth: number;
@@ -159,7 +202,7 @@ export type CreateSpaceInput = Pick<Space, "name"> &
 export type CreateFolderInput = Pick<Folder, "space_id" | "name">;
 
 export type CreateListInput = Pick<List, "space_id" | "name"> &
-  Partial<Pick<List, "folder_id" | "description">>;
+  Partial<Pick<List, "folder_id" | "description" | "type">>;
 
 export type CreateTaskInput = Pick<Task, "list_id" | "title"> &
   Partial<

@@ -14,6 +14,11 @@ import type {
   SpaceMemberRole,
   Folder,
   List,
+  ListType,
+  ListMember,
+  ListMemberRole,
+  AssigneeRole,
+  TaskWatcher,
   Task,
   Status,
   Comment,
@@ -21,6 +26,8 @@ import type {
   TaskWithRelations,
   FlatTask,
   CustomFieldDef,
+  GlobalTask,
+  GlobalTaskFilters,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -60,6 +67,12 @@ export async function getSpaces(): Promise<Space[]> {
 export async function getSpaceTree(): Promise<SpaceTree[]> {
   const supabase = await db();
 
+  // Get current user for private list visibility check
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const userId = user?.id ?? null;
+
   const [spacesRes, foldersRes, listsRes] = await Promise.all([
     supabase.from("spaces").select("*").is("archived_at", null).order("order"),
     supabase.from("folders").select("*").is("archived_at", null).order("order"),
@@ -72,7 +85,28 @@ export async function getSpaceTree(): Promise<SpaceTree[]> {
 
   const spaces = spacesRes.data ?? [];
   const folders = foldersRes.data ?? [];
-  const lists = listsRes.data ?? [];
+  const rawLists = listsRes.data ?? [];
+
+  // Filter out private lists the caller is not a member of
+  let memberListIds: Set<string> = new Set();
+  if (userId) {
+    const { data: memberRows } = await supabase
+      .from("list_members")
+      .select("list_id")
+      .eq("profile_id", userId);
+    if (memberRows) {
+      memberListIds = new Set(memberRows.map((r) => r.list_id));
+    }
+  }
+
+  const lists = rawLists.filter((l) => {
+    const listType = (l as Record<string, unknown>).type as string | undefined;
+    if (listType === "private") {
+      return userId ? memberListIds.has(l.id) : false;
+    }
+    // shared and public are visible to all authenticated users
+    return true;
+  });
 
   return spaces.map((space) => {
     const spaceFolders = folders
@@ -226,7 +260,7 @@ export async function createList(input: CreateListInput): Promise<List> {
 
 export async function updateList(
   id: string,
-  input: Partial<Pick<List, "name" | "description">>,
+  input: Partial<Pick<List, "name" | "description" | "type">>,
 ): Promise<void> {
   const supabase = await db();
   const { error } = await supabase.from("lists").update(input).eq("id", id);
@@ -601,11 +635,12 @@ export async function createComment(
 export async function addAssignee(
   taskId: string,
   profileId: string,
+  role: AssigneeRole = "secondary",
 ): Promise<void> {
   const supabase = await db();
   const { error } = await supabase
     .from("task_assignees")
-    .upsert({ task_id: taskId, profile_id: profileId });
+    .upsert({ task_id: taskId, profile_id: profileId, role });
   if (error) throw error;
   revalidatePath("/work", "layout");
 }
@@ -621,6 +656,24 @@ export async function removeAssignee(
     .eq("task_id", taskId)
     .eq("profile_id", profileId);
   if (error) throw error;
+  revalidatePath("/work", "layout");
+}
+
+export async function setPrimaryAssignee(
+  taskId: string,
+  profileId: string,
+): Promise<void> {
+  const supabase = await db();
+  // Demote all existing assignees to secondary first, then set the target to primary
+  const { error: demoteError } = await supabase
+    .from("task_assignees")
+    .update({ role: "secondary" })
+    .eq("task_id", taskId);
+  if (demoteError) throw demoteError;
+  const { error: promoteError } = await supabase
+    .from("task_assignees")
+    .upsert({ task_id: taskId, profile_id: profileId, role: "primary" });
+  if (promoteError) throw promoteError;
   revalidatePath("/work", "layout");
 }
 
@@ -708,4 +761,300 @@ export async function updateSpaceMemberRole(
     .eq("profile_id", profileId);
   if (error) throw error;
   revalidatePath("/work", "layout");
+}
+
+// ---------------------------------------------------------------------------
+// LIST MEMBERS
+// ---------------------------------------------------------------------------
+
+export async function getListMembers(listId: string): Promise<ListMember[]> {
+  const supabase = await db();
+  const { data, error } = await supabase
+    .from("list_members")
+    .select("*, profile:profiles!profile_id(id, full_name, email, avatar_url)")
+    .eq("list_id", listId)
+    .order("added_at");
+  if (error) throw error;
+  return (data ?? []) as ListMember[];
+}
+
+export async function addListMember(
+  listId: string,
+  profileId: string,
+  options: { role?: ListMemberRole; color?: string } = {},
+): Promise<void> {
+  const supabase = await db();
+  const userId = await currentUserId();
+  const { error } = await supabase.from("list_members").upsert({
+    list_id: listId,
+    profile_id: profileId,
+    role: options.role ?? "member",
+    color: options.color ?? "#6366f1",
+    added_by: userId,
+  });
+  if (error) throw error;
+  revalidatePath("/work", "layout");
+}
+
+export async function removeListMember(
+  listId: string,
+  profileId: string,
+): Promise<void> {
+  const supabase = await db();
+  const { error } = await supabase
+    .from("list_members")
+    .delete()
+    .eq("list_id", listId)
+    .eq("profile_id", profileId);
+  if (error) throw error;
+  revalidatePath("/work", "layout");
+}
+
+export async function updateListMemberColor(
+  listId: string,
+  profileId: string,
+  color: string,
+): Promise<void> {
+  const supabase = await db();
+  const { error } = await supabase
+    .from("list_members")
+    .update({ color })
+    .eq("list_id", listId)
+    .eq("profile_id", profileId);
+  if (error) throw error;
+  revalidatePath("/work", "layout");
+}
+
+export async function updateListType(
+  listId: string,
+  type: ListType,
+): Promise<void> {
+  const supabase = await db();
+  const { error } = await supabase
+    .from("lists")
+    .update({ type })
+    .eq("id", listId);
+  if (error) throw error;
+  revalidatePath("/work", "layout");
+}
+
+// ---------------------------------------------------------------------------
+// TASK WATCHERS
+// ---------------------------------------------------------------------------
+
+export async function getWatchers(taskId: string): Promise<TaskWatcher[]> {
+  const supabase = await db();
+  const { data, error } = await supabase
+    .from("task_watchers")
+    .select("*")
+    .eq("task_id", taskId)
+    .order("added_at");
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function addWatcher(
+  taskId: string,
+  profileId: string,
+): Promise<void> {
+  const supabase = await db();
+  const { error } = await supabase
+    .from("task_watchers")
+    .upsert({ task_id: taskId, profile_id: profileId });
+  if (error) throw error;
+  revalidatePath("/work", "layout");
+}
+
+export async function removeWatcher(
+  taskId: string,
+  profileId: string,
+): Promise<void> {
+  const supabase = await db();
+  const { error } = await supabase
+    .from("task_watchers")
+    .delete()
+    .eq("task_id", taskId)
+    .eq("profile_id", profileId);
+  if (error) throw error;
+  revalidatePath("/work", "layout");
+}
+
+// ---------------------------------------------------------------------------
+// GLOBAL TASKS
+// ---------------------------------------------------------------------------
+
+/** Inline date helpers (avoids adding date-fns as a dep) */
+function startOfDay(date: Date): Date {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function endOfDay(date: Date): Date {
+  const d = new Date(date);
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
+
+function startOfWeek(date: Date): Date {
+  const d = new Date(date);
+  const day = d.getDay();
+  d.setDate(d.getDate() - day);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function endOfWeek(date: Date): Date {
+  const d = new Date(date);
+  const day = d.getDay();
+  d.setDate(d.getDate() + (6 - day));
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
+
+export async function getGlobalTasks(
+  filters: GlobalTaskFilters = {},
+): Promise<GlobalTask[]> {
+  const supabase = await db();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const userId = user?.id ?? null;
+
+  // Resolve which list_ids the caller can see (respect private visibility)
+  let memberListIds: Set<string> = new Set();
+  if (userId) {
+    const { data: memberRows } = await supabase
+      .from("list_members")
+      .select("list_id")
+      .eq("profile_id", userId);
+    if (memberRows) {
+      memberListIds = new Set(memberRows.map((r) => r.list_id));
+    }
+  }
+
+  let query = supabase
+    .from("tasks")
+    .select(
+      `
+      *,
+      status:statuses(*),
+      subtasks:tasks!parent_id(id),
+      list:lists!list_id(id, name, type, space_id),
+      space:spaces!inner(id, name, color)
+    `,
+    )
+    .is("archived_at", filters.include_archived ? undefined : null)
+    .order("order");
+
+  if (!filters.include_completed) {
+    query = query.is("completed_at", null);
+  }
+
+  if (filters.search) {
+    query = query.ilike("title", `%${filters.search}%`);
+  }
+
+  if (filters.priorities && filters.priorities.length > 0) {
+    query = query.in("priority", filters.priorities);
+  }
+
+  if (filters.assignee_ids && filters.assignee_ids.length > 0) {
+    query = query.overlaps("assignee_ids", filters.assignee_ids);
+  }
+
+  if (filters.list_ids && filters.list_ids.length > 0) {
+    query = query.in("list_id", filters.list_ids);
+  }
+
+  if (filters.space_ids && filters.space_ids.length > 0) {
+    query = query.in("spaces.id", filters.space_ids);
+  }
+
+  if (filters.statuses && filters.statuses.length > 0) {
+    // Filter by status name via join — use subquery approach
+    const { data: statusRows } = await supabase
+      .from("statuses")
+      .select("id")
+      .in("name", filters.statuses);
+    if (statusRows && statusRows.length > 0) {
+      query = query.in(
+        "status_id",
+        statusRows.map((s) => s.id),
+      );
+    }
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  // Resolve assignee profiles
+  const allAssigneeIds = [
+    ...new Set((data ?? []).flatMap((t: Task) => t.assignee_ids)),
+  ];
+  let profileMap: Record<
+    string,
+    { id: string; full_name: string | null; avatar_url: string | null }
+  > = {};
+
+  if (allAssigneeIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, full_name, avatar_url")
+      .in("id", allAssigneeIds);
+    if (profiles) {
+      profileMap = Object.fromEntries(profiles.map((p) => [p.id, p]));
+    }
+  }
+
+  const enriched = (data ?? []).map((t: Record<string, unknown>) => ({
+    ...t,
+    status: t.status ?? null,
+    subtask_count: Array.isArray(t.subtasks)
+      ? (t.subtasks as unknown[]).length
+      : 0,
+    assignees: ((t.assignee_ids ?? []) as string[])
+      .map((id: string) => profileMap[id])
+      .filter(Boolean),
+  })) as GlobalTask[];
+
+  // Filter by visibility: hide private lists the caller isn't a member of
+  const visible = enriched.filter((t) => {
+    const listType = t.list?.type;
+    if (listType === "private") {
+      return userId ? memberListIds.has(t.list.id) : false;
+    }
+    return true;
+  });
+
+  // Date filters (applied in JS after DB query)
+  if (!filters.due || filters.due === "all") {
+    return visible;
+  }
+
+  const now = new Date();
+  const todayStart = startOfDay(now);
+  const todayEnd = endOfDay(now);
+  const weekStart = startOfWeek(now);
+  const weekEnd = endOfWeek(now);
+
+  return visible.filter((t) => {
+    if (!t.due_date) {
+      return filters.due === "none";
+    }
+    const d = new Date(t.due_date + "T00:00:00");
+    switch (filters.due) {
+      case "overdue":
+        return d < todayStart;
+      case "today":
+        return d >= todayStart && d <= todayEnd;
+      case "this_week":
+        return d >= weekStart && d <= weekEnd;
+      case "none":
+        return false;
+      default:
+        return true;
+    }
+  });
 }
