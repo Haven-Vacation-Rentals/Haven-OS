@@ -3,8 +3,10 @@
 import { Bell, HelpCircle, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "./theme-toggle";
+import { UserMenu } from "./user-menu";
+import type { HavenUser } from "@/lib/auth/user";
 
-export function Topbar() {
+export function Topbar({ user }: { user: HavenUser }) {
   return (
     <header className="sticky top-0 z-30 flex h-[68px] items-center gap-3 border-b border-border bg-background/80 px-6 backdrop-blur">
       {/* Search button — opens the command palette */}
@@ -36,16 +38,7 @@ export function Topbar() {
         </Button>
         <ThemeToggle />
         <div className="mx-2 h-6 w-px bg-border" />
-        <button
-          type="button"
-          className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-surface-alt"
-          aria-label="Account menu"
-        >
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-foreground text-background text-[11px] font-bold">
-            JB
-          </span>
-          <span className="text-[13px] font-semibold">Jack</span>
-        </button>
+        <UserMenu user={user} />
       </div>
     </header>
   );

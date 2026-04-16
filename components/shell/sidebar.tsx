@@ -22,6 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import { HavenWordmark } from "@/components/brand/haven-logo";
 import { Badge } from "@/components/ui/badge";
+import type { HavenUser } from "@/lib/auth/user";
 
 type NavItem = {
   label: string;
@@ -74,7 +75,7 @@ const sections: NavSection[] = [
   },
 ];
 
-export function Sidebar() {
+export function Sidebar({ user }: { user: HavenUser }) {
   const pathname = usePathname();
 
   return (
@@ -86,7 +87,7 @@ export function Sidebar() {
     >
       {/* Brand header */}
       <div className="flex h-[68px] items-center border-b border-border px-4">
-        <HavenWordmark subtitle="Jack" />
+        <HavenWordmark subtitle={user.name.split(" ")[0]} />
       </div>
 
       {/* Nav */}

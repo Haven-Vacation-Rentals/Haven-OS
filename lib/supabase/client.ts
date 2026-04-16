@@ -1,18 +1,13 @@
 import { createBrowserClient } from "@supabase/ssr";
+import { getSupabaseConfig } from "./config";
 
 /**
  * Browser-side Supabase client. Use inside "use client" components.
- * Throws early in dev if env vars are missing so nothing fails silently.
+ * Returns `null` when env is not configured so callers can render a
+ * "Supabase not configured" UX instead of crashing.
  */
 export function createClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !key) {
-    throw new Error(
-      "Supabase env not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local.",
-    );
-  }
-
-  return createBrowserClient(url, key);
+  const config = getSupabaseConfig();
+  if (!config) return null;
+  return createBrowserClient(config.url, config.anonKey);
 }

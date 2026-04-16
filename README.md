@@ -28,7 +28,9 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-Open <http://localhost:3000> — you'll land on `/dashboard`.
+Open <http://localhost:3000> — login page first, `/dashboard` after sign-in.
+
+Without a Supabase project the app still boots; the login page just shows a setup banner.
 
 ### Environment variables
 
@@ -38,7 +40,41 @@ Open <http://localhost:3000> — you'll land on `/dashboard`.
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only privileged key |
 | `ANTHROPIC_API_KEY` | For Haven Assistant (Phase 4) |
-| `NEXT_PUBLIC_APP_URL` | Absolute app URL |
+| `NEXT_PUBLIC_APP_URL` | Absolute app URL (e.g. `https://os.havenvacationrentals.com`) |
+
+---
+
+## Supabase setup
+
+One-time, takes ~10 minutes.
+
+### 1. Create the project
+1. Go to <https://supabase.com> → **New project** (pick the closest region).
+2. Copy **Project URL** and **anon public key** into `.env.local`:
+   ```
+   NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
+   SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOi...   # Settings → API → service_role
+   ```
+
+### 2. Run the initial migration
+Open **SQL Editor** in Supabase and paste the contents of
+[`supabase/migrations/0001_init_profiles.sql`](supabase/migrations/0001_init_profiles.sql) — creates the `profiles` table, RLS policies, and the auto-provision trigger.
+
+### 3. Enable Google OAuth
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an **OAuth 2.0 Client ID** (Web application).
+   - **Authorized JavaScript origins:** `http://localhost:3000`, your Vercel URL.
+   - **Authorized redirect URIs:** `https://YOUR-PROJECT.supabase.co/auth/v1/callback`.
+2. In Supabase: **Authentication → Providers → Google** → paste the Client ID + secret → Save.
+3. In Supabase: **Authentication → URL Configuration**:
+   - **Site URL:** `http://localhost:3000` (dev) or your production URL.
+   - **Redirect URLs:** add both `http://localhost:3000/auth/callback` and `https://YOUR-APP/auth/callback`.
+
+### 4. (Optional) Restrict to Haven Google Workspace
+In Google Cloud Console → **OAuth consent screen** → set **User type = Internal** so only `@havenvacationrentals.com` accounts can complete the flow. That + the redirect URL allowlist is enough to keep the tool internal without any per-user invite flow.
+
+### 5. Restart dev server
+`pnpm dev` — login page should now let you click **Continue with Google**.
 
 ---
 
@@ -46,8 +82,9 @@ Open <http://localhost:3000> — you'll land on `/dashboard`.
 
 | Phase | Scope | Status |
 |---|---|---|
-| 0 | Scaffold + design system | ✅ this PR |
-| 1 | App shell, ⌘K, dashboard mock | ✅ this PR |
+| 0 | Scaffold + design system | ✅ |
+| 1 | App shell, ⌘K, dashboard mock | ✅ |
+| 1.5 | Supabase Auth (Google OAuth), profiles table, RLS, gated routes | ✅ |
 | 2 | **Work** — data model, Spaces/Lists/Tasks, List + Board + Calendar, custom fields, saved views | ⏭️ next |
 | 3 | Work power features — Timeline/Gantt, dependencies, recurring, Docs, time tracking | |
 | 4 | **Haven Assistant** — Claude Agent SDK in ⌘J drawer, context-aware, tool-use on Haven data | |
