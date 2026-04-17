@@ -158,7 +158,8 @@ export async function getReviews(params: {
   qp.set("type", params.type ?? "guest-to-host");
   qp.set("limit", String(params.limit ?? 500));
   qp.set("offset", String(params.offset ?? 0));
-  qp.set("sortBy", "departureDate");
+  // Sort by id desc so the most recently received reviews come first.
+  qp.set("sortBy", "id");
   qp.set("sortOrder", "desc");
 
   const json = await request<ListEnvelope<HostawayReview>>(
@@ -172,40 +173,43 @@ export async function getReviews(params: {
 // Finance — Consolidated report
 // ---------------------------------------------------------------------------
 
-export type ConsolidatedFinanceRow = {
-  listingMapId?: number;
-  listingName?: string;
-  reservationId?: number;
-  pmCommission?: number;
-  pmCommissionAbc?: number;
-  totalPaid?: number;
-  ownerPayout?: number;
-  channelFee?: number;
-  cleaningFee?: number;
-  // The endpoint returns many fields; we type only what we use.
-  [k: string]: unknown;
+/**
+ * The consolidated finance report returns data in a tabular shape:
+ *   result: {
+ *     columns: [{ name, title, valueType }, ...],
+ *     rows:    [ [val, val, val, ...], ... ],       // positional
+ *     totals:  ["Totals", val, val, val, ...]       // parallel to columns
+ *     currency?: string | null
+ *   }
+ * We look up `pmCommission` by column name and sum the matching cell in
+ * each row (or read the `totals` row if present).
+ */
+export type ConsolidatedColumn = {
+  name: string;
+  title: string;
+  valueType: string;
+};
+
+export type ConsolidatedResult = {
+  columns?: ConsolidatedColumn[];
+  rows?: Array<Array<string | number | null>>;
+  totals?: Array<string | number | null>;
+  currency?: string | null;
 };
 
 type ConsolidatedEnvelope = {
   status: "success" | "fail";
-  result: {
-    rows?: ConsolidatedFinanceRow[];
-    totals?: Record<string, number>;
-    // Fallback: some tenants get a flat array.
-    [k: string]: unknown;
-  };
+  message?: string;
+  result: ConsolidatedResult;
 };
 
-/**
- * Calls the consolidated finance report. We sum `pmCommission` across
- * returned rows to get total PM commission for the window.
- */
+/** POST /finance/report/consolidated with format=json. */
 export async function getConsolidatedFinance(params: {
   fromDate: string; // Y-m-d
   toDate: string; // Y-m-d
   dateType?: "arrivalDate" | "departureDate" | "reservationDate";
   revalidate?: number | false;
-}): Promise<ConsolidatedEnvelope["result"]> {
+}): Promise<ConsolidatedResult> {
   const body = new URLSearchParams();
   body.set("fromDate", params.fromDate);
   body.set("toDate", params.toDate);
@@ -220,6 +224,11 @@ export async function getConsolidatedFinance(params: {
       revalidate: params.revalidate ?? 60,
     },
   );
+  if (json.status === "fail") {
+    throw new HostawayError(
+      `Finance report failed: ${json.message ?? "unknown error"}`,
+    );
+  }
   return json.result ?? {};
 }
 
@@ -227,61 +236,82 @@ export async function getConsolidatedFinance(params: {
 // Summary helpers (shape data for dashboard tiles)
 // ---------------------------------------------------------------------------
 
+/** Coerce API cell to a number (handles numeric strings, nulls). */
+function toNumber(v: unknown): number {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
 /**
- * Sum PM commission across a window. Handles both the `rows[]` shape and
- * a flat array fallback.
+ * Sum PM commission across a window. Reads `result.totals` if present,
+ * otherwise sums the pmCommission cell across `result.rows`.
  */
 export async function getPmCommissionTotal(params: {
   fromDate: string;
   toDate: string;
   dateType?: "arrivalDate" | "departureDate" | "reservationDate";
-}): Promise<{ total: number; rowCount: number }> {
+}): Promise<{ total: number; rowCount: number; currency: string | null }> {
   const result = await getConsolidatedFinance(params);
-  const rows: ConsolidatedFinanceRow[] = Array.isArray((result as { rows?: unknown }).rows)
-    ? ((result as { rows: ConsolidatedFinanceRow[] }).rows)
-    : Array.isArray(result)
-      ? (result as unknown as ConsolidatedFinanceRow[])
-      : [];
+  const columns = result.columns ?? [];
+  const rows = result.rows ?? [];
+  const totals = result.totals ?? [];
+  const currency = result.currency ?? null;
 
-  // Prefer the API's own totals if present.
-  const totals = (result as { totals?: Record<string, number> }).totals;
-  if (totals && typeof totals.pmCommission === "number") {
-    return { total: totals.pmCommission, rowCount: rows.length };
+  const idx = columns.findIndex((c) => c.name === "pmCommission");
+  if (idx === -1) {
+    // API didn't return a pmCommission column at all.
+    return { total: 0, rowCount: rows.length, currency };
   }
 
-  const total = rows.reduce((sum, r) => {
-    const v = typeof r.pmCommission === "number" ? r.pmCommission : 0;
-    return sum + v;
-  }, 0);
-  return { total, rowCount: rows.length };
+  // Prefer the authoritative totals row.
+  if (totals.length > idx) {
+    const t = toNumber(totals[idx]);
+    if (t !== 0 || rows.length === 0) {
+      return { total: t, rowCount: rows.length, currency };
+    }
+    // Fall through to per-row sum if totals row was blank.
+  }
+
+  const total = rows.reduce((sum, row) => sum + toNumber(row[idx]), 0);
+  return { total, rowCount: rows.length, currency };
 }
 
 /**
  * Average review rating over the last N days, across all listings.
- * Only counts reviews with a non-null numeric rating.
+ *
+ * Filters by `insertedOn` (when the review was received) rather than
+ * reservation departure date — a review posted yesterday for a trip
+ * that ended 2 weeks ago still counts as "this week's review".
  */
 export async function getPortfolioReviewAverage(days: number): Promise<{
   average: number | null;
   count: number;
   scale: 10; // Hostaway reviews are 1–10
 }> {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - days);
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
+  // Pull recent reviews sorted desc by id — most recent first — without a
+  // departure-date filter (which would miss newly-received reviews for
+  // older stays). Hostaway caps limit at 500.
   const reviews = await getReviews({
-    departureDateStart: fmt(start),
-    departureDateEnd: fmt(end),
     type: "guest-to-host",
     limit: 500,
   });
 
-  const rated = reviews.filter((r) => typeof r.rating === "number");
-  if (rated.length === 0) return { average: null, count: 0, scale: 10 };
+  const recent = reviews.filter((r) => {
+    if (typeof r.rating !== "number") return false;
+    const ts = r.insertedOn ? Date.parse(r.insertedOn) : NaN;
+    return Number.isFinite(ts) && ts >= cutoff;
+  });
+
+  if (recent.length === 0) return { average: null, count: 0, scale: 10 };
   const avg =
-    rated.reduce((sum, r) => sum + (r.rating as number), 0) / rated.length;
-  return { average: avg, count: rated.length, scale: 10 };
+    recent.reduce((sum, r) => sum + (r.rating as number), 0) / recent.length;
+  return { average: avg, count: recent.length, scale: 10 };
 }
 
 /**
