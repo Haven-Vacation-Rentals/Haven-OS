@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth/user";
+import { isConfigured as isHostawayConfigured } from "@/lib/hostaway/client";
+import { HostawayIntegrationCard } from "@/components/settings/hostaway-integration-card";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +15,7 @@ export const metadata: Metadata = {
  */
 export default async function SettingsPage() {
   const user = await requireUser();
+  const hostawayConfigured = isHostawayConfigured();
 
   return (
     <div className="mx-auto flex w-full max-w-[720px] flex-col gap-6">
@@ -22,6 +25,14 @@ export default async function SettingsPage() {
           Manage your account and workspace preferences.
         </p>
       </header>
+
+      {/* Integrations */}
+      <div className="flex flex-col gap-3">
+        <h2 className="font-heading text-[13px] font-bold uppercase tracking-wide text-muted-foreground">
+          Integrations
+        </h2>
+        <HostawayIntegrationCard configured={hostawayConfigured} />
+      </div>
 
       {/* Account section */}
       <section className="rounded-card border border-border bg-surface p-5 shadow-card">

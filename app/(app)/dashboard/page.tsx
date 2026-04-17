@@ -6,7 +6,9 @@ import {
   DoorOpen,
   LogIn,
   Percent,
+  Star,
   Users,
+  Wallet,
 } from "lucide-react";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { RangeTabs } from "@/components/dashboard/range-tabs";
@@ -18,6 +20,77 @@ import {
   ActivityList,
   type ActivityRow,
 } from "@/components/dashboard/activity-list";
+import {
+  getPmCommissionTotal,
+  getPortfolioReviewAverage,
+  isConfigured as isHostawayConfigured,
+} from "@/lib/hostaway/client";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 60;
+
+/** Format a Date as Y-m-d (UTC-stable for API calls). */
+function ymd(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/** Current-month window in America/New_York is close enough to UTC for MTD. */
+function monthToDate() {
+  const now = new Date();
+  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  return { from: ymd(first), to: ymd(now) };
+}
+
+async function loadHostawayStats() {
+  if (!isHostawayConfigured()) {
+    return {
+      pmCommission: null as number | null,
+      pmCommissionRows: 0,
+      reviewAverage: null as number | null,
+      reviewCount: 0,
+      error: null as string | null,
+    };
+  }
+  const { from, to } = monthToDate();
+  try {
+    const [commission, reviews] = await Promise.all([
+      getPmCommissionTotal({
+        fromDate: from,
+        toDate: to,
+        dateType: "arrivalDate",
+      }),
+      getPortfolioReviewAverage(7),
+    ]);
+    return {
+      pmCommission: commission.total,
+      pmCommissionRows: commission.rowCount,
+      reviewAverage: reviews.average,
+      reviewCount: reviews.count,
+      error: null as string | null,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      pmCommission: null,
+      pmCommissionRows: 0,
+      reviewAverage: null,
+      reviewCount: 0,
+      error: msg,
+    };
+  }
+}
+
+function currency(n: number): string {
+  return n.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
+}
+
+function currentMonthLabel(): string {
+  return new Date().toLocaleString("en-US", { month: "long", year: "numeric" });
+}
 
 /**
  * Dashboard — Phase 1 mock data. Wired to real queries once the Work
@@ -25,7 +98,8 @@ import {
  * reference so the muscle memory carries over, re-skinned in Haven's
  * brand language (Futura numerics + coral accent).
  */
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  const hostaway = await loadHostawayStats();
   const newProperties: ActivityRow[] = [
     { title: "Laura Earl 1117", subtitle: "Gatlinburg · 3 BR", meta: "Active" },
     { title: "Eric Fleming 1260", subtitle: "Pigeon Forge · 2 BR", meta: "Active" },
@@ -64,6 +138,43 @@ export default function DashboardPage() {
       </div>
 
       <RangeTabs />
+
+      {/* Live (Hostaway) — real-time portfolio signals */}
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <KpiCard
+          label="PM Commission · MTD"
+          value={
+            hostaway.pmCommission === null
+              ? "—"
+              : currency(hostaway.pmCommission)
+          }
+          icon={Wallet}
+          sub={
+            hostaway.error
+              ? `Hostaway error: ${hostaway.error.slice(0, 60)}`
+              : hostaway.pmCommission === null
+                ? "Hostaway not connected — set it up in Settings"
+                : `${currentMonthLabel()} · ${hostaway.pmCommissionRows} reservations`
+          }
+          accent
+        />
+        <KpiCard
+          label="Portfolio Review Avg · 7d"
+          value={
+            hostaway.reviewAverage === null
+              ? "—"
+              : `${hostaway.reviewAverage.toFixed(2)} ★`
+          }
+          icon={Star}
+          sub={
+            hostaway.error
+              ? "Check Hostaway connection"
+              : hostaway.reviewCount === 0
+                ? "No rated reviews in the last 7 days"
+                : `${hostaway.reviewCount} review${hostaway.reviewCount === 1 ? "" : "s"} · scale 1–10`
+          }
+        />
+      </section>
 
       {/* Top KPI row */}
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
