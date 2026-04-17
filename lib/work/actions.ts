@@ -318,7 +318,7 @@ export async function getOrCreatePersonalList(): Promise<List> {
       name: "My Tasks",
       description: "Your personal task list.",
       order: 0,
-      type: "list" as ListType,
+      type: "private" as ListType,
       created_by: userId,
     })
     .select()
