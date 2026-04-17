@@ -4,7 +4,7 @@
  * ListTaskRow — individual task row for the Tendwell-style list view.
  *
  * Supports:
- * - Status toggle (circle → checkmark for done)
+ * - Status picker (click circle → full StatusPickerPopover with all statuses)
  * - Inline title editing (double-click)
  * - Priority dropdown
  * - Assignee avatar stack
@@ -12,6 +12,8 @@
  * - Subtask count indicator ({done}/{total})
  * - Expand/collapse subtasks caret
  * - Right-click context menu trigger
+ * - Hover-reveal "+ subtask" button
+ * - Droppable nest zone on chevron area (handled by parent via useDroppable id)
  */
 
 import { useState, useRef, useEffect, useTransition } from "react";
@@ -23,9 +25,11 @@ import {
   Calendar,
   UserCircle2,
   GripVertical,
+  Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { addAssignee, removeAssignee } from "@/lib/work/actions";
+import { addAssignee, removeAssignee, createTask } from "@/lib/work/actions";
+import { StatusPickerPopover } from "@/components/work/status-picker-popover";
 import type { Status, TaskPriority } from "@/lib/work/types";
 import type { TaskWithSubtasks } from "@/lib/work/actions";
 
@@ -84,9 +88,11 @@ export function ListTaskRow({
   expandedSubtasks,
   onToggleSubtasks,
   onSelect,
-  onToggleDone,
+  onStatusChange,
   onUpdate,
   onContextMenu,
+  onSubtaskAdded,
+  nestDroppableProps,
 }: {
   task: TaskWithSubtasks;
   statuses: Status[];
@@ -95,135 +101,271 @@ export function ListTaskRow({
   expandedSubtasks: Set<string>;
   onToggleSubtasks: (id: string) => void;
   onSelect: (id: string) => void;
-  onToggleDone: (task: TaskWithSubtasks) => void;
+  /** Called when user picks a status from the status circle popover */
+  onStatusChange: (task: TaskWithSubtasks, status: Status) => void;
   onUpdate: (id: string, updates: Partial<TaskWithSubtasks>) => void;
   onContextMenu: (e: React.MouseEvent, taskId: string) => void;
+  onSubtaskAdded?: (task: TaskWithSubtasks) => void;
+  /**
+   * Props to spread onto the chevron/nest zone element so the parent
+   * can attach a useDroppable ref for drag-to-nest detection.
+   */
+  nestDroppableProps?: {
+    ref: (el: HTMLElement | null) => void;
+    isOver: boolean;
+  };
 }) {
   const isDone =
     task.status?.category === "done" || task.status?.category === "closed";
   const hasSubtasks = (task.subtask_count ?? 0) > 0;
   const isExpanded = expandedSubtasks.has(task.id);
+  const currentStatus = statuses.find((s) => s.id === task.status_id) ?? null;
 
   // Sub-task done fraction
   const subsDone = (task as TaskWithSubtasks).subtasks_done ?? 0;
   const subsTot = task.subtask_count ?? 0;
 
+  // "+ subtask" inline add state
+  const [addingSubtask, setAddingSubtask] = useState(false);
+  const [subtaskTitle, setSubtaskTitle] = useState("");
+  const [addPending, startAdd] = useTransition();
+  const subtaskInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (addingSubtask) {
+      subtaskInputRef.current?.focus();
+    }
+  }, [addingSubtask]);
+
+  function submitSubtask() {
+    const t = subtaskTitle.trim();
+    if (!t) return;
+    startAdd(async () => {
+      const newTask = await createTask({
+        list_id: task.list_id,
+        title: t,
+        parent_id: task.id,
+        ...(task.status_id ? { status_id: task.status_id } : {}),
+      });
+      setSubtaskTitle("");
+      subtaskInputRef.current?.focus();
+      onSubtaskAdded?.({
+        ...newTask,
+        status: currentStatus,
+        subtask_count: 0,
+        subtask_list: [],
+        subtasks_done: 0,
+        assignees: [],
+      } as TaskWithSubtasks);
+    });
+  }
+
   return (
-    <div
-      className={cn(
-        "group flex items-center border-b border-border/50 transition-all duration-100",
-        "hover:bg-surface-alt/40",
-        isDone && "opacity-70",
-      )}
-      onContextMenu={(e) => onContextMenu(e, task.id)}
-      style={{ paddingLeft: depth * 20 }}
-    >
-      {/* ── Left sticky section ───────────────────────────────────────── */}
-      <div className="sticky left-0 z-10 flex min-w-0 flex-1 items-center bg-inherit">
-        {/* Drag handle (visual only for now) */}
-        <span
-          className={cn(
-            "flex h-full w-5 shrink-0 cursor-grab items-center justify-center",
-            "opacity-0 group-hover:opacity-100 transition-opacity",
-          )}
-        >
-          <GripVertical className="h-3 w-3 text-muted-foreground/40" />
-        </span>
-
-        {/* Expand/collapse subtasks caret */}
-        {hasSubtasks ? (
-          <button
-            type="button"
-            onClick={() => onToggleSubtasks(task.id)}
-            className="grid h-5 w-5 shrink-0 place-items-center transition-transform"
-            title={isExpanded ? "Collapse subtasks" : "Expand subtasks"}
-          >
-            {isExpanded ? (
-              <ChevronDown className="h-3 w-3 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="h-3 w-3 text-muted-foreground" />
-            )}
-          </button>
-        ) : (
-          <span className="w-5 shrink-0" />
+    <>
+      <div
+        className={cn(
+          "group flex items-center border-b border-border/50 transition-all duration-100",
+          "hover:bg-surface-alt/40",
+          isDone && "opacity-70",
         )}
+        onContextMenu={(e) => onContextMenu(e, task.id)}
+        style={{ paddingLeft: depth * 20 }}
+      >
+        {/* ── Left sticky section ───────────────────────────────────────── */}
+        <div className="sticky left-0 z-10 flex min-w-0 flex-1 items-center bg-inherit">
+          {/* Drag handle (visual only — DnD wired in parent SortableTaskRow) */}
+          <span
+            className={cn(
+              "flex h-full w-5 shrink-0 cursor-grab items-center justify-center",
+              "opacity-0 group-hover:opacity-100 transition-opacity",
+            )}
+          >
+            <GripVertical className="h-3 w-3 text-muted-foreground/40" />
+          </span>
 
-        {/* Status toggle (circle / check) */}
-        <button
-          type="button"
-          onClick={() => onToggleDone(task)}
-          className="shrink-0 p-0.5 transition-transform hover:scale-110"
-          title={isDone ? "Mark as To Do" : "Mark as Done"}
-        >
-          {isDone ? (
-            <CheckCircle2
-              className="h-[18px] w-[18px]"
-              style={{ color: task.status?.color ?? "#22c55e" }}
-            />
-          ) : (
-            <Circle
-              className="h-[18px] w-[18px]"
-              style={{ color: task.status?.color ?? "#94a3b8" }}
-            />
-          )}
-        </button>
-
-        {/* Title */}
-        <InlineTitle
-          title={task.title}
-          isDone={isDone}
-          onOpen={() => onSelect(task.id)}
-          onSave={(v) => onUpdate(task.id, { title: v })}
-        />
-      </div>
-
-      {/* ── Right fields strip ────────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center">
-        {/* Priority */}
-        <PriorityCell
-          value={task.priority}
-          onChange={(v) => onUpdate(task.id, { priority: v })}
-        />
-
-        {/* Assignees */}
-        <AssigneeCell
-          taskId={task.id}
-          assignees={task.assignees}
-          allMembers={members}
-        />
-
-        {/* Due date */}
-        <DueDateCell
-          value={task.due_date}
-          isDone={isDone}
-          onChange={(v) => onUpdate(task.id, { due_date: v })}
-        />
-
-        {/* Subtask count */}
-        <div
-          className="flex items-center justify-center border-l border-border/30 px-2 py-2"
-          style={{ width: 56 }}
-        >
-          {subsTot > 0 ? (
+          {/* Expand/collapse subtasks caret — also acts as nest drop zone */}
+          {hasSubtasks ? (
             <button
               type="button"
+              ref={nestDroppableProps?.ref as React.Ref<HTMLButtonElement>}
               onClick={() => onToggleSubtasks(task.id)}
               className={cn(
-                "rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums transition-colors",
-                subsDone === subsTot
-                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
-                  : "bg-surface-alt text-muted-foreground hover:bg-muted",
+                "grid h-5 w-5 shrink-0 place-items-center transition-transform rounded",
+                nestDroppableProps?.isOver && "bg-accent/20 ring-1 ring-accent/50",
               )}
-              title="Subtasks"
+              title={isExpanded ? "Collapse subtasks" : "Expand subtasks"}
             >
-              {subsDone}/{subsTot}
+              {isExpanded ? (
+                <ChevronDown className="h-3 w-3 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="h-3 w-3 text-muted-foreground" />
+              )}
             </button>
           ) : (
-            <span className="text-[11px] text-muted-foreground/30">—</span>
+            // No subtasks yet — still provide a nest drop zone (invisible)
+            <span
+              ref={nestDroppableProps?.ref as React.Ref<HTMLSpanElement>}
+              className={cn(
+                "w-5 h-5 shrink-0 rounded transition-colors",
+                nestDroppableProps?.isOver && "bg-accent/20 ring-1 ring-accent/50",
+              )}
+            />
           )}
+
+          {/* Status circle — opens full StatusPickerPopover */}
+          <StatusPickerPopover
+            statuses={statuses}
+            currentStatus={currentStatus}
+            onSelect={(status) => onStatusChange(task, status)}
+          >
+            <button
+              type="button"
+              className="shrink-0 p-0.5 transition-transform hover:scale-110 rounded-full"
+              title="Change status"
+            >
+              {isDone ? (
+                <CheckCircle2
+                  className="h-[18px] w-[18px]"
+                  style={{ color: task.status?.color ?? "#22c55e" }}
+                />
+              ) : (
+                <Circle
+                  className="h-[18px] w-[18px]"
+                  style={{ color: task.status?.color ?? "#94a3b8" }}
+                />
+              )}
+            </button>
+          </StatusPickerPopover>
+
+          {/* Title */}
+          <InlineTitle
+            title={task.title}
+            isDone={isDone}
+            onOpen={() => onSelect(task.id)}
+            onSave={(v) => onUpdate(task.id, { title: v })}
+          />
+
+          {/* Hover-reveal "+ subtask" button */}
+          <button
+            type="button"
+            onClick={() => {
+              setAddingSubtask(true);
+              // Also expand subtasks so new one is visible
+              if (!isExpanded && hasSubtasks) onToggleSubtasks(task.id);
+            }}
+            className={cn(
+              "ml-1 mr-2 flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5",
+              "text-[10px] font-medium text-muted-foreground/50 hover:bg-accent/10 hover:text-accent",
+              "opacity-0 group-hover:opacity-100 transition-opacity",
+            )}
+            title="Add subtask"
+          >
+            <Plus className="h-2.5 w-2.5" />
+            subtask
+          </button>
+        </div>
+
+        {/* ── Right fields strip ────────────────────────────────────────── */}
+        <div className="flex shrink-0 items-center">
+          {/* Priority */}
+          <PriorityCell
+            value={task.priority}
+            onChange={(v) => onUpdate(task.id, { priority: v })}
+          />
+
+          {/* Assignees */}
+          <AssigneeCell
+            taskId={task.id}
+            assignees={task.assignees}
+            allMembers={members}
+          />
+
+          {/* Due date */}
+          <DueDateCell
+            value={task.due_date}
+            isDone={isDone}
+            onChange={(v) => onUpdate(task.id, { due_date: v })}
+          />
+
+          {/* Subtask count */}
+          <div
+            className="flex items-center justify-center border-l border-border/30 px-2 py-2"
+            style={{ width: 56 }}
+          >
+            {subsTot > 0 ? (
+              <button
+                type="button"
+                onClick={() => onToggleSubtasks(task.id)}
+                className={cn(
+                  "rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums transition-colors",
+                  subsDone === subsTot
+                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
+                    : "bg-surface-alt text-muted-foreground hover:bg-muted",
+                )}
+                title="Subtasks"
+              >
+                {subsDone}/{subsTot}
+              </button>
+            ) : (
+              <span className="text-[11px] text-muted-foreground/30">—</span>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* Inline subtask add input (shown below row when addingSubtask) */}
+      {addingSubtask && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitSubtask();
+          }}
+          style={{ paddingLeft: (depth + 1) * 20 + 56 }}
+          className="flex items-center gap-2 border-b border-border/50 py-2 pr-3 bg-accent/5"
+        >
+          <Plus className="h-3.5 w-3.5 text-accent shrink-0" />
+          <input
+            ref={subtaskInputRef}
+            value={subtaskTitle}
+            onChange={(e) => setSubtaskTitle(e.target.value)}
+            onBlur={() => {
+              if (!subtaskTitle.trim()) {
+                setAddingSubtask(false);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setSubtaskTitle("");
+                setAddingSubtask(false);
+              }
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submitSubtask();
+                // Close after adding if nothing in input
+                if (!subtaskTitle.trim()) setAddingSubtask(false);
+              }
+            }}
+            placeholder="Subtask name — Enter to add, Esc to cancel"
+            disabled={addPending}
+            className={cn(
+              "flex-1 bg-transparent text-[13px] font-medium outline-none",
+              "placeholder:text-muted-foreground/50",
+              addPending && "opacity-50",
+            )}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setSubtaskTitle("");
+              setAddingSubtask(false);
+            }}
+            className="text-[10px] text-muted-foreground/60 hover:text-foreground transition-colors"
+          >
+            Esc
+          </button>
+        </form>
+      )}
+    </>
   );
 }
 

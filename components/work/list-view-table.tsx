@@ -7,7 +7,9 @@
  * - StatusPill + StatusPickerPopover for status cell
  * - Dynamic custom-field columns from list's field_defs
  * - Multi-select checkbox column + animated BulkActionsBar
- * - Drag handles on rows using @dnd-kit for reorder within status group
+ * - Unified DndContext across ALL status groups for cross-group drag
+ *   - Droppable group zones (id: "group:<statusId>") accept drops
+ *   - Nest zones on each task row (id: "nest:<taskId>") set parent_id
  * - framer-motion AnimatePresence + layout around rows
  * - Keyboard shortcuts: n, /, ↑↓, space, esc, cmd+a
  */
@@ -26,7 +28,9 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  useDroppable,
   type DragEndEvent,
+  type DragOverEvent,
 } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -49,6 +53,7 @@ import {
   CornerDownRight,
   GripVertical,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +68,7 @@ import { BulkActionsBar } from "@/components/work/bulk-actions-bar";
 import { CustomFieldCell } from "@/components/work/custom-field-cell";
 import {
   updateTask,
+  reorderTasks,
   deleteTask,
   duplicateTask,
 } from "@/lib/work/actions";
@@ -99,6 +105,40 @@ const PRIORITY_ORDER: Record<TaskPriority, number> = {
 };
 
 // ---------------------------------------------------------------------------
+// Droppable group zone — wraps each status group's row area
+// ---------------------------------------------------------------------------
+
+function DroppableGroupZone({
+  groupKey,
+  children,
+}: {
+  groupKey: string;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `group:${groupKey}` });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "transition-colors duration-150",
+        isOver && "bg-accent/5",
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Droppable nest zone — wraps the chevron area of each task row
+// ---------------------------------------------------------------------------
+
+function useNestDroppable(taskId: string) {
+  const { setNodeRef, isOver } = useDroppable({ id: `nest:${taskId}` });
+  return { ref: setNodeRef, isOver };
+}
+
+// ---------------------------------------------------------------------------
 // Sortable task row wrapper (DnD)
 // ---------------------------------------------------------------------------
 
@@ -113,11 +153,11 @@ function SortableTaskRow({
   focusedTaskId,
   onToggleSubtasks,
   onSelect,
-  onToggleDone,
   onUpdate,
   onContextMenu,
   onToggleSelected,
   onStatusChange,
+  onSubtaskAdded,
 }: {
   task: TaskWithSubtasks;
   statuses: Status[];
@@ -129,14 +169,16 @@ function SortableTaskRow({
   focusedTaskId: string | null;
   onToggleSubtasks: (id: string) => void;
   onSelect: (id: string) => void;
-  onToggleDone: (task: TaskWithSubtasks) => void;
   onUpdate: (id: string, updates: Partial<TaskWithSubtasks>) => void;
   onContextMenu: (e: React.MouseEvent, taskId: string) => void;
   onToggleSelected: (id: string, e?: React.MouseEvent) => void;
   onStatusChange: (task: TaskWithSubtasks, status: Status) => void;
+  onSubtaskAdded?: (task: TaskWithSubtasks) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: task.id });
+
+  const nestDroppable = useNestDroppable(task.id);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -145,8 +187,6 @@ function SortableTaskRow({
 
   const isSelected = selectedIds.has(task.id);
   const isFocused = focusedTaskId === task.id;
-  const isDone =
-    task.status?.category === "done" || task.status?.category === "closed";
   const currentStatus = statuses.find((s) => s.id === task.status_id) ?? null;
 
   return (
@@ -195,7 +235,7 @@ function SortableTaskRow({
       {/* Main task row content */}
       <div className="min-w-0 flex-1">
         <div className="flex items-stretch">
-          {/* Task row (handles title, priority, assignee, due date, subtasks) */}
+          {/* Task row (handles title, status circle, priority, assignee, due date, subtasks) */}
           <div className="min-w-0 flex-1">
             <ListTaskRow
               task={task}
@@ -205,9 +245,11 @@ function SortableTaskRow({
               expandedSubtasks={expandedSubtasks}
               onToggleSubtasks={onToggleSubtasks}
               onSelect={onSelect}
-              onToggleDone={onToggleDone}
+              onStatusChange={onStatusChange}
               onUpdate={onUpdate}
               onContextMenu={onContextMenu}
+              onSubtaskAdded={onSubtaskAdded}
+              nestDroppableProps={nestDroppable}
             />
           </div>
 
@@ -464,6 +506,16 @@ export function ListViewTable({
     return Array.from(groupMap.values());
   }, [filtered, statuses, groupBy]);
 
+  // All task ids across all groups (for unified SortableContext)
+  const allTaskIds = useMemo(() => groups.flatMap((g) => g.tasks.map((t) => t.id)), [groups]);
+
+  // Build a map of taskId → statusId for quick lookup
+  const taskStatusMap = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const t of tasks) m.set(t.id, t.status_id);
+    return m;
+  }, [tasks]);
+
   // Callbacks
   const toggleGroup = useCallback((id: string) => {
     setExpandedGroups((prev) => {
@@ -519,20 +571,6 @@ export function ListViewTable({
     [handleTaskUpdate],
   );
 
-  const handleToggleDone = useCallback(
-    (task: TaskWithSubtasks) => {
-      const isDone =
-        task.status?.category === "done" || task.status?.category === "closed";
-      const targetStatus = isDone
-        ? statuses.find((s) => s.category === "todo") ?? statuses[0]
-        : statuses.find((s) => s.category === "done" || s.category === "closed") ??
-          statuses[statuses.length - 1];
-      if (!targetStatus) return;
-      handleStatusChange(task, targetStatus);
-    },
-    [statuses, handleStatusChange],
-  );
-
   const handleDeleteTask = useCallback(
     (taskId: string) => {
       if (!confirm("Delete this task?")) return;
@@ -555,6 +593,28 @@ export function ListViewTable({
 
   const handleTaskAdded = useCallback((newTask: TaskWithSubtasks) => {
     setTasks((prev) => [...prev, newTask]);
+  }, []);
+
+  const handleSubtaskAdded = useCallback((newTask: TaskWithSubtasks) => {
+    // Add to tasks list (it will show under parent when expanded)
+    setTasks((prev) => {
+      // Update parent subtask_count + auto-expand
+      const updated = prev.map((t) => {
+        if (t.id === newTask.parent_id) {
+          return {
+            ...t,
+            subtask_count: (t.subtask_count ?? 0) + 1,
+            subtask_list: [...(t.subtask_list ?? []), newTask],
+          };
+        }
+        return t;
+      });
+      return updated;
+    });
+    // Expand parent
+    if (newTask.parent_id) {
+      setExpandedSubtasks((prev) => new Set([...prev, newTask.parent_id!]));
+    }
   }, []);
 
   const handleContextMenu = useCallback(
@@ -587,17 +647,185 @@ export function ListViewTable({
     [tasks],
   );
 
+  // -------------------------------------------------------------------------
+  // DnD — drag over handler (no-op: nest visual feedback handled by useDroppable)
+  // -------------------------------------------------------------------------
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  function handleDragOver(_event: DragOverEvent) {
+    // Visual feedback for nest zones is handled by useDroppable's isOver
+    // inside useNestDroppable — no additional state needed here.
+  }
+
+  // -------------------------------------------------------------------------
+  // DnD — drag end handler (cross-group + nest + same-group reorder)
+  // -------------------------------------------------------------------------
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
+
     if (!over || active.id === over.id) return;
 
+    const activeId = String(active.id);
+    const overId = String(over.id);
+
+    // ── Case 1: Drop on a nest zone → set parent_id ───────────────────────
+    if (overId.startsWith("nest:")) {
+      const targetTaskId = overId.slice(5);
+      // Don't nest a task into itself or into one of its own subtasks
+      if (targetTaskId === activeId) return;
+
+      // Snapshot for rollback
+      const prevTasks = tasks;
+
+      // Optimistic update: remove from tasks list (it becomes a subtask), update parent
+      setTasks((prev) =>
+        prev.map((t) => {
+          if (t.id === targetTaskId) {
+            return {
+              ...t,
+              subtask_count: (t.subtask_count ?? 0) + 1,
+            };
+          }
+          if (t.id === activeId) {
+            return { ...t, parent_id: targetTaskId };
+          }
+          return t;
+        }),
+      );
+
+      // Expand target to show newly nested task
+      setExpandedSubtasks((prev) => new Set([...prev, targetTaskId]));
+
+      startTransition(async () => {
+        try {
+          await updateTask(activeId, { parent_id: targetTaskId });
+        } catch {
+          setTasks(prevTasks);
+          toast.error("Failed to nest task — changes reverted");
+        }
+      });
+      return;
+    }
+
+    // ── Case 2: Drop on a group zone → cross-group status change ─────────
+    if (overId.startsWith("group:")) {
+      const targetGroupKey = overId.slice(6);
+      const targetStatusId = targetGroupKey === "__none__" ? null : targetGroupKey;
+
+      // Find current status of dragged task
+      const currentStatusId = taskStatusMap.get(activeId);
+      if (currentStatusId === targetStatusId) return; // same group, no-op
+
+      const targetStatus = targetStatusId
+        ? statuses.find((s) => s.id === targetStatusId) ?? null
+        : null;
+
+      // Snapshot for rollback
+      const prevTasks = tasks;
+
+      // Optimistic update
+      setTasks((prev) =>
+        prev.map((t) => {
+          if (t.id === activeId) {
+            return {
+              ...t,
+              status_id: targetStatusId,
+              status: targetStatus,
+              completed_at:
+                targetStatus?.category === "done" || targetStatus?.category === "closed"
+                  ? new Date().toISOString()
+                  : null,
+            };
+          }
+          return t;
+        }),
+      );
+
+      startTransition(async () => {
+        try {
+          await updateTask(activeId, {
+            status_id: targetStatusId ?? undefined,
+            completed_at:
+              targetStatus?.category === "done" || targetStatus?.category === "closed"
+                ? new Date().toISOString()
+                : undefined,
+          });
+        } catch {
+          setTasks(prevTasks);
+          toast.error("Failed to update status — changes reverted");
+        }
+      });
+      return;
+    }
+
+    // ── Case 3: Drop on another task id → check if same group or cross-group
+    const activeStatusId = taskStatusMap.get(activeId);
+    const overStatusId = taskStatusMap.get(overId);
+
+    if (activeStatusId !== overStatusId) {
+      // Cross-group: change status to match the target task's group
+      const targetStatus = overStatusId
+        ? statuses.find((s) => s.id === overStatusId) ?? null
+        : null;
+
+      const prevTasks = tasks;
+
+      setTasks((prev) =>
+        prev.map((t) => {
+          if (t.id === activeId) {
+            return {
+              ...t,
+              status_id: overStatusId ?? null,
+              status: targetStatus,
+              completed_at:
+                targetStatus?.category === "done" || targetStatus?.category === "closed"
+                  ? new Date().toISOString()
+                  : null,
+            };
+          }
+          return t;
+        }),
+      );
+
+      startTransition(async () => {
+        try {
+          await updateTask(activeId, {
+            status_id: overStatusId ?? undefined,
+            completed_at:
+              targetStatus?.category === "done" || targetStatus?.category === "closed"
+                ? new Date().toISOString()
+                : undefined,
+          });
+        } catch {
+          setTasks(prevTasks);
+          toast.error("Failed to update status — changes reverted");
+        }
+      });
+      return;
+    }
+
+    // ── Case 4: Same group reorder ─────────────────────────────────────────
     setTasks((prev) => {
-      const oldIndex = prev.findIndex((t) => t.id === active.id);
-      const newIndex = prev.findIndex((t) => t.id === over.id);
-      return arrayMove(prev, oldIndex, newIndex);
+      const oldIndex = prev.findIndex((t) => t.id === activeId);
+      const newIndex = prev.findIndex((t) => t.id === overId);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+      const reordered = arrayMove(prev, oldIndex, newIndex);
+
+      // Persist order values
+      const updates = reordered
+        .filter((t) => t.status_id === activeStatusId)
+        .map((t, i) => ({ id: t.id, order: i }));
+
+      startTransition(async () => {
+        try {
+          await reorderTasks(updates);
+        } catch {
+          // Non-critical: reorder failed, local state is still updated
+          toast.error("Failed to save reorder");
+        }
+      });
+
+      return reordered;
     });
-    // Note: server-side reorder via updateTask order would require additional wiring
-    // For now, optimistic local reorder only
   }
 
   const handleBulkTasksDeleted = useCallback((ids: string[]) => {
@@ -738,118 +966,121 @@ export function ListViewTable({
             </div>
           </div>
 
-          {/* Groups */}
+          {/* Groups — single unified DndContext wraps ALL groups */}
           <DndContext
             sensors={dndSensors}
             collisionDetection={closestCenter}
+            onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
           >
-            {groups.map((group) => {
-              const groupKey = group.status?.id ?? "__none__";
-              const isExpanded = expandedGroups.has(groupKey);
-              return (
-                <div key={groupKey}>
-                  {/* Group header */}
-                  <button
-                    type="button"
-                    onClick={() => toggleGroup(groupKey)}
-                    className="flex w-full items-center gap-2 border-b border-border/30 bg-surface-alt/30 px-3 py-1.5 text-left hover:bg-surface-alt/60 transition-colors"
-                  >
-                    {isExpanded ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    )}
-                    <span
-                      className="h-2.5 w-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: group.status?.color ?? "#94a3b8" }}
-                    />
-                    <span className="text-[12px] font-bold uppercase tracking-wider text-muted-foreground">
-                      {group.status?.name ?? "No Status"}
-                    </span>
-                    <span className="text-[11px] font-semibold text-muted-foreground/60">
-                      {group.tasks.length}
-                    </span>
-                  </button>
+            <SortableContext
+              items={allTaskIds}
+              strategy={verticalListSortingStrategy}
+            >
+              {groups.map((group) => {
+                const groupKey = group.status?.id ?? "__none__";
+                const isExpanded = expandedGroups.has(groupKey);
+                return (
+                  <div key={groupKey}>
+                    {/* Group header */}
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(groupKey)}
+                      className="flex w-full items-center gap-2 border-b border-border/30 bg-surface-alt/30 px-3 py-1.5 text-left hover:bg-surface-alt/60 transition-colors"
+                    >
+                      {isExpanded ? (
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      )}
+                      <span
+                        className="h-2.5 w-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: group.status?.color ?? "#94a3b8" }}
+                      />
+                      <span className="text-[12px] font-bold uppercase tracking-wider text-muted-foreground">
+                        {group.status?.name ?? "No Status"}
+                      </span>
+                      <span className="text-[11px] font-semibold text-muted-foreground/60">
+                        {group.tasks.length}
+                      </span>
+                    </button>
 
-                  {/* Task rows */}
-                  <AnimatePresence initial={false}>
-                    {isExpanded && (
-                      <SortableContext
-                        items={group.tasks.map((t) => t.id)}
-                        strategy={verticalListSortingStrategy}
-                      >
-                        {group.tasks.length === 0 && !search ? (
-                          <div className="px-3 py-3 text-[12px] text-muted-foreground/50 border-b border-border/20">
-                            No tasks
-                          </div>
-                        ) : null}
+                    {/* Task rows — wrapped in DroppableGroupZone */}
+                    <AnimatePresence initial={false}>
+                      {isExpanded && (
+                        <DroppableGroupZone groupKey={groupKey}>
+                          {group.tasks.length === 0 && !search ? (
+                            <div className="px-3 py-3 text-[12px] text-muted-foreground/50 border-b border-border/20">
+                              Drop tasks here or add a new one
+                            </div>
+                          ) : null}
 
-                        {group.tasks.map((task) => (
-                          <SortableTaskRow
-                            key={task.id}
-                            task={task}
-                            statuses={statuses}
-                            members={members}
-                            fieldDefs={fieldDefs}
-                            depth={0}
-                            expandedSubtasks={expandedSubtasks}
-                            selectedIds={selectedIds}
-                            focusedTaskId={focusedTaskId}
-                            onToggleSubtasks={toggleSubtasks}
-                            onSelect={(id) => {
-                              setSelectedTaskId(id);
-                              setFocusedTaskId(id);
-                            }}
-                            onToggleDone={handleToggleDone}
-                            onUpdate={handleTaskUpdate}
-                            onContextMenu={handleContextMenu}
-                            onToggleSelected={handleToggleSelected}
-                            onStatusChange={handleStatusChange}
+                          {group.tasks.map((task) => (
+                            <SortableTaskRow
+                              key={task.id}
+                              task={task}
+                              statuses={statuses}
+                              members={members}
+                              fieldDefs={fieldDefs}
+                              depth={0}
+                              expandedSubtasks={expandedSubtasks}
+                              selectedIds={selectedIds}
+                              focusedTaskId={focusedTaskId}
+                              onToggleSubtasks={toggleSubtasks}
+                              onSelect={(id) => {
+                                setSelectedTaskId(id);
+                                setFocusedTaskId(id);
+                              }}
+                              onUpdate={handleTaskUpdate}
+                              onContextMenu={handleContextMenu}
+                              onToggleSelected={handleToggleSelected}
+                              onStatusChange={handleStatusChange}
+                              onSubtaskAdded={handleSubtaskAdded}
+                            />
+                          ))}
+
+                          {/* Subtasks */}
+                          {group.tasks.flatMap((task) =>
+                            expandedSubtasks.has(task.id)
+                              ? task.subtask_list.map((sub) => (
+                                  <SortableTaskRow
+                                    key={sub.id}
+                                    task={sub as TaskWithSubtasks}
+                                    statuses={statuses}
+                                    members={members}
+                                    fieldDefs={fieldDefs}
+                                    depth={1}
+                                    expandedSubtasks={expandedSubtasks}
+                                    selectedIds={selectedIds}
+                                    focusedTaskId={focusedTaskId}
+                                    onToggleSubtasks={toggleSubtasks}
+                                    onSelect={(id) => {
+                                      setSelectedTaskId(id);
+                                      setFocusedTaskId(id);
+                                    }}
+                                    onUpdate={handleTaskUpdate}
+                                    onContextMenu={handleContextMenu}
+                                    onToggleSelected={handleToggleSelected}
+                                    onStatusChange={handleStatusChange}
+                                    onSubtaskAdded={handleSubtaskAdded}
+                                  />
+                                ))
+                              : [],
+                          )}
+
+                          {/* Add task row per group */}
+                          <ListAddRow
+                            listId={list.id}
+                            statusId={group.status?.id ?? null}
+                            onAdded={handleTaskAdded}
                           />
-                        ))}
-
-                        {/* Subtasks */}
-                        {group.tasks.flatMap((task) =>
-                          expandedSubtasks.has(task.id)
-                            ? task.subtask_list.map((sub) => (
-                                <SortableTaskRow
-                                  key={sub.id}
-                                  task={sub as TaskWithSubtasks}
-                                  statuses={statuses}
-                                  members={members}
-                                  fieldDefs={fieldDefs}
-                                  depth={1}
-                                  expandedSubtasks={expandedSubtasks}
-                                  selectedIds={selectedIds}
-                                  focusedTaskId={focusedTaskId}
-                                  onToggleSubtasks={toggleSubtasks}
-                                  onSelect={(id) => {
-                                    setSelectedTaskId(id);
-                                    setFocusedTaskId(id);
-                                  }}
-                                  onToggleDone={handleToggleDone}
-                                  onUpdate={handleTaskUpdate}
-                                  onContextMenu={handleContextMenu}
-                                  onToggleSelected={handleToggleSelected}
-                                  onStatusChange={handleStatusChange}
-                                />
-                              ))
-                            : [],
-                        )}
-
-                        {/* Add task row per group */}
-                        <ListAddRow
-                          listId={list.id}
-                          statusId={group.status?.id ?? null}
-                          onAdded={handleTaskAdded}
-                        />
-                      </SortableContext>
-                    )}
-                  </AnimatePresence>
-                </div>
-              );
-            })}
+                        </DroppableGroupZone>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+            </SortableContext>
           </DndContext>
 
           {/* Empty state */}
