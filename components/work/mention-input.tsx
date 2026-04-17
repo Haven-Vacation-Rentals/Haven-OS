@@ -31,6 +31,8 @@ export function MentionInput({
   className,
   onSubmit,
   rows = 1,
+  autoGrow = false,
+  maxHeight = 480,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -39,6 +41,8 @@ export function MentionInput({
   className?: string;
   onSubmit?: () => void;
   rows?: number;
+  autoGrow?: boolean;
+  maxHeight?: number;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -74,6 +78,17 @@ export function MentionInput({
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
+  // Auto-grow the textarea to fit content when autoGrow is enabled
+  useEffect(() => {
+    if (!autoGrow) return;
+    const ta = ref.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    const next = Math.min(ta.scrollHeight, maxHeight);
+    ta.style.height = `${next}px`;
+    ta.style.overflowY = ta.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [value, autoGrow, maxHeight]);
 
   const insertMention = useCallback(
     (user: MentionUser) => {
