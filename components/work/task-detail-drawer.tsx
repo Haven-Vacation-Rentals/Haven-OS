@@ -31,7 +31,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatusPill } from "@/components/work/status-pill";
 import { StatusPickerPopover } from "@/components/work/status-picker-popover";
 import { CustomFieldCell } from "@/components/work/custom-field-cell";
@@ -348,9 +347,9 @@ export function TaskDetailDrawer({
           </div>
 
           {/* ── Details Tab ──────────────────────────────────────────── */}
-          <TabsContent value="details" className="mt-0 flex-1 min-h-0">
-            <ScrollArea className="h-full">
-              <div className="space-y-5 px-4 py-4">
+          <TabsContent value="details" className="mt-0 flex-1 min-h-0 overflow-y-auto">
+            <div className="h-full">
+              <div className="space-y-5 px-4 py-4 pb-10">
                 {/* Status */}
                 <FieldRow label="Status">
                   <StatusPickerPopover
@@ -510,13 +509,13 @@ export function TaskDetailDrawer({
                   ) : null}
                 </div>
               </div>
-            </ScrollArea>
+            </div>
           </TabsContent>
 
           {/* ── Checklist Tab ────────────────────────────────────────── */}
-          <TabsContent value="checklist" className="mt-0 flex-1 min-h-0">
-            <ScrollArea className="h-full">
-              <div className="space-y-4 px-4 py-4">
+          <TabsContent value="checklist" className="mt-0 flex-1 min-h-0 overflow-y-auto">
+            <div className="h-full">
+              <div className="space-y-4 px-4 py-4 pb-10">
                 {checklists.map((cl) => (
                   <ChecklistSection
                     key={cl.id}
@@ -540,12 +539,12 @@ export function TaskDetailDrawer({
                   Add checklist
                 </button>
               </div>
-            </ScrollArea>
+            </div>
           </TabsContent>
 
           {/* ── Comments Tab ─────────────────────────────────────────── */}
           <TabsContent value="comments" className="mt-0 flex-1 min-h-0 flex flex-col">
-            <ScrollArea className="flex-1">
+            <div className="flex-1 min-h-0 overflow-y-auto">
               <div className="space-y-4 px-4 py-4">
                 {comments.length === 0 && (
                   <p className="text-center text-[13px] text-muted-foreground py-6">
@@ -589,7 +588,7 @@ export function TaskDetailDrawer({
                   </div>
                 ))}
               </div>
-            </ScrollArea>
+            </div>
 
             {/* Comment composer */}
             <div className="shrink-0 border-t border-border px-4 py-3">
@@ -616,9 +615,9 @@ export function TaskDetailDrawer({
           </TabsContent>
 
           {/* ── Activity Tab ─────────────────────────────────────────── */}
-          <TabsContent value="activity" className="mt-0 flex-1 min-h-0">
-            <ScrollArea className="h-full">
-              <div className="space-y-1 px-4 py-4">
+          <TabsContent value="activity" className="mt-0 flex-1 min-h-0 overflow-y-auto">
+            <div className="h-full">
+              <div className="space-y-1 px-4 py-4 pb-10">
                 {activity.length === 0 && (
                   <p className="text-center text-[13px] text-muted-foreground py-6">
                     No activity yet.
@@ -654,13 +653,13 @@ export function TaskDetailDrawer({
                   </div>
                 ))}
               </div>
-            </ScrollArea>
+            </div>
           </TabsContent>
 
           {/* ── Time Tracking Tab ────────────────────────────────────── */}
-          <TabsContent value="time" className="mt-0 flex-1 min-h-0">
-            <ScrollArea className="h-full">
-              <div className="space-y-4 px-4 py-4">
+          <TabsContent value="time" className="mt-0 flex-1 min-h-0 overflow-y-auto">
+            <div className="h-full">
+              <div className="space-y-4 px-4 py-4 pb-10">
                 {/* Total */}
                 <div className="rounded-xl border border-border bg-surface-alt p-4 text-center">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -767,7 +766,7 @@ export function TaskDetailDrawer({
                   </div>
                 )}
               </div>
-            </ScrollArea>
+            </div>
           </TabsContent>
         </Tabs>
       </motion.div>

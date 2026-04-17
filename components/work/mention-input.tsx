@@ -79,16 +79,23 @@ export function MentionInput({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  // Auto-grow the textarea to fit content when autoGrow is enabled
+  // Auto-grow the textarea to fit content when autoGrow is enabled.
+  // Keeps a minimum height based on `rows` so empty descriptions stay visible.
   useEffect(() => {
     if (!autoGrow) return;
     const ta = ref.current;
     if (!ta) return;
+    // Compute the min-height from the rows prop using the textarea's line-height.
+    const cs = window.getComputedStyle(ta);
+    const lineHeight = parseFloat(cs.lineHeight) || 20;
+    const paddingY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const borderY = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+    const minHeight = Math.ceil(lineHeight * rows + paddingY + borderY);
     ta.style.height = "auto";
-    const next = Math.min(ta.scrollHeight, maxHeight);
+    const next = Math.max(minHeight, Math.min(ta.scrollHeight, maxHeight));
     ta.style.height = `${next}px`;
     ta.style.overflowY = ta.scrollHeight > maxHeight ? "auto" : "hidden";
-  }, [value, autoGrow, maxHeight]);
+  }, [value, autoGrow, maxHeight, rows]);
 
   const insertMention = useCallback(
     (user: MentionUser) => {
