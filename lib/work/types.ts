@@ -95,8 +95,9 @@ export interface Folder {
 
 export interface List {
   id: string;
-  space_id: string;
+  space_id: string | null;
   folder_id: string | null;
+  personal_owner_id: string | null;
   name: string;
   description: string | null;
   order: number;

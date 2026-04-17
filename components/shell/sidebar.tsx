@@ -36,7 +36,7 @@ const sections: NavSection[] = [
   {
     heading: "Work",
     items: [
-      { label: "My Tasks", href: "/work/mine", icon: ListTodo },
+      { label: "My Tasks", href: "/my-tasks", icon: ListTodo },
       { label: "Project Management", href: "/work", icon: FolderKanban },
     ],
   },

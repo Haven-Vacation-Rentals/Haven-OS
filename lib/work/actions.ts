@@ -151,6 +151,7 @@ export async function createSpace(input: CreateSpaceInput): Promise<Space> {
   if (error) throw error;
 
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
   return data;
 }
 
@@ -162,6 +163,7 @@ export async function updateSpace(
   const { error } = await supabase.from("spaces").update(input).eq("id", id);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 export async function deleteSpace(id: string): Promise<void> {
@@ -169,6 +171,7 @@ export async function deleteSpace(id: string): Promise<void> {
   const { error } = await supabase.from("spaces").delete().eq("id", id);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +202,7 @@ export async function createFolder(input: CreateFolderInput): Promise<Folder> {
   if (error) throw error;
 
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
   return data;
 }
 
@@ -210,6 +214,7 @@ export async function updateFolder(
   const { error } = await supabase.from("folders").update(input).eq("id", id);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 export async function deleteFolder(id: string): Promise<void> {
@@ -217,6 +222,7 @@ export async function deleteFolder(id: string): Promise<void> {
   const { error } = await supabase.from("folders").delete().eq("id", id);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +267,7 @@ export async function createList(input: CreateListInput): Promise<List> {
   await supabase.rpc("seed_default_statuses", { p_list_id: data.id });
 
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
   return data;
 }
 
@@ -272,6 +279,7 @@ export async function updateList(
   const { error } = await supabase.from("lists").update(input).eq("id", id);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 export async function deleteList(id: string): Promise<void> {
@@ -279,6 +287,57 @@ export async function deleteList(id: string): Promise<void> {
   const { error } = await supabase.from("lists").delete().eq("id", id);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
+}
+
+/**
+ * Returns the signed-in user's personal list ("My Tasks"), creating it on
+ * first access. Personal lists have `space_id = null` and
+ * `personal_owner_id = userId`. Default statuses are seeded on creation.
+ */
+export async function getOrCreatePersonalList(): Promise<List> {
+  const supabase = await db();
+  const userId = await currentUserId();
+
+  // Try to find an existing personal list for this user.
+  const { data: existing } = await supabase
+    .from("lists")
+    .select("*")
+    .eq("personal_owner_id", userId)
+    .maybeSingle();
+
+  if (existing) return existing as List;
+
+  // Create it.
+  const { data: created, error } = await supabase
+    .from("lists")
+    .insert({
+      space_id: null,
+      folder_id: null,
+      personal_owner_id: userId,
+      name: "My Tasks",
+      description: "Your personal task list.",
+      order: 0,
+      type: "list" as ListType,
+      created_by: userId,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+
+  // Seed default statuses so the list is usable immediately.
+  await supabase.rpc("seed_default_statuses", { p_list_id: created.id });
+
+  // Add the owner as a member so assignee pickers / permissions work.
+  await supabase.from("list_members").upsert({
+    list_id: created.id,
+    profile_id: userId,
+    role: "owner",
+    color: "#FF564E",
+    added_by: userId,
+  });
+
+  return created as List;
 }
 
 // ---------------------------------------------------------------------------
@@ -327,6 +386,7 @@ export async function createCustomFieldDef(input: {
     .single();
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
   return data;
 }
 
@@ -444,6 +504,7 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
   if (error) throw error;
 
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
   return data;
 }
 
@@ -470,6 +531,7 @@ export async function updateTask(
   const { error } = await supabase.from("tasks").update(input).eq("id", id);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 export async function deleteTask(id: string): Promise<void> {
@@ -477,6 +539,7 @@ export async function deleteTask(id: string): Promise<void> {
   const { error } = await supabase.from("tasks").delete().eq("id", id);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 // ---------------------------------------------------------------------------
@@ -620,6 +683,7 @@ export async function duplicateTask(taskId: string): Promise<Task> {
     .single();
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
   return data;
 }
 
@@ -724,6 +788,7 @@ export async function reorderTask(
     .eq("id", taskId);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 /**
@@ -744,6 +809,7 @@ export async function reorderTasks(
   const err = results.find((r) => r.error);
   if (err?.error) throw err.error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 // ---------------------------------------------------------------------------
@@ -776,6 +842,7 @@ export async function createComment(
     .insert({ task_id: taskId, author_id: userId, body });
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 // ---------------------------------------------------------------------------
@@ -793,6 +860,7 @@ export async function addAssignee(
     .upsert({ task_id: taskId, profile_id: profileId, role });
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 export async function removeAssignee(
@@ -807,6 +875,7 @@ export async function removeAssignee(
     .eq("profile_id", profileId);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 export async function setPrimaryAssignee(
@@ -825,6 +894,7 @@ export async function setPrimaryAssignee(
     .upsert({ task_id: taskId, profile_id: profileId, role: "primary" });
   if (promoteError) throw promoteError;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 // ---------------------------------------------------------------------------
@@ -869,6 +939,7 @@ export async function addSpaceMember(
     .upsert({ space_id: spaceId, profile_id: profileId, role });
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 export async function removeSpaceMember(
@@ -883,6 +954,7 @@ export async function removeSpaceMember(
     .eq("profile_id", profileId);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 export async function updateSpacePrivacy(
@@ -896,6 +968,7 @@ export async function updateSpacePrivacy(
     .eq("id", spaceId);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 export async function updateSpaceMemberRole(
@@ -911,6 +984,7 @@ export async function updateSpaceMemberRole(
     .eq("profile_id", profileId);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 // ---------------------------------------------------------------------------
@@ -944,6 +1018,7 @@ export async function addListMember(
   });
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 export async function removeListMember(
@@ -958,6 +1033,7 @@ export async function removeListMember(
     .eq("profile_id", profileId);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 export async function updateListMemberColor(
@@ -973,6 +1049,7 @@ export async function updateListMemberColor(
     .eq("profile_id", profileId);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 export async function updateListType(
@@ -986,6 +1063,7 @@ export async function updateListType(
     .eq("id", listId);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 // ---------------------------------------------------------------------------
@@ -1013,6 +1091,7 @@ export async function addWatcher(
     .upsert({ task_id: taskId, profile_id: profileId });
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 export async function removeWatcher(
@@ -1027,6 +1106,7 @@ export async function removeWatcher(
     .eq("profile_id", profileId);
   if (error) throw error;
   revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
 }
 
 // ---------------------------------------------------------------------------

@@ -265,7 +265,7 @@ export function TaskDetailDrawer({
         <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]" onClick={onClose} />
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
           <div
-            className="w-full max-w-[880px] rounded-card border border-border bg-surface p-6 shadow-2xl"
+            className="w-full max-w-[1200px] rounded-card border border-border bg-surface p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="animate-pulse space-y-4">
@@ -297,12 +297,12 @@ export function TaskDetailDrawer({
         onClick={onClose}
       >
         <motion.div
-          initial={{ opacity: 0, scale: 0.96, y: 8 }}
+          initial={{ opacity: 0, scale: 0.97, y: 6 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.97, y: 4 }}
+          exit={{ opacity: 0, scale: 0.98, y: 4 }}
           transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
           onClick={(e) => e.stopPropagation()}
-          className="flex h-full max-h-[85vh] w-full max-w-[880px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
+          className="flex h-full max-h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
         >
         {/* ── Header ─────────────────────────────────────────────────── */}
         <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
@@ -357,8 +357,48 @@ export function TaskDetailDrawer({
 
           {/* ── Details Tab ──────────────────────────────────────────── */}
           <TabsContent value="details" className="mt-0 flex-1 min-h-0 overflow-y-auto">
-            <div className="h-full">
-              <div className="space-y-5 px-4 py-4 pb-10">
+            <div className="grid h-full grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_320px]">
+              {/* LEFT — primary content (description) */}
+              <div className="flex min-h-0 flex-col gap-5 px-6 py-5 pb-10">
+                {/* Description — top of left column, grows to fill */}
+                <div className="flex flex-1 flex-col">
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Description
+                  </p>
+                  <MentionInput
+                    value={description}
+                    onChange={setDescription}
+                    users={allUsers}
+                    placeholder="Add a description… (type @ to mention)"
+                    autoGrow
+                    rows={10}
+                    maxHeight={700}
+                    className="py-2"
+                  />
+                  {description !== (task.description ?? "") ? (
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => save({ description: description || null })}
+                        disabled={pending}
+                      >
+                        Save
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setDescription(task.description ?? "")}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* RIGHT — metadata sidebar */}
+              <div className="flex min-h-0 flex-col gap-4 border-t border-border px-6 py-5 pb-10 lg:border-l lg:border-t-0 lg:bg-surface-alt/20">
                 {/* Status */}
                 <FieldRow label="Status">
                   <StatusPickerPopover
@@ -483,40 +523,6 @@ export function TaskDetailDrawer({
                   </div>
                 )}
 
-                {/* Description */}
-                <div>
-                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Description
-                  </p>
-                  <MentionInput
-                    value={description}
-                    onChange={setDescription}
-                    users={allUsers}
-                    placeholder="Add a description… (type @ to mention)"
-                    autoGrow
-                    rows={3}
-                    className="py-2"
-                  />
-                  {description !== (task.description ?? "") ? (
-                    <div className="mt-1.5 flex gap-2">
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={() => save({ description: description || null })}
-                        disabled={pending}
-                      >
-                        Save
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setDescription(task.description ?? "")}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
               </div>
             </div>
           </TabsContent>
