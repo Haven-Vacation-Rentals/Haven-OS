@@ -320,5 +320,6 @@ export type UpdateTaskInput = Partial<
     | "custom_fields"
     | "archived_at"
     | "completed_at"
+    | "parent_id"
   >
 >;
