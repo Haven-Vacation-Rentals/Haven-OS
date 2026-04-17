@@ -4,18 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  Inbox,
   ListTodo,
   FolderKanban,
-  FileText,
   Home,
-  Users,
-  Wrench,
-  DoorOpen,
-  LogIn,
-  BarChart3,
   Settings,
-  ShieldCheck,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
@@ -39,38 +31,25 @@ const sections: NavSection[] = [
     heading: "Overview",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-      { label: "Inbox", href: "/inbox", icon: Inbox, badge: "4" },
     ],
   },
   {
     heading: "Work",
     items: [
-      { label: "My Tasks", href: "/work/mine", icon: ListTodo, soon: true },
+      { label: "My Tasks", href: "/work/mine", icon: ListTodo },
       { label: "Project Management", href: "/work", icon: FolderKanban },
-      { label: "Docs", href: "/work/docs", icon: FileText, soon: true },
     ],
   },
   {
     heading: "Operations",
     items: [
       { label: "Properties", href: "/properties", icon: Home },
-      { label: "Onboarding", href: "/onboarding", icon: LogIn, soon: true },
-      { label: "Offboarding", href: "/offboarding", icon: DoorOpen, soon: true },
-      { label: "Maintenance", href: "/maintenance", icon: Wrench, soon: true },
-    ],
-  },
-  {
-    heading: "Management",
-    items: [
-      { label: "People", href: "/people", icon: Users, soon: true },
-      { label: "Reports", href: "/reports", icon: BarChart3, soon: true },
     ],
   },
   {
     heading: "Admin",
     items: [
-      { label: "Settings", href: "/settings", icon: Settings, soon: true },
-      { label: "Access", href: "/access", icon: ShieldCheck, soon: true },
+      { label: "Settings", href: "/settings", icon: Settings },
     ],
   },
 ];

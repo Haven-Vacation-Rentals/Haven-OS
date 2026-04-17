@@ -658,6 +658,7 @@ export function GlobalTasksView({
   spaces,
   members,
   initialFilters,
+  hideAssigneeFilter = false,
 }: {
   initialTasks: GlobalTask[];
   spaces: Space[];
@@ -668,6 +669,8 @@ export function GlobalTasksView({
     avatar_url: string | null;
   }[];
   initialFilters: GlobalTaskFilters;
+  /** When true, the "All assignees" picker is hidden — used by /work/mine. */
+  hideAssigneeFilter?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -892,21 +895,23 @@ export function GlobalTasksView({
         </select>
 
         {/* Assignee picker */}
-        <select
-          value={currentAssigneeIds[0] ?? ""}
-          onChange={(e) => {
-            const v = e.target.value;
-            updateFilters({ assignee_ids: v ? [v] : [] });
-          }}
-          className="h-8 rounded-md border border-border bg-surface px-2 text-[12px] text-foreground"
-        >
-          <option value="">All assignees</option>
-          {members.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.full_name ?? m.email}
-            </option>
-          ))}
-        </select>
+        {!hideAssigneeFilter && (
+          <select
+            value={currentAssigneeIds[0] ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              updateFilters({ assignee_ids: v ? [v] : [] });
+            }}
+            className="h-8 rounded-md border border-border bg-surface px-2 text-[12px] text-foreground"
+          >
+            <option value="">All assignees</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.full_name ?? m.email}
+              </option>
+            ))}
+          </select>
+        )}
 
         {/* Space picker */}
         <select

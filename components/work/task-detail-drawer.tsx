@@ -262,13 +262,17 @@ export function TaskDetailDrawer({
   if (!task) {
     return (
       <>
-        {/* Backdrop */}
-        <div className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px]" onClick={onClose} />
-        <div className="fixed right-0 top-0 bottom-0 z-50 w-[480px] border-l border-border bg-surface p-6">
-          <div className="animate-pulse space-y-4">
-            <div className="h-6 w-3/4 rounded bg-surface-alt" />
-            <div className="h-4 w-full rounded bg-surface-alt" />
-            <div className="h-4 w-2/3 rounded bg-surface-alt" />
+        <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]" onClick={onClose} />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+          <div
+            className="w-full max-w-[880px] rounded-card border border-border bg-surface p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="animate-pulse space-y-4">
+              <div className="h-6 w-3/4 rounded bg-surface-alt" />
+              <div className="h-4 w-full rounded bg-surface-alt" />
+              <div className="h-4 w-2/3 rounded bg-surface-alt" />
+            </div>
           </div>
         </div>
       </>
@@ -282,19 +286,24 @@ export function TaskDetailDrawer({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        transition={{ duration: 0.2 }}
-        className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[4px]"
+        transition={{ duration: 0.18 }}
+        className="fixed inset-0 z-40 bg-black/35 backdrop-blur-[3px]"
         onClick={onClose}
       />
 
-      {/* Drawer */}
-      <motion.div
-        initial={{ x: "100%" }}
-        animate={{ x: 0 }}
-        exit={{ x: "100%" }}
-        transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
-        className="fixed right-0 top-0 bottom-0 z-50 flex w-[480px] flex-col border-l border-border bg-surface shadow-2xl"
+      {/* Centered modal container (captures outside clicks to close) */}
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+        onClick={onClose}
       >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96, y: 8 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.97, y: 4 }}
+          transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+          onClick={(e) => e.stopPropagation()}
+          className="flex h-full max-h-[85vh] w-full max-w-[880px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
+        >
         {/* ── Header ─────────────────────────────────────────────────── */}
         <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
           <div className="flex-1 min-w-0">
@@ -769,7 +778,8 @@ export function TaskDetailDrawer({
             </div>
           </TabsContent>
         </Tabs>
-      </motion.div>
+        </motion.div>
+      </div>
     </>
   );
 }
