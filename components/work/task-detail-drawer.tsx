@@ -3,7 +3,7 @@
 /**
  * TaskDetailDrawer — ClickUp-parity rewrite with Radix Tabs.
  *
- * Tabs: Details, Subtasks, Checklist, Comments, Activity, Time
+ * Tabs: Details, Checklist, Comments, Activity, Time
  * Animation: slide in from right, 280ms cubic-bezier, backdrop blur
  */
 
@@ -26,7 +26,6 @@ import {
   MessageSquare,
   Activity,
   Timer,
-  List,
   AlignLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -326,7 +325,6 @@ export function TaskDetailDrawer({
             <TabsList className="h-8 gap-0.5 bg-transparent p-0">
               {[
                 { value: "details", label: "Details", icon: <AlignLeft className="h-3 w-3" /> },
-                { value: "subtasks", label: "Subtasks", icon: <List className="h-3 w-3" /> },
                 { value: "checklist", label: "Checklist", icon: <CheckSquare2 className="h-3 w-3" /> },
                 { value: "comments", label: "Comments", icon: <MessageSquare className="h-3 w-3" /> },
                 { value: "activity", label: "Activity", icon: <Activity className="h-3 w-3" /> },
@@ -487,8 +485,9 @@ export function TaskDetailDrawer({
                     onChange={setDescription}
                     users={allUsers}
                     placeholder="Add a description… (type @ to mention)"
-                    rows={4}
-                    className="resize-y py-2"
+                    autoGrow
+                    rows={3}
+                    className="py-2"
                   />
                   {description !== (task.description ?? "") ? (
                     <div className="mt-1.5 flex gap-2">
@@ -510,17 +509,6 @@ export function TaskDetailDrawer({
                     </div>
                   ) : null}
                 </div>
-              </div>
-            </ScrollArea>
-          </TabsContent>
-
-          {/* ── Subtasks Tab ─────────────────────────────────────────── */}
-          <TabsContent value="subtasks" className="mt-0 flex-1 min-h-0">
-            <ScrollArea className="h-full">
-              <div className="px-4 py-4">
-                <p className="text-[13px] text-muted-foreground">
-                  Subtasks are shown in the main list view. Expand the parent task row to see them.
-                </p>
               </div>
             </ScrollArea>
           </TabsContent>
