@@ -24,13 +24,17 @@ import {
 } from "react";
 import {
   DndContext,
+  DragOverlay,
   closestCenter,
   PointerSensor,
   useSensor,
   useSensors,
   useDroppable,
+  defaultDropAnimationSideEffects,
   type DragEndEvent,
   type DragOverEvent,
+  type DragStartEvent,
+  type DropAnimation,
 } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -41,7 +45,7 @@ import {
 } from "@dnd-kit/sortable";
 import { KeyboardSensor } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import {
   Search,
   Plus,
@@ -105,14 +109,30 @@ const PRIORITY_ORDER: Record<TaskPriority, number> = {
 };
 
 // ---------------------------------------------------------------------------
+// Drop animation — smoother settle onto final position
+// ---------------------------------------------------------------------------
+
+const DROP_ANIMATION: DropAnimation = {
+  duration: 220,
+  easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+  sideEffects: defaultDropAnimationSideEffects({
+    styles: {
+      active: { opacity: "0.5" },
+    },
+  }),
+};
+
+// ---------------------------------------------------------------------------
 // Droppable group zone — wraps each status group's row area
 // ---------------------------------------------------------------------------
 
 function DroppableGroupZone({
   groupKey,
+  isDragActive,
   children,
 }: {
   groupKey: string;
+  isDragActive: boolean;
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `group:${groupKey}` });
@@ -121,7 +141,8 @@ function DroppableGroupZone({
       ref={setNodeRef}
       className={cn(
         "transition-colors duration-150",
-        isOver && "bg-accent/5",
+        isOver && "bg-accent/[0.06] ring-1 ring-inset ring-accent/30",
+        isDragActive && !isOver && "bg-surface-alt/20",
       )}
     >
       {children}
@@ -175,37 +196,52 @@ function SortableTaskRow({
   onStatusChange: (task: TaskWithSubtasks, status: Status) => void;
   onSubtaskAdded?: (task: TaskWithSubtasks) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: task.id });
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+    isOver,
+  } = useSortable({ id: task.id });
 
   const nestDroppable = useNestDroppable(task.id);
 
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
+    transition: transition ?? "transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)",
   };
 
   const isSelected = selectedIds.has(task.id);
   const isFocused = focusedTaskId === task.id;
   const currentStatus = statuses.find((s) => s.id === task.status_id) ?? null;
 
+  // Drop-indicator — when another row is being dragged over this one,
+  // highlight the insertion line at the top of this row.
+  const showDropAbove = isOver && !isDragging;
+
   return (
-    <motion.div
+    <div
       ref={setNodeRef}
       style={style}
-      layout
-      initial={{ opacity: 0, y: -4 }}
-      animate={{ opacity: isDragging ? 0.4 : 1, y: 0 }}
-      exit={{ opacity: 0, y: -4 }}
-      transition={{ duration: 0.15 }}
       className={cn(
-        "group flex items-stretch border-b border-border/20 transition-colors duration-[120ms] ease-out",
-        isSelected && "bg-accent/5",
+        "group relative flex items-stretch border-b border-border/20 transition-colors duration-[120ms] ease-out",
+        isSelected && "bg-accent-soft/40",
         isFocused && !isSelected && "bg-surface-alt/60",
         !isSelected && !isFocused && "hover:bg-surface-alt/30",
+        isDragging && "opacity-0",
       )}
       onContextMenu={(e) => onContextMenu(e, task.id)}
     >
+      {/* Drop indicator line — shown above the row when it is the drop target */}
+      {showDropAbove && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-2 -top-px z-30 h-0.5 rounded-full bg-accent shadow-[0_0_8px_rgb(var(--accent)/0.6)]"
+        />
+      )}
+
       {/* Checkbox column */}
       <div
         className={cn(
@@ -223,11 +259,17 @@ function SortableTaskRow({
         />
       </div>
 
-      {/* Drag handle */}
+      {/* Drag handle — larger hit area, fades on hover, full-row-height cursor */}
       <div
         {...attributes}
         {...listeners}
-        className="flex w-6 shrink-0 cursor-grab items-center justify-center text-muted-foreground/20 opacity-0 group-hover:opacity-100 active:cursor-grabbing"
+        aria-label="Drag to reorder"
+        className={cn(
+          "flex w-6 shrink-0 touch-none select-none items-center justify-center",
+          "cursor-grab text-muted-foreground/30 hover:text-muted-foreground/80 active:cursor-grabbing",
+          "opacity-0 group-hover:opacity-100 transition-opacity",
+          isDragging && "opacity-100 cursor-grabbing",
+        )}
       >
         <GripVertical className="h-3.5 w-3.5" />
       </div>
@@ -293,7 +335,60 @@ function SortableTaskRow({
           ))}
         </div>
       </div>
-    </motion.div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TaskDragOverlay — what the user sees floating under their cursor while
+// dragging. A compact, tilted card gives much better visual feedback than
+// the live row lerping between positions.
+// ---------------------------------------------------------------------------
+
+function TaskDragOverlay({
+  task,
+}: {
+  task: { title: string; status: Status | null } | null;
+}) {
+  if (!task) return null;
+  const color = task.status?.color ?? "#94a3b8";
+  const isDone =
+    task.status?.category === "done" || task.status?.category === "closed";
+
+  return (
+    <div
+      className={cn(
+        "pointer-events-none flex max-w-md items-center gap-2 rounded-lg border border-border",
+        "bg-surface/95 px-3 py-2 shadow-[0_12px_30px_rgba(0,0,0,0.18)] backdrop-blur-md",
+      )}
+      style={{ transform: "rotate(-1.5deg)" }}
+    >
+      <span
+        aria-hidden="true"
+        className="h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: color }}
+      />
+      <span
+        className={cn(
+          "truncate text-[13.5px] font-medium",
+          isDone ? "text-muted-foreground line-through" : "text-foreground",
+        )}
+      >
+        {task.title}
+      </span>
+      {task.status && (
+        <span
+          className="ml-auto shrink-0 rounded-md border px-1.5 text-[11px] font-medium leading-5"
+          style={{
+            backgroundColor: `${color}22`,
+            color,
+            borderColor: `${color}55`,
+          }}
+        >
+          {task.status.name}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -333,13 +428,18 @@ export function ListViewTable({
   } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
+  const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const lastClickedId = useRef<string | null>(null);
 
+  // Tighter activation distance + small delay so quick clicks still open the
+  // task detail drawer — only a deliberate drag gesture triggers DnD.
   const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5, tolerance: 5, delay: 0 },
+    }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
@@ -648,6 +748,20 @@ export function ListViewTable({
   );
 
   // -------------------------------------------------------------------------
+  // DnD — drag start (capture active task for DragOverlay)
+  // -------------------------------------------------------------------------
+  function handleDragStart(event: DragStartEvent) {
+    setActiveDragTaskId(String(event.active.id));
+  }
+
+  // -------------------------------------------------------------------------
+  // DnD — drag cancel
+  // -------------------------------------------------------------------------
+  function handleDragCancel() {
+    setActiveDragTaskId(null);
+  }
+
+  // -------------------------------------------------------------------------
   // DnD — drag over handler (no-op: nest visual feedback handled by useDroppable)
   // -------------------------------------------------------------------------
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -660,6 +774,7 @@ export function ListViewTable({
   // DnD — drag end handler (cross-group + nest + same-group reorder)
   // -------------------------------------------------------------------------
   function handleDragEnd(event: DragEndEvent) {
+    setActiveDragTaskId(null);
     const { active, over } = event;
 
     if (!over || active.id === over.id) return;
@@ -970,8 +1085,10 @@ export function ListViewTable({
           <DndContext
             sensors={dndSensors}
             collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
+            onDragCancel={handleDragCancel}
           >
             <SortableContext
               items={allTaskIds}
@@ -1008,10 +1125,23 @@ export function ListViewTable({
                     {/* Task rows — wrapped in DroppableGroupZone */}
                     <AnimatePresence initial={false}>
                       {isExpanded && (
-                        <DroppableGroupZone groupKey={groupKey}>
+                        <DroppableGroupZone
+                          groupKey={groupKey}
+                          isDragActive={!!activeDragTaskId}
+                        >
                           {group.tasks.length === 0 && !search ? (
-                            <div className="px-3 py-3 text-[12px] text-muted-foreground/50 border-b border-border/20">
-                              Drop tasks here or add a new one
+                            <div
+                              className={cn(
+                                "flex items-center gap-2 border-b border-border/20 px-3 py-3 text-[12px] transition-colors",
+                                activeDragTaskId
+                                  ? "border-dashed border-accent/50 bg-accent-soft/20 text-accent"
+                                  : "text-muted-foreground/50",
+                              )}
+                            >
+                              <CornerDownRight className="h-3.5 w-3.5 opacity-60" />
+                              {activeDragTaskId
+                                ? "Drop here to move into this status"
+                                : "Drop tasks here or add a new one"}
                             </div>
                           ) : null}
 
@@ -1081,6 +1211,21 @@ export function ListViewTable({
                 );
               })}
             </SortableContext>
+
+            {/* Floating drag preview — reads so much better than the live row */}
+            <DragOverlay dropAnimation={DROP_ANIMATION} zIndex={60}>
+              {activeDragTaskId ? (
+                <TaskDragOverlay
+                  task={
+                    tasks.find((t) => t.id === activeDragTaskId) ??
+                    tasks
+                      .flatMap((t) => t.subtask_list ?? [])
+                      .find((s) => s.id === activeDragTaskId) ??
+                    null
+                  }
+                />
+              ) : null}
+            </DragOverlay>
           </DndContext>
 
           {/* Empty state */}
@@ -1116,6 +1261,13 @@ export function ListViewTable({
             statuses={statuses}
             fieldDefs={fieldDefs}
             members={members}
+            initialTask={
+              tasks.find((t) => t.id === selectedTaskId) ??
+              tasks
+                .flatMap((t) => t.subtask_list ?? [])
+                .find((s) => s.id === selectedTaskId) ??
+              null
+            }
             onClose={() => setSelectedTaskId(null)}
           />
         ) : null}

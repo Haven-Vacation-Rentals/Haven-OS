@@ -183,17 +183,26 @@ export function ListTaskRow({
             <GripVertical className="h-3 w-3 text-muted-foreground/40" />
           </span>
 
-          {/* Expand/collapse subtasks caret — also acts as nest drop zone */}
+          {/* Expand/collapse subtasks caret — also acts as nest drop zone.
+              When a drag hovers here, we scale up and show a strong ring so
+              the user knows they're about to nest-as-subtask (vs. reorder). */}
           {hasSubtasks ? (
             <button
               type="button"
               ref={nestDroppableProps?.ref as React.Ref<HTMLButtonElement>}
               onClick={() => onToggleSubtasks(task.id)}
               className={cn(
-                "grid h-5 w-5 shrink-0 place-items-center transition-transform rounded",
-                nestDroppableProps?.isOver && "bg-accent/20 ring-1 ring-accent/50",
+                "grid h-5 w-5 shrink-0 place-items-center rounded transition-all duration-150",
+                nestDroppableProps?.isOver &&
+                  "scale-125 bg-accent/25 ring-2 ring-accent shadow-[0_0_0_3px_rgb(var(--accent)/0.15)]",
               )}
-              title={isExpanded ? "Collapse subtasks" : "Expand subtasks"}
+              title={
+                nestDroppableProps?.isOver
+                  ? "Release to nest as subtask"
+                  : isExpanded
+                    ? "Collapse subtasks"
+                    : "Expand subtasks"
+              }
             >
               {isExpanded ? (
                 <ChevronDown className="h-3 w-3 text-muted-foreground" />
@@ -202,14 +211,21 @@ export function ListTaskRow({
               )}
             </button>
           ) : (
-            // No subtasks yet — still provide a nest drop zone (invisible)
+            // No subtasks yet — still provide a nest drop zone. Becomes visible
+            // with a corner-down-right glyph when a task is being dragged over.
             <span
               ref={nestDroppableProps?.ref as React.Ref<HTMLSpanElement>}
               className={cn(
-                "w-5 h-5 shrink-0 rounded transition-colors",
-                nestDroppableProps?.isOver && "bg-accent/20 ring-1 ring-accent/50",
+                "grid h-5 w-5 shrink-0 place-items-center rounded transition-all duration-150",
+                nestDroppableProps?.isOver &&
+                  "scale-125 bg-accent/25 ring-2 ring-accent shadow-[0_0_0_3px_rgb(var(--accent)/0.15)]",
               )}
-            />
+              title={nestDroppableProps?.isOver ? "Release to nest as subtask" : ""}
+            >
+              {nestDroppableProps?.isOver && (
+                <ChevronRight className="h-3 w-3 text-accent" />
+              )}
+            </span>
           )}
 
           {/* Status circle — opens full StatusPickerPopover */}

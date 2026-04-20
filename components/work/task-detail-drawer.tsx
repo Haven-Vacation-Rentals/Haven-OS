@@ -27,10 +27,16 @@ import {
   Activity,
   Timer,
   AlignLeft,
+  Flag,
+  Eye,
+  EyeOff,
+  UserPlus,
+  Calendar as CalendarIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { StatusPill } from "@/components/work/status-pill";
 import { StatusPickerPopover } from "@/components/work/status-picker-popover";
 import { CustomFieldCell } from "@/components/work/custom-field-cell";
@@ -58,6 +64,11 @@ import {
   stopTimer,
   addManualTimeEntry,
   deleteTimeEntry,
+  addAssignee,
+  removeAssignee,
+  getWatchers,
+  addWatcher,
+  removeWatcher,
 } from "@/lib/work/actions";
 import type {
   Task,
@@ -126,21 +137,25 @@ export function TaskDetailDrawer({
   statuses,
   fieldDefs,
   members = [],
+  initialTask = null,
   onClose,
 }: {
   taskId: string;
   statuses: Status[];
   fieldDefs: CustomFieldDef[];
   members?: { id: string; full_name: string | null; avatar_url: string | null }[];
+  /** Optional cached task shape — lets the drawer render immediately while
+   *  the fresh server copy loads in the background. */
+  initialTask?: Task | null;
   onClose: () => void;
 }) {
-  const [task, setTask] = useState<Task | null>(null);
+  const [task, setTask] = useState<Task | null>(initialTask);
   const [comments, setComments] = useState<
     (Comment & { author: { full_name: string | null; avatar_url: string | null } })[]
   >([]);
   const [allUsers, setAllUsers] = useState<MentionUser[]>([]);
   const [commentBody, setCommentBody] = useState("");
-  const [description, setDescription] = useState("");
+  const [description, setDescription] = useState(initialTask?.description ?? "");
   const [activeTab, setActiveTab] = useState("details");
   const [pending, start] = useTransition();
 
@@ -158,16 +173,21 @@ export function TaskDetailDrawer({
   // Activity state
   const [activity, setActivity] = useState<TaskActivityWithActor[]>([]);
 
+  // Watchers — ClickUp-parity
+  const [watcherIds, setWatcherIds] = useState<string[]>([]);
+
   const load = useCallback(async () => {
-    const [t, c, u] = await Promise.all([
+    const [t, c, u, w] = await Promise.all([
       getTask(taskId),
       getComments(taskId),
       getMembers(),
+      getWatchers(taskId),
     ]);
     setTask(t);
     setDescription(t?.description ?? "");
     setComments(c);
     setAllUsers(u);
+    setWatcherIds(w.map((x) => x.profile_id));
   }, [taskId]);
 
   const loadChecklists = useCallback(async () => {
@@ -223,10 +243,35 @@ export function TaskDetailDrawer({
     };
   }, [activeTimer]);
 
-  // Keyboard
+  // Keyboard shortcuts — Esc closes; number keys jump between tabs.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      const inInput =
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target as HTMLElement)?.isContentEditable;
+
+      if (e.key === "Escape") {
+        // Let the mention-input swallow Esc (for dismissing the @ menu)
+        if (inInput) return;
+        onClose();
+        return;
+      }
+
+      // Tab hotkeys — only when not focused in a text field.
+      if (inInput || e.metaKey || e.ctrlKey || e.altKey) return;
+      const tabMap: Record<string, string> = {
+        "1": "details",
+        "2": "checklist",
+        "3": "comments",
+        "4": "activity",
+        "5": "time",
+      };
+      const target = tabMap[e.key];
+      if (target) {
+        e.preventDefault();
+        setActiveTab(target);
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -259,21 +304,53 @@ export function TaskDetailDrawer({
 
   const currentStatus = statuses.find((s) => s.id === task?.status_id) ?? null;
 
+  // When no task is loaded yet AND no initial task was provided, render a
+  // skeleton that shares the final layout so the drawer doesn't "jump" when
+  // real data lands. For snappier perceived performance, callers should pass
+  // initialTask so we can skip this branch entirely.
   if (!task) {
     return (
       <>
-        <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]" onClick={onClose} />
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
-          <div
-            className="w-full max-w-[1200px] rounded-card border border-border bg-surface p-6 shadow-2xl"
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.12 }}
+          className="fixed inset-0 z-40 bg-black/35 backdrop-blur-[3px]"
+          onClick={onClose}
+        />
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.985, y: 4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.99, y: 2 }}
+            transition={{ duration: 0.14, ease: [0.2, 0.8, 0.2, 1] }}
             onClick={(e) => e.stopPropagation()}
+            className="flex h-full max-h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
           >
-            <div className="animate-pulse space-y-4">
-              <div className="h-6 w-3/4 rounded bg-surface-alt" />
-              <div className="h-4 w-full rounded bg-surface-alt" />
-              <div className="h-4 w-2/3 rounded bg-surface-alt" />
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+              <div className="h-5 w-64 animate-pulse rounded bg-surface-alt" />
+              <div className="ml-auto h-7 w-7 animate-pulse rounded-md bg-surface-alt" />
+              <div className="h-7 w-7 animate-pulse rounded-md bg-surface-alt" />
             </div>
-          </div>
+            <div className="grid flex-1 grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="space-y-3 px-6 py-5">
+                <div className="h-3 w-24 animate-pulse rounded bg-surface-alt" />
+                <div className="h-48 animate-pulse rounded-md bg-surface-alt/60" />
+              </div>
+              <div className="space-y-3 border-t border-border px-6 py-5 lg:border-l lg:border-t-0 lg:bg-surface-alt/20">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="grid grid-cols-[100px_1fr] gap-2">
+                    <div className="h-3 animate-pulse rounded bg-surface-alt" />
+                    <div className="h-6 animate-pulse rounded bg-surface-alt" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
         </div>
       </>
     );
@@ -286,7 +363,7 @@ export function TaskDetailDrawer({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        transition={{ duration: 0.18 }}
+        transition={{ duration: 0.12 }}
         className="fixed inset-0 z-40 bg-black/35 backdrop-blur-[3px]"
         onClick={onClose}
       />
@@ -297,10 +374,10 @@ export function TaskDetailDrawer({
         onClick={onClose}
       >
         <motion.div
-          initial={{ opacity: 0, scale: 0.97, y: 6 }}
+          initial={{ opacity: 0, scale: 0.985, y: 4 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.98, y: 4 }}
-          transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+          exit={{ opacity: 0, scale: 0.99, y: 2 }}
+          transition={{ duration: 0.14, ease: [0.2, 0.8, 0.2, 1] }}
           onClick={(e) => e.stopPropagation()}
           className="flex h-full max-h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
         >
@@ -329,18 +406,19 @@ export function TaskDetailDrawer({
 
         {/* ── Tabs ───────────────────────────────────────────────────── */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col">
-          <div className="shrink-0 border-b border-border px-4 py-2">
+          <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
             <TabsList className="h-8 gap-0.5 bg-transparent p-0">
               {[
-                { value: "details", label: "Details", icon: <AlignLeft className="h-3 w-3" /> },
-                { value: "checklist", label: "Checklist", icon: <CheckSquare2 className="h-3 w-3" /> },
-                { value: "comments", label: "Comments", icon: <MessageSquare className="h-3 w-3" /> },
-                { value: "activity", label: "Activity", icon: <Activity className="h-3 w-3" /> },
-                { value: "time", label: "Time", icon: <Timer className="h-3 w-3" /> },
+                { value: "details", label: "Details", icon: <AlignLeft className="h-3 w-3" />, hint: "1" },
+                { value: "checklist", label: "Checklist", icon: <CheckSquare2 className="h-3 w-3" />, hint: "2" },
+                { value: "comments", label: "Comments", icon: <MessageSquare className="h-3 w-3" />, hint: "3" },
+                { value: "activity", label: "Activity", icon: <Activity className="h-3 w-3" />, hint: "4" },
+                { value: "time", label: "Time", icon: <Timer className="h-3 w-3" />, hint: "5" },
               ].map((tab) => (
                 <TabsTrigger
                   key={tab.value}
                   value={tab.value}
+                  title={`${tab.label} (press ${tab.hint})`}
                   className="h-7 gap-1 rounded-md px-2 text-[11px] data-[state=active]:bg-surface-alt data-[state=active]:shadow-none"
                 >
                   {tab.icon}
@@ -353,6 +431,11 @@ export function TaskDetailDrawer({
                 </TabsTrigger>
               ))}
             </TabsList>
+            <span className="ml-auto hidden items-center gap-1 text-[10px] text-muted-foreground/60 md:flex">
+              Press
+              <kbd className="haven-kbd text-[9px]">1</kbd>–<kbd className="haven-kbd text-[9px]">5</kbd>
+              to switch tabs
+            </span>
           </div>
 
           {/* ── Details Tab ──────────────────────────────────────────── */}
@@ -420,36 +503,48 @@ export function TaskDetailDrawer({
                   </StatusPickerPopover>
                 </FieldRow>
 
-                {/* Priority */}
+                {/* Priority — tinted picker popover */}
                 <FieldRow label="Priority">
-                  <select
+                  <PriorityPicker
                     value={task.priority}
-                    onChange={(e) => save({ priority: e.target.value as TaskPriority })}
-                    className="h-7 rounded-md border border-border bg-surface px-2 text-[13px]"
-                  >
-                    {priorities.map((p) => (
-                      <option key={p.value} value={p.value}>{p.label}</option>
-                    ))}
-                  </select>
+                    onChange={(p) => save({ priority: p })}
+                  />
                 </FieldRow>
 
-                {/* Due date */}
+                {/* Assignees */}
+                <FieldRow label="Assignees">
+                  <AssigneesField
+                    taskId={task.id}
+                    selectedIds={task.assignee_ids}
+                    members={members}
+                    onChange={load}
+                  />
+                </FieldRow>
+
+                {/* Watchers — who gets notified */}
+                <FieldRow label="Watchers">
+                  <WatchersField
+                    taskId={task.id}
+                    watcherIds={watcherIds}
+                    members={members}
+                    onChange={(ids) => setWatcherIds(ids)}
+                  />
+                </FieldRow>
+
+                {/* Due date — native picker + quick buttons */}
                 <FieldRow label="Due date">
-                  <input
-                    type="date"
-                    value={task.due_date ?? ""}
-                    onChange={(e) => save({ due_date: e.target.value || null })}
-                    className="h-7 rounded-md border border-border bg-surface px-2 text-[13px]"
+                  <DatePickerField
+                    value={task.due_date}
+                    onChange={(v) => save({ due_date: v })}
                   />
                 </FieldRow>
 
                 {/* Start date */}
                 <FieldRow label="Start date">
-                  <input
-                    type="date"
-                    value={task.start_date ?? ""}
-                    onChange={(e) => save({ start_date: e.target.value || null })}
-                    className="h-7 rounded-md border border-border bg-surface px-2 text-[13px]"
+                  <DatePickerField
+                    value={task.start_date}
+                    onChange={(v) => save({ start_date: v })}
+                    hideQuickButtons
                   />
                 </FieldRow>
 
@@ -465,7 +560,7 @@ export function TaskDetailDrawer({
                           time_estimate: e.target.value ? parseInt(e.target.value, 10) : null,
                         })
                       }
-                      className="h-7 w-20 rounded-md border border-border bg-surface px-2 text-[13px]"
+                      className="h-7 w-20 rounded-md border border-border bg-surface px-2 text-[13px] outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 transition-colors"
                     />
                     <span className="text-[12px] text-muted-foreground">min</span>
                   </div>
@@ -1125,5 +1220,373 @@ function ManualTimeEntry({
         </Button>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PriorityPicker — colored pill + popover with keyboard-friendly options.
+// ---------------------------------------------------------------------------
+
+function PriorityPicker({
+  value,
+  onChange,
+}: {
+  value: TaskPriority;
+  onChange: (p: TaskPriority) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const active = priorities.find((p) => p.value === value) ?? priorities[4];
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-surface px-2 text-[13px] font-medium",
+            "hover:border-accent/50 hover:bg-surface-alt transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+          )}
+        >
+          {active.value !== "none" ? (
+            <Flag className={cn("h-3.5 w-3.5", active.color)} />
+          ) : (
+            <Flag className="h-3.5 w-3.5 text-muted-foreground/40" />
+          )}
+          <span className={active.color}>{active.label}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={6} className="w-40 p-1">
+        {priorities.map((p) => (
+          <button
+            key={p.value}
+            type="button"
+            onClick={() => {
+              onChange(p.value);
+              setOpen(false);
+            }}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors",
+              "hover:bg-surface-alt",
+              p.value === value && "bg-accent-soft/60",
+            )}
+          >
+            <Flag
+              className={cn(
+                "h-3.5 w-3.5",
+                p.value === "none" ? "text-muted-foreground/30" : p.color,
+              )}
+            />
+            <span
+              className={cn(
+                p.value === "none" ? "text-muted-foreground" : p.color,
+                "font-medium",
+              )}
+            >
+              {p.label}
+            </span>
+            {p.value === value && (
+              <Check className="ml-auto h-3.5 w-3.5 text-accent" />
+            )}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DatePickerField — native date input + quick-pick shortcuts (Today, Tmrw,
+// Next week, Clear) for faster task triage.
+// ---------------------------------------------------------------------------
+
+function DatePickerField({
+  value,
+  onChange,
+  hideQuickButtons = false,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+  hideQuickButtons?: boolean;
+}) {
+  function iso(offsetDays: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    return d.toISOString().slice(0, 10);
+  }
+
+  const isOverdue =
+    value && new Date(value + "T00:00:00") < new Date(new Date().setHours(0, 0, 0, 0));
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-1.5">
+        <CalendarIcon
+          className={cn(
+            "h-3.5 w-3.5 shrink-0",
+            isOverdue ? "text-rose-500" : "text-muted-foreground",
+          )}
+        />
+        <input
+          type="date"
+          value={value ?? ""}
+          onChange={(e) => onChange(e.target.value || null)}
+          className={cn(
+            "h-7 flex-1 rounded-md border border-border bg-surface px-2 text-[13px] outline-none",
+            "focus:border-accent focus:ring-1 focus:ring-accent/30 transition-colors",
+            isOverdue && "border-rose-300 text-rose-600",
+          )}
+        />
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            title="Clear date"
+            className="text-muted-foreground/50 hover:text-rose-500 transition-colors"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+      {!hideQuickButtons && (
+        <div className="flex flex-wrap gap-1">
+          {[
+            { label: "Today", value: iso(0) },
+            { label: "Tmrw", value: iso(1) },
+            { label: "+1w", value: iso(7) },
+          ].map((q) => (
+            <button
+              key={q.label}
+              type="button"
+              onClick={() => onChange(q.value)}
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-[10.5px] font-medium transition-colors",
+                value === q.value
+                  ? "border-accent bg-accent text-accent-foreground"
+                  : "border-border bg-surface text-muted-foreground hover:border-accent/50 hover:text-accent",
+              )}
+            >
+              {q.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AssigneesField — avatar stack + popover to add/remove people.
+// ---------------------------------------------------------------------------
+
+function AssigneesField({
+  taskId,
+  selectedIds,
+  members,
+  onChange,
+}: {
+  taskId: string;
+  selectedIds: string[];
+  members: { id: string; full_name: string | null; avatar_url: string | null }[];
+  onChange: () => Promise<void> | void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [, start] = useTransition();
+  const selectedSet = new Set(selectedIds);
+  const selected = members.filter((m) => selectedSet.has(m.id));
+
+  function toggle(id: string) {
+    start(async () => {
+      if (selectedSet.has(id)) await removeAssignee(taskId, id);
+      else await addAssignee(taskId, id);
+      await onChange();
+    });
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "flex min-h-7 w-full items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-left",
+            "hover:border-accent/50 hover:bg-surface-alt transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+          )}
+        >
+          {selected.length === 0 ? (
+            <span className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+              <UserPlus className="h-3.5 w-3.5" />
+              Assign…
+            </span>
+          ) : (
+            <div className="flex -space-x-1.5">
+              {selected.slice(0, 5).map((m) =>
+                m.avatar_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={m.id}
+                    src={m.avatar_url}
+                    alt={m.full_name ?? ""}
+                    title={m.full_name ?? ""}
+                    className="h-5 w-5 rounded-full ring-2 ring-surface object-cover"
+                  />
+                ) : (
+                  <span
+                    key={m.id}
+                    title={m.full_name ?? ""}
+                    className="grid h-5 w-5 place-items-center rounded-full bg-accent-soft text-[9px] font-bold text-accent ring-2 ring-surface"
+                  >
+                    {(m.full_name ?? "?")[0]?.toUpperCase()}
+                  </span>
+                ),
+              )}
+              {selected.length > 5 && (
+                <span className="grid h-5 w-5 place-items-center rounded-full bg-muted text-[9px] font-bold ring-2 ring-surface">
+                  +{selected.length - 5}
+                </span>
+              )}
+            </div>
+          )}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={6} className="w-56 p-1">
+        {members.length === 0 ? (
+          <p className="px-2 py-1.5 text-[12px] text-muted-foreground">No members yet.</p>
+        ) : (
+          <div className="max-h-60 overflow-y-auto">
+            {members.map((m) => {
+              const on = selectedSet.has(m.id);
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => toggle(m.id)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors",
+                    "hover:bg-surface-alt",
+                    on && "bg-accent-soft/60",
+                  )}
+                >
+                  {m.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={m.avatar_url}
+                      alt=""
+                      className="h-5 w-5 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="grid h-5 w-5 place-items-center rounded-full bg-muted text-[9px] font-bold">
+                      {(m.full_name ?? "?")[0]?.toUpperCase()}
+                    </span>
+                  )}
+                  <span className="truncate">{m.full_name ?? "Unnamed"}</span>
+                  {on && <Check className="ml-auto h-3.5 w-3.5 text-accent" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WatchersField — same shape as assignees but wired to task_watchers.
+// ---------------------------------------------------------------------------
+
+function WatchersField({
+  taskId,
+  watcherIds,
+  members,
+  onChange,
+}: {
+  taskId: string;
+  watcherIds: string[];
+  members: { id: string; full_name: string | null; avatar_url: string | null }[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [, start] = useTransition();
+  const selectedSet = new Set(watcherIds);
+
+  function toggle(id: string) {
+    start(async () => {
+      const wasOn = selectedSet.has(id);
+      if (wasOn) {
+        await removeWatcher(taskId, id);
+        onChange(watcherIds.filter((x) => x !== id));
+      } else {
+        await addWatcher(taskId, id);
+        onChange([...watcherIds, id]);
+      }
+    });
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-surface px-2 text-[12.5px]",
+            "hover:border-accent/50 hover:bg-surface-alt transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+          )}
+        >
+          {watcherIds.length > 0 ? (
+            <>
+              <Eye className="h-3.5 w-3.5 text-accent" />
+              <span className="font-medium">{watcherIds.length}</span>
+              <span className="text-muted-foreground">watching</span>
+            </>
+          ) : (
+            <>
+              <EyeOff className="h-3.5 w-3.5 text-muted-foreground/60" />
+              <span className="text-muted-foreground">Not watched</span>
+            </>
+          )}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={6} className="w-56 p-1">
+        {members.length === 0 ? (
+          <p className="px-2 py-1.5 text-[12px] text-muted-foreground">No members yet.</p>
+        ) : (
+          <div className="max-h-60 overflow-y-auto">
+            {members.map((m) => {
+              const on = selectedSet.has(m.id);
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => toggle(m.id)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors",
+                    "hover:bg-surface-alt",
+                    on && "bg-accent-soft/60",
+                  )}
+                >
+                  {m.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={m.avatar_url}
+                      alt=""
+                      className="h-5 w-5 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="grid h-5 w-5 place-items-center rounded-full bg-muted text-[9px] font-bold">
+                      {(m.full_name ?? "?")[0]?.toUpperCase()}
+                    </span>
+                  )}
+                  <span className="truncate">{m.full_name ?? "Unnamed"}</span>
+                  {on && <Eye className="ml-auto h-3.5 w-3.5 text-accent" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
