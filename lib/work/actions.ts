@@ -34,6 +34,7 @@ import type {
   TaskActivity,
   TaskAttachment,
   TaskStatusCategory,
+  RecurrenceRule,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -515,6 +516,7 @@ export async function updateTask(
   const supabase = await db();
 
   // If marking done, set completed_at
+  let justCompleted = false;
   if (input.status_id) {
     const { data: status } = await supabase
       .from("statuses")
@@ -523,6 +525,7 @@ export async function updateTask(
       .single();
     if (status?.category === "done" || status?.category === "closed") {
       input.completed_at = new Date().toISOString();
+      justCompleted = true;
     } else {
       input.completed_at = null;
     }
@@ -530,8 +533,99 @@ export async function updateTask(
 
   const { error } = await supabase.from("tasks").update(input).eq("id", id);
   if (error) throw error;
+
+  // If the task was just completed AND has a recurrence rule, roll it forward.
+  // We DON'T use a trigger for this because we want the caller's optimistic
+  // update to settle first — then the rollover produces a fresh task row that
+  // the next revalidatePath sweeps up.
+  if (justCompleted) {
+    try {
+      await rolloverRecurringTask(id);
+    } catch (err) {
+      // Rollover failures shouldn't block marking the task done.
+      console.error("[recurrence] rollover failed", err);
+    }
+  }
+
   revalidatePath("/work", "layout");
   revalidatePath("/my-tasks");
+}
+
+// ---------------------------------------------------------------------------
+// RECURRENCE rollover
+// ---------------------------------------------------------------------------
+
+/**
+ * When a recurring task is completed, spawn the next instance:
+ *   - If the rule has ended, no-op.
+ *   - Otherwise, reopen the same row by clearing completed_at, bumping the
+ *     due_date to the next occurrence, and incrementing recurrence_count.
+ *
+ * We re-use the same row (instead of creating a new one) so that checklists,
+ * comments, watchers, and attachments continue to ride along — matching
+ * ClickUp's default recurring-task behavior.
+ */
+async function rolloverRecurringTask(taskId: string): Promise<void> {
+  const { computeNextOccurrence } = await import("./recurrence");
+  const supabase = await db();
+
+  const { data: task, error } = await supabase
+    .from("tasks")
+    .select(
+      "id, due_date, start_date, recurrence_rule, recurrence_count, completed_at, list_id",
+    )
+    .eq("id", taskId)
+    .single();
+  if (error || !task) return;
+
+  const rule = task.recurrence_rule as RecurrenceRule | null;
+  if (!rule) return;
+
+  // "after" cap
+  if (rule.ends?.type === "after" && (task.recurrence_count ?? 0) >= rule.ends.count) {
+    return;
+  }
+
+  const nextDue = computeNextOccurrence(
+    rule,
+    task.due_date,
+    task.completed_at ?? new Date().toISOString(),
+  );
+  if (!nextDue) return;
+
+  // Shift start_date by the same delta so the lead time is preserved.
+  let nextStart: string | null = null;
+  if (task.start_date && task.due_date) {
+    const prevStart = new Date(task.start_date + "T00:00:00").getTime();
+    const prevDue = new Date(task.due_date + "T00:00:00").getTime();
+    const delta = prevDue - prevStart;
+    const newStart = new Date(new Date(nextDue + "T00:00:00").getTime() - delta);
+    const y = newStart.getFullYear();
+    const m = String(newStart.getMonth() + 1).padStart(2, "0");
+    const d = String(newStart.getDate()).padStart(2, "0");
+    nextStart = `${y}-${m}-${d}`;
+  }
+
+  // Find the first "todo" status for the list so the task reopens there.
+  const { data: todoStatus } = await supabase
+    .from("statuses")
+    .select("id")
+    .eq("list_id", task.list_id)
+    .eq("category", "todo")
+    .order("order")
+    .limit(1)
+    .single();
+
+  const updates: Record<string, unknown> = {
+    due_date: nextDue,
+    completed_at: null,
+    recurrence_count: (task.recurrence_count ?? 0) + 1,
+  };
+  if (nextStart) updates.start_date = nextStart;
+  if (todoStatus?.id) updates.status_id = todoStatus.id;
+
+  const { error: upErr } = await supabase.from("tasks").update(updates).eq("id", taskId);
+  if (upErr) throw upErr;
 }
 
 export async function deleteTask(id: string): Promise<void> {

@@ -32,6 +32,7 @@ import {
   EyeOff,
   UserPlus,
   Calendar as CalendarIcon,
+  Repeat,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -79,7 +80,10 @@ import type {
   Checklist,
   ChecklistItem,
   TimeEntry,
+  RecurrenceRule,
+  RecurrencePattern,
 } from "@/lib/work/types";
+import { summarizeRule } from "@/lib/work/recurrence";
 import type {
   TaskActivityWithActor,
   TaskTimeTotalResult,
@@ -191,18 +195,33 @@ export function TaskDetailDrawer({
   }, [taskId]);
 
   const loadChecklists = useCallback(async () => {
-    const data = await getChecklists(taskId);
-    setChecklists(data);
+    try {
+      const data = await getChecklists(taskId);
+      setChecklists(data);
+    } catch (err) {
+      console.error("Failed to load checklists", err);
+      setChecklists([]);
+    }
   }, [taskId]);
 
   const loadActivity = useCallback(async () => {
-    const data = await getTaskActivity(taskId, 50);
-    setActivity(data);
+    try {
+      const data = await getTaskActivity(taskId, 50);
+      setActivity(data);
+    } catch (err) {
+      console.error("Failed to load activity", err);
+      setActivity([]);
+    }
   }, [taskId]);
 
   const loadTimeData = useCallback(async () => {
-    const [total] = await Promise.all([getTaskTimeTotal(taskId)]);
-    setTimeTotal(total);
+    try {
+      const [total] = await Promise.all([getTaskTimeTotal(taskId)]);
+      setTimeTotal(total);
+    } catch (err) {
+      console.error("Failed to load time data", err);
+      setTimeTotal(null);
+    }
   }, [taskId]);
 
   useEffect(() => {
@@ -408,7 +427,7 @@ export function TaskDetailDrawer({
         <Tabs
           value={activeTab}
           onValueChange={setActiveTab}
-          className="flex min-h-0 flex-col"
+          className="flex min-h-[460px] flex-col"
         >
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
             <TabsList className="h-8 gap-0.5 bg-transparent p-0">
@@ -552,6 +571,14 @@ export function TaskDetailDrawer({
                   />
                 </FieldRow>
 
+                {/* Repeat — recurring task rule */}
+                <FieldRow label="Repeat">
+                  <RecurrencePicker
+                    value={task.recurrence_rule ?? null}
+                    onChange={(rule) => save({ recurrence_rule: rule })}
+                  />
+                </FieldRow>
+
                 {/* Estimate */}
                 <FieldRow label="Estimate">
                   <div className="flex items-center gap-1">
@@ -667,18 +694,18 @@ export function TaskDetailDrawer({
                 )}
                 {comments.map((c) => (
                   <div key={c.id} className="flex gap-2.5">
-                    {c.author.avatar_url ? (
+                    {c.author?.avatar_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={c.author.avatar_url} alt="" className="h-7 w-7 shrink-0 rounded-full" />
                     ) : (
                       <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-bold">
-                        {(c.author.full_name ?? "?")[0]}
+                        {(c.author?.full_name ?? "?")[0]}
                       </span>
                     )}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline gap-2">
                         <span className="text-[12px] font-semibold">
-                          {c.author.full_name ?? "Unknown"}
+                          {c.author?.full_name ?? "Unknown"}
                         </span>
                         <span className="text-[11px] text-muted-foreground">
                           {formatDistanceToNow(new Date(c.created_at), { addSuffix: true })}
@@ -1590,6 +1617,307 @@ function WatchersField({
             })}
           </div>
         )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// RecurrencePicker — configure how a task repeats after it's completed.
+// Keep the surface compact: a popover that exposes pattern, interval,
+// weekdays (for weekly), and an end condition.
+// ---------------------------------------------------------------------------
+
+const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+
+function RecurrencePicker({
+  value,
+  onChange,
+}: {
+  value: RecurrenceRule | null;
+  onChange: (rule: RecurrenceRule | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  // Local draft so users can tweak multiple fields, then the parent only
+  // re-saves on blur/close — cheap to reason about, and avoids a write storm.
+  const [draft, setDraft] = useState<RecurrenceRule>(
+    value ?? {
+      pattern: "weekly",
+      interval: 1,
+      anchor: "due_date",
+      ends: { type: "never" },
+    },
+  );
+
+  useEffect(() => {
+    if (value) setDraft(value);
+  }, [value]);
+
+  function commit(next: RecurrenceRule) {
+    setDraft(next);
+    onChange(next);
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "inline-flex h-7 w-full items-center gap-1.5 rounded-md border border-border bg-surface px-2 text-left text-[12.5px]",
+            "hover:border-accent/50 hover:bg-surface-alt transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+          )}
+        >
+          <Repeat
+            className={cn(
+              "h-3.5 w-3.5",
+              value ? "text-accent" : "text-muted-foreground/60",
+            )}
+          />
+          <span
+            className={cn(
+              "truncate",
+              value ? "font-medium text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {summarizeRule(value)}
+          </span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={6} className="w-72 p-3">
+        <div className="space-y-3">
+          {/* Header + clear */}
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Repeat
+            </span>
+            {value && (
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(null);
+                  setOpen(false);
+                }}
+                className="text-[11px] text-rose-500 hover:underline"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          {/* Pattern */}
+          <div className="grid grid-cols-4 gap-1">
+            {(["daily", "weekly", "monthly", "yearly"] as RecurrencePattern[]).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => commit({ ...draft, pattern: p })}
+                className={cn(
+                  "rounded-md border px-2 py-1 text-[11.5px] font-medium capitalize transition-colors",
+                  draft.pattern === p
+                    ? "border-accent bg-accent text-accent-foreground"
+                    : "border-border bg-surface text-muted-foreground hover:border-accent/50 hover:text-accent",
+                )}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+
+          {/* Interval */}
+          <div className="flex items-center gap-2">
+            <span className="text-[12px] text-muted-foreground">Every</span>
+            <input
+              type="number"
+              min={1}
+              value={draft.interval}
+              onChange={(e) => {
+                const n = Math.max(1, parseInt(e.target.value || "1", 10));
+                commit({ ...draft, interval: n });
+              }}
+              className="h-7 w-14 rounded-md border border-border bg-surface px-2 text-[13px] outline-none focus:border-accent"
+            />
+            <span className="text-[12px] text-muted-foreground">
+              {draft.pattern === "daily" && (draft.interval > 1 ? "days" : "day")}
+              {draft.pattern === "weekly" && (draft.interval > 1 ? "weeks" : "week")}
+              {draft.pattern === "monthly" && (draft.interval > 1 ? "months" : "month")}
+              {draft.pattern === "yearly" && (draft.interval > 1 ? "years" : "year")}
+            </span>
+          </div>
+
+          {/* Weekly: weekday chooser */}
+          {draft.pattern === "weekly" && (
+            <div>
+              <p className="mb-1 text-[11px] text-muted-foreground">On days</p>
+              <div className="flex gap-1">
+                {WEEKDAY_LABELS.map((label, dow) => {
+                  const on = (draft.days_of_week ?? []).includes(dow);
+                  return (
+                    <button
+                      key={dow}
+                      type="button"
+                      onClick={() => {
+                        const set = new Set(draft.days_of_week ?? []);
+                        if (set.has(dow)) set.delete(dow);
+                        else set.add(dow);
+                        commit({ ...draft, days_of_week: Array.from(set) });
+                      }}
+                      className={cn(
+                        "h-7 w-7 rounded-full text-[11px] font-semibold transition-colors",
+                        on
+                          ? "bg-accent text-accent-foreground"
+                          : "bg-surface-alt text-muted-foreground hover:bg-muted",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Monthly: day-of-month */}
+          {draft.pattern === "monthly" && (
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] text-muted-foreground">On day</span>
+              <input
+                type="number"
+                min={1}
+                max={31}
+                placeholder="—"
+                value={draft.day_of_month ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                  commit({ ...draft, day_of_month: v });
+                }}
+                className="h-7 w-16 rounded-md border border-border bg-surface px-2 text-[13px] outline-none focus:border-accent"
+              />
+              <span className="text-[11px] text-muted-foreground">
+                (falls back to month-end if shorter)
+              </span>
+            </div>
+          )}
+
+          {/* Anchor */}
+          <div>
+            <p className="mb-1 text-[11px] text-muted-foreground">Next occurrence from</p>
+            <div className="flex gap-1">
+              {(
+                [
+                  { value: "due_date", label: "Previous due" },
+                  { value: "completion", label: "Completion" },
+                ] as { value: "due_date" | "completion"; label: string }[]
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => commit({ ...draft, anchor: opt.value })}
+                  className={cn(
+                    "flex-1 rounded-md border px-2 py-1 text-[11.5px] font-medium transition-colors",
+                    (draft.anchor ?? "due_date") === opt.value
+                      ? "border-accent bg-accent text-accent-foreground"
+                      : "border-border bg-surface text-muted-foreground hover:border-accent/50 hover:text-accent",
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Ends */}
+          <div>
+            <p className="mb-1 text-[11px] text-muted-foreground">Ends</p>
+            <div className="space-y-1.5">
+              <label className="flex items-center gap-2 text-[12px]">
+                <input
+                  type="radio"
+                  checked={draft.ends.type === "never"}
+                  onChange={() => commit({ ...draft, ends: { type: "never" } })}
+                  className="accent-accent"
+                />
+                Never
+              </label>
+              <label className="flex items-center gap-2 text-[12px]">
+                <input
+                  type="radio"
+                  checked={draft.ends.type === "on"}
+                  onChange={() =>
+                    commit({
+                      ...draft,
+                      ends: {
+                        type: "on",
+                        date:
+                          draft.ends.type === "on"
+                            ? draft.ends.date
+                            : new Date(Date.now() + 90 * 864e5).toISOString().slice(0, 10),
+                      },
+                    })
+                  }
+                  className="accent-accent"
+                />
+                On date
+                {draft.ends.type === "on" && (
+                  <input
+                    type="date"
+                    value={draft.ends.date}
+                    onChange={(e) =>
+                      commit({
+                        ...draft,
+                        ends: { type: "on", date: e.target.value },
+                      })
+                    }
+                    className="h-6 rounded-md border border-border bg-surface px-1.5 text-[12px] outline-none focus:border-accent"
+                  />
+                )}
+              </label>
+              <label className="flex items-center gap-2 text-[12px]">
+                <input
+                  type="radio"
+                  checked={draft.ends.type === "after"}
+                  onChange={() =>
+                    commit({
+                      ...draft,
+                      ends: {
+                        type: "after",
+                        count: draft.ends.type === "after" ? draft.ends.count : 10,
+                      },
+                    })
+                  }
+                  className="accent-accent"
+                />
+                After
+                {draft.ends.type === "after" && (
+                  <input
+                    type="number"
+                    min={1}
+                    value={draft.ends.count}
+                    onChange={(e) =>
+                      commit({
+                        ...draft,
+                        ends: {
+                          type: "after",
+                          count: Math.max(1, parseInt(e.target.value || "1", 10)),
+                        },
+                      })
+                    }
+                    className="h-6 w-14 rounded-md border border-border bg-surface px-1.5 text-[12px] outline-none focus:border-accent"
+                  />
+                )}
+                <span className="text-muted-foreground">occurrences</span>
+              </label>
+            </div>
+          </div>
+
+          <p className="pt-1 text-[11px] text-muted-foreground">
+            Completing a recurring task rolls it forward to its next due date —
+            it reopens in the first &quot;to do&quot; status of the list, keeping its
+            checklists, comments, and watchers.
+          </p>
+        </div>
       </PopoverContent>
     </Popover>
   );

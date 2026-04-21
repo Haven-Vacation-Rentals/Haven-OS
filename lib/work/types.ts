@@ -160,6 +160,30 @@ export interface FieldValue<T> {
   value: T;
 }
 
+// --- Recurrence -------------------------------------------------------------
+
+export type RecurrencePattern = "daily" | "weekly" | "monthly" | "yearly";
+
+export type RecurrenceAnchor = "due_date" | "completion";
+
+export type RecurrenceEnd =
+  | { type: "never" }
+  | { type: "on"; date: string } // ISO yyyy-mm-dd
+  | { type: "after"; count: number };
+
+export interface RecurrenceRule {
+  pattern: RecurrencePattern;
+  /** every N units (default 1) */
+  interval: number;
+  /** 0=Sun … 6=Sat — only meaningful for weekly */
+  days_of_week?: number[];
+  /** 1..31 — only meaningful for monthly */
+  day_of_month?: number;
+  /** what "next occurrence" is computed from — defaults to "due_date" */
+  anchor?: RecurrenceAnchor;
+  ends: RecurrenceEnd;
+}
+
 export interface Task {
   id: string;
   list_id: string;
@@ -180,6 +204,10 @@ export interface Task {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Optional repeat rule. When set, completing the task rolls it forward. */
+  recurrence_rule: RecurrenceRule | null;
+  /** How many times this recurring series has rolled over. */
+  recurrence_count: number;
 }
 
 export interface Comment {
@@ -322,5 +350,6 @@ export type UpdateTaskInput = Partial<
     | "archived_at"
     | "completed_at"
     | "parent_id"
+    | "recurrence_rule"
   >
 >;

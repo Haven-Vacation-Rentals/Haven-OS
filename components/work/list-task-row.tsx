@@ -24,7 +24,6 @@ import {
   ChevronDown,
   Calendar,
   UserCircle2,
-  GripVertical,
   Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -173,16 +172,6 @@ export function ListTaskRow({
       >
         {/* ── Left sticky section ───────────────────────────────────────── */}
         <div className="sticky left-0 z-10 flex min-w-0 flex-1 items-center bg-inherit">
-          {/* Drag handle (visual only — DnD wired in parent SortableTaskRow) */}
-          <span
-            className={cn(
-              "flex h-full w-5 shrink-0 cursor-grab items-center justify-center",
-              "opacity-0 group-hover:opacity-100 transition-opacity",
-            )}
-          >
-            <GripVertical className="h-3 w-3 text-muted-foreground/40" />
-          </span>
-
           {/* Expand/collapse subtasks caret — also acts as nest drop zone.
               When a drag hovers here, we scale up and show a strong ring so
               the user knows they're about to nest-as-subtask (vs. reorder). */}
