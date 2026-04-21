@@ -329,7 +329,7 @@ export function TaskDetailDrawer({
             exit={{ opacity: 0, scale: 0.99, y: 2 }}
             transition={{ duration: 0.14, ease: [0.2, 0.8, 0.2, 1] }}
             onClick={(e) => e.stopPropagation()}
-            className="flex h-full max-h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
+            className="flex max-h-[92vh] min-h-[420px] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
           >
             <div className="flex items-center gap-2 border-b border-border px-4 py-3">
               <div className="h-5 w-64 animate-pulse rounded bg-surface-alt" />
@@ -379,7 +379,7 @@ export function TaskDetailDrawer({
           exit={{ opacity: 0, scale: 0.99, y: 2 }}
           transition={{ duration: 0.14, ease: [0.2, 0.8, 0.2, 1] }}
           onClick={(e) => e.stopPropagation()}
-          className="flex h-full max-h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
+          className="flex max-h-[92vh] min-h-[420px] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
         >
         {/* ── Header ─────────────────────────────────────────────────── */}
         <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
@@ -405,7 +405,11 @@ export function TaskDetailDrawer({
         </div>
 
         {/* ── Tabs ───────────────────────────────────────────────────── */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col">
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
             <TabsList className="h-8 gap-0.5 bg-transparent p-0">
               {[
@@ -439,12 +443,12 @@ export function TaskDetailDrawer({
           </div>
 
           {/* ── Details Tab ──────────────────────────────────────────── */}
-          <TabsContent value="details" className="mt-0 flex-1 min-h-0 overflow-y-auto">
-            <div className="grid h-full grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <TabsContent value="details" className="mt-0 min-h-0 flex-1 overflow-y-auto">
+            <div className="grid grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_320px]">
               {/* LEFT — primary content (description) */}
-              <div className="flex min-h-0 flex-col gap-5 px-6 py-5 pb-10">
-                {/* Description — top of left column, grows to fill */}
-                <div className="flex flex-1 flex-col">
+              <div className="flex flex-col gap-5 px-6 py-5">
+                {/* Description */}
+                <div className="flex flex-col">
                   <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Description
                   </p>
@@ -454,7 +458,7 @@ export function TaskDetailDrawer({
                     users={allUsers}
                     placeholder="Add a description… (type @ to mention)"
                     autoGrow
-                    rows={10}
+                    rows={4}
                     maxHeight={700}
                     className="py-2"
                   />
@@ -481,7 +485,7 @@ export function TaskDetailDrawer({
               </div>
 
               {/* RIGHT — metadata sidebar */}
-              <div className="flex min-h-0 flex-col gap-4 border-t border-border px-6 py-5 pb-10 lg:border-l lg:border-t-0 lg:bg-surface-alt/20">
+              <div className="flex flex-col gap-4 border-t border-border px-6 py-5 lg:border-l lg:border-t-0 lg:bg-surface-alt/20">
                 {/* Status */}
                 <FieldRow label="Status">
                   <StatusPickerPopover
