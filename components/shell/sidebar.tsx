@@ -60,8 +60,11 @@ export function Sidebar({ user }: { user: HavenUser }) {
   return (
     <aside
       className={cn(
-        "sticky top-0 flex h-dvh w-60 shrink-0 flex-col border-r border-border",
-        "bg-surface-alt/40 backdrop-blur-sm",
+        // On lg+ the sidebar is sticky in the page flow.
+        // On <lg it's placed inside the AppShell drawer which handles
+        // positioning, so `h-dvh w-full` fills that drawer.
+        "flex h-dvh w-full shrink-0 flex-col border-r border-border",
+        "bg-surface-alt/95 backdrop-blur-sm lg:sticky lg:top-0 lg:w-60 lg:bg-surface-alt/40",
       )}
     >
       {/* Brand header */}

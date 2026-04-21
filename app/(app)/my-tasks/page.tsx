@@ -44,10 +44,10 @@ export default async function MyTasksPage() {
   const members = allMembers.filter((m) => memberIdSet.has(m.id));
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-3 sm:gap-4">
       <header className="flex items-baseline justify-between gap-4">
         <div>
-          <h1 className="font-heading text-display-3 font-bold">My Tasks</h1>
+          <h1 className="font-heading text-display-4 font-bold sm:text-display-3">My Tasks</h1>
           <p className="text-[13px] text-muted-foreground">
             Your personal task list — private to you.
           </p>

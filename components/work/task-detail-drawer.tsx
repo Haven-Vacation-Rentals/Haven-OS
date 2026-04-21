@@ -339,7 +339,7 @@ export function TaskDetailDrawer({
           onClick={onClose}
         />
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+          className="fixed inset-0 z-50 flex items-stretch justify-center sm:items-center sm:p-4 md:p-6"
           onClick={onClose}
         >
           <motion.div
@@ -348,7 +348,7 @@ export function TaskDetailDrawer({
             exit={{ opacity: 0, scale: 0.99, y: 2 }}
             transition={{ duration: 0.14, ease: [0.2, 0.8, 0.2, 1] }}
             onClick={(e) => e.stopPropagation()}
-            className="flex max-h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
+            className="flex h-dvh max-h-dvh w-full flex-col overflow-hidden border-border bg-surface shadow-2xl sm:h-auto sm:max-h-[92vh] sm:max-w-[1200px] sm:rounded-card sm:border"
           >
             <div className="flex items-center gap-2 border-b border-border px-4 py-3">
               <div className="h-5 w-64 animate-pulse rounded bg-surface-alt" />
@@ -398,7 +398,7 @@ export function TaskDetailDrawer({
           exit={{ opacity: 0, scale: 0.99, y: 2 }}
           transition={{ duration: 0.14, ease: [0.2, 0.8, 0.2, 1] }}
           onClick={(e) => e.stopPropagation()}
-          className="flex max-h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
+          className="flex h-dvh max-h-dvh w-full flex-col overflow-hidden border-border bg-surface shadow-2xl sm:h-auto sm:max-h-[92vh] sm:max-w-[1200px] sm:rounded-card sm:border"
         >
         {/* ── Header ─────────────────────────────────────────────────── */}
         <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
@@ -427,10 +427,10 @@ export function TaskDetailDrawer({
         <Tabs
           value={activeTab}
           onValueChange={setActiveTab}
-          className="flex min-h-[460px] flex-col"
+          className="flex flex-1 flex-col sm:min-h-[460px] sm:flex-none"
         >
-          <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
-            <TabsList className="h-8 gap-0.5 bg-transparent p-0">
+          <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-border px-4 py-2">
+            <TabsList className="h-8 shrink-0 gap-0.5 bg-transparent p-0">
               {[
                 { value: "details", label: "Details", icon: <AlignLeft className="h-3 w-3" />, hint: "1" },
                 { value: "checklist", label: "Checklist", icon: <CheckSquare2 className="h-3 w-3" />, hint: "2" },
@@ -462,10 +462,13 @@ export function TaskDetailDrawer({
           </div>
 
           {/* ── Details Tab ──────────────────────────────────────────── */}
-          <TabsContent value="details" className="mt-0 max-h-[calc(92vh-120px)] overflow-y-auto">
+          <TabsContent
+            value="details"
+            className="mt-0 max-h-[calc(100dvh-112px)] overflow-y-auto sm:max-h-[calc(92vh-120px)]"
+          >
             <div className="grid grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_320px]">
               {/* LEFT — primary content (description) */}
-              <div className="flex flex-col gap-5 px-6 py-5">
+              <div className="flex flex-col gap-4 px-4 py-4 sm:gap-5 sm:px-6 sm:py-5">
                 {/* Description */}
                 <div className="flex flex-col">
                   <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -504,7 +507,7 @@ export function TaskDetailDrawer({
               </div>
 
               {/* RIGHT — metadata sidebar */}
-              <div className="flex flex-col gap-4 border-t border-border px-6 py-5 lg:border-l lg:border-t-0 lg:bg-surface-alt/20">
+              <div className="flex flex-col gap-3 border-t border-border px-4 py-4 sm:gap-4 sm:px-6 sm:py-5 lg:border-l lg:border-t-0 lg:bg-surface-alt/20">
                 {/* Status */}
                 <FieldRow label="Status">
                   <StatusPickerPopover
@@ -654,7 +657,10 @@ export function TaskDetailDrawer({
           </TabsContent>
 
           {/* ── Checklist Tab ────────────────────────────────────────── */}
-          <TabsContent value="checklist" className="mt-0 max-h-[calc(92vh-120px)] overflow-y-auto">
+          <TabsContent
+            value="checklist"
+            className="mt-0 max-h-[calc(100dvh-112px)] overflow-y-auto sm:max-h-[calc(92vh-120px)]"
+          >
             <div className="h-full">
               <div className="space-y-4 px-4 py-4 pb-10">
                 {checklists.map((cl) => (
@@ -684,7 +690,10 @@ export function TaskDetailDrawer({
           </TabsContent>
 
           {/* ── Comments Tab ─────────────────────────────────────────── */}
-          <TabsContent value="comments" className="mt-0 flex max-h-[calc(92vh-120px)] flex-col">
+          <TabsContent
+            value="comments"
+            className="mt-0 flex max-h-[calc(100dvh-112px)] flex-col sm:max-h-[calc(92vh-120px)]"
+          >
             <div className="flex-1 min-h-0 overflow-y-auto">
               <div className="space-y-4 px-4 py-4">
                 {comments.length === 0 && (
@@ -756,7 +765,10 @@ export function TaskDetailDrawer({
           </TabsContent>
 
           {/* ── Activity Tab ─────────────────────────────────────────── */}
-          <TabsContent value="activity" className="mt-0 max-h-[calc(92vh-120px)] overflow-y-auto">
+          <TabsContent
+            value="activity"
+            className="mt-0 max-h-[calc(100dvh-112px)] overflow-y-auto sm:max-h-[calc(92vh-120px)]"
+          >
             <div className="h-full">
               <div className="space-y-1 px-4 py-4 pb-10">
                 {activity.length === 0 && (
@@ -798,7 +810,10 @@ export function TaskDetailDrawer({
           </TabsContent>
 
           {/* ── Time Tracking Tab ────────────────────────────────────── */}
-          <TabsContent value="time" className="mt-0 max-h-[calc(92vh-120px)] overflow-y-auto">
+          <TabsContent
+            value="time"
+            className="mt-0 max-h-[calc(100dvh-112px)] overflow-y-auto sm:max-h-[calc(92vh-120px)]"
+          >
             <div className="h-full">
               <div className="space-y-4 px-4 py-4 pb-10">
                 {/* Total */}

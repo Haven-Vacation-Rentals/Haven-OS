@@ -110,9 +110,9 @@ export function BulkActionsBar({
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 80, opacity: 0 }}
           transition={{ type: "spring", stiffness: 300, damping: 30 }}
-          className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2"
+          className="fixed bottom-4 left-1/2 z-50 w-[calc(100vw-1.5rem)] -translate-x-1/2 sm:bottom-6 sm:w-auto"
         >
-          <div className="flex items-center gap-2 rounded-2xl border border-border bg-surface px-4 py-3 shadow-xl ring-1 ring-black/5">
+          <div className="flex items-center gap-2 overflow-x-auto rounded-2xl border border-border bg-surface px-3 py-2 shadow-xl ring-1 ring-black/5 sm:px-4 sm:py-3">
             {/* Count badge */}
             <div className="flex items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-1">
               <CheckCircle2 className="h-3.5 w-3.5 text-accent" />

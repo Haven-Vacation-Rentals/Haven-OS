@@ -242,10 +242,10 @@ function SortableTaskRow({
         />
       )}
 
-      {/* Checkbox column */}
+      {/* Checkbox column — hidden on phones to save room for the title */}
       <div
         className={cn(
-          "flex w-9 shrink-0 items-center justify-center border-r border-border/20 transition-opacity",
+          "hidden w-9 shrink-0 items-center justify-center border-r border-border/20 transition-opacity sm:flex",
           "opacity-0 group-hover:opacity-100",
           isSelected && "opacity-100",
         )}
@@ -265,7 +265,7 @@ function SortableTaskRow({
         {...listeners}
         aria-label="Drag to reorder"
         className={cn(
-          "flex w-6 shrink-0 touch-none select-none items-center justify-center",
+          "hidden w-6 shrink-0 touch-none select-none items-center justify-center sm:flex",
           "cursor-grab text-muted-foreground/30 hover:text-muted-foreground/80 active:cursor-grabbing",
           "opacity-0 group-hover:opacity-100 transition-opacity",
           isDragging && "opacity-100 cursor-grabbing",
@@ -295,8 +295,8 @@ function SortableTaskRow({
             />
           </div>
 
-          {/* Status pill column */}
-          <div className="flex w-28 shrink-0 items-center border-l border-border/20 px-2">
+          {/* Status pill column — hidden on xs since we already show the status circle in the title row */}
+          <div className="hidden w-28 shrink-0 items-center border-l border-border/20 px-2 sm:flex">
             <StatusPickerPopover
               statuses={statuses}
               currentStatus={currentStatus}
@@ -313,11 +313,11 @@ function SortableTaskRow({
             </StatusPickerPopover>
           </div>
 
-          {/* Custom field columns */}
+          {/* Custom field columns — hidden below lg, users can still edit them in the drawer */}
           {fieldDefs.map((fd) => (
             <div
               key={fd.id}
-              className="flex w-28 shrink-0 items-center border-l border-border/20 px-2"
+              className="hidden w-28 shrink-0 items-center border-l border-border/20 px-2 lg:flex"
               onClick={(e) => e.stopPropagation()}
             >
               <CustomFieldCell
@@ -1028,14 +1028,14 @@ export function ListViewTable({
             </button>
           ))}
 
-          <div className="relative ml-auto">
+          <div className="relative w-full sm:ml-auto sm:w-auto">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               ref={searchRef}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search tasks…"
-              className="h-8 w-44 pl-8 text-xs"
+              className="h-8 w-full pl-8 text-xs sm:w-44"
             />
           </div>
         </div>
@@ -1044,10 +1044,10 @@ export function ListViewTable({
       {/* ── Table ────────────────────────────────────────────────────────── */}
       <div className="flex min-h-0 flex-1">
         <div className="flex-1 overflow-auto">
-          {/* Column header */}
+          {/* Column header — column visibility matches row-level breakpoints */}
           <div className="sticky top-0 z-20 flex items-center border-b border-border bg-surface-alt/80 backdrop-blur-sm text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-            {/* Checkbox + drag columns */}
-            <div className="flex w-9 shrink-0 items-center justify-center border-r border-border/30 px-2 py-1.5">
+            {/* Checkbox + drag columns — hidden on phones */}
+            <div className="hidden w-9 shrink-0 items-center justify-center border-r border-border/30 px-2 py-1.5 sm:flex">
               <input
                 type="checkbox"
                 checked={selectedIds.size === tasks.length && tasks.length > 0}
@@ -1058,25 +1058,35 @@ export function ListViewTable({
                 className="h-3.5 w-3.5 rounded accent-accent cursor-pointer"
               />
             </div>
-            <div className="w-6 shrink-0" />
+            <div className="hidden w-6 shrink-0 sm:block" />
 
             {/* Task title column */}
             <div className="sticky left-0 z-10 min-w-0 flex-1 bg-inherit px-3 py-1.5">
               Task
             </div>
 
-            {/* Fixed columns */}
+            {/* Fixed columns — each hides independently at the same breakpoint as its cell */}
             <div className="flex shrink-0 items-center">
-              <ColHeader width={112}>Status</ColHeader>
-              <ColHeader width={80}>Priority</ColHeader>
-              <ColHeader width={72}>Assignee</ColHeader>
-              <ColHeader width={96}>Due Date</ColHeader>
-              <ColHeader width={56}>Sub</ColHeader>
-              {/* Dynamic field columns */}
+              <div className="hidden sm:block">
+                <ColHeader width={112}>Status</ColHeader>
+              </div>
+              <div className="hidden sm:block">
+                <ColHeader width={80}>Priority</ColHeader>
+              </div>
+              <div className="hidden md:block">
+                <ColHeader width={72}>Assignee</ColHeader>
+              </div>
+              <div className="hidden sm:block">
+                <ColHeader width={96}>Due Date</ColHeader>
+              </div>
+              <div className="hidden md:block">
+                <ColHeader width={56}>Sub</ColHeader>
+              </div>
+              {/* Dynamic field columns — lg+ only */}
               {fieldDefs.map((fd) => (
-                <ColHeader key={fd.id} width={112}>
-                  {fd.name}
-                </ColHeader>
+                <div key={fd.id} className="hidden lg:block">
+                  <ColHeader width={112}>{fd.name}</ColHeader>
+                </div>
               ))}
             </div>
           </div>

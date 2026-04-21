@@ -822,14 +822,14 @@ export function GlobalTasksView({
 
       {/* Top-bar controls */}
       <div className="flex flex-wrap items-center gap-2">
-        {/* Search */}
-        <div className="relative">
+        {/* Search — full width on phones */}
+        <div className="relative w-full sm:w-auto">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={localSearch}
             onChange={(e) => setLocalSearch(e.target.value)}
             placeholder="Search tasks…"
-            className="h-8 w-52 pl-8 text-[13px]"
+            className="h-8 w-full pl-8 text-[13px] sm:w-52"
           />
         </div>
 

@@ -32,13 +32,13 @@ export function UserMenu({ user }: { user: HavenUser }) {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-surface-alt"
+        className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-surface-alt sm:px-2"
       >
         <Avatar user={user} />
-        <span className="text-[13px] font-semibold">
+        <span className="hidden text-[13px] font-semibold sm:inline">
           {user.name.split(" ")[0]}
         </span>
-        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+        <ChevronDown className="hidden h-3.5 w-3.5 text-muted-foreground sm:inline" />
       </button>
 
       {open ? (

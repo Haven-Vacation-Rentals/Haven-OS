@@ -270,31 +270,37 @@ export function ListTaskRow({
           </button>
         </div>
 
-        {/* ── Right fields strip ────────────────────────────────────────── */}
+        {/* ── Right fields strip — progressively hidden on small screens ─── */}
         <div className="flex shrink-0 items-center">
-          {/* Priority */}
-          <PriorityCell
-            value={task.priority}
-            onChange={(v) => onUpdate(task.id, { priority: v })}
-          />
+          {/* Priority — visible from sm+ */}
+          <div className="hidden sm:contents">
+            <PriorityCell
+              value={task.priority}
+              onChange={(v) => onUpdate(task.id, { priority: v })}
+            />
+          </div>
 
-          {/* Assignees */}
-          <AssigneeCell
-            taskId={task.id}
-            assignees={task.assignees}
-            allMembers={members}
-          />
+          {/* Assignees — visible from md+ */}
+          <div className="hidden md:contents">
+            <AssigneeCell
+              taskId={task.id}
+              assignees={task.assignees}
+              allMembers={members}
+            />
+          </div>
 
-          {/* Due date */}
-          <DueDateCell
-            value={task.due_date}
-            isDone={isDone}
-            onChange={(v) => onUpdate(task.id, { due_date: v })}
-          />
+          {/* Due date — visible from sm+, on mobile users can set it in the drawer */}
+          <div className="hidden sm:contents">
+            <DueDateCell
+              value={task.due_date}
+              isDone={isDone}
+              onChange={(v) => onUpdate(task.id, { due_date: v })}
+            />
+          </div>
 
-          {/* Subtask count */}
+          {/* Subtask count — visible from md+ */}
           <div
-            className="flex items-center justify-center border-l border-border/30 px-2 py-2"
+            className="hidden items-center justify-center border-l border-border/30 px-2 py-2 md:flex"
             style={{ width: 56 }}
           >
             {subsTot > 0 ? (

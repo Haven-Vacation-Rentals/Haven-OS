@@ -1,7 +1,6 @@
 export const dynamic = "force-dynamic";
 
-import { Sidebar } from "@/components/shell/sidebar";
-import { Topbar } from "@/components/shell/topbar";
+import { AppShell } from "@/components/shell/app-shell";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { requireUser } from "@/lib/auth/user";
 import { Toaster } from "sonner";
@@ -14,14 +13,10 @@ export default async function AppLayout({
   const user = await requireUser();
 
   return (
-    <div className="flex min-h-dvh">
-      <Sidebar user={user} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar user={user} />
-        <main className="flex-1 px-8 py-8">{children}</main>
-      </div>
+    <>
+      <AppShell user={user}>{children}</AppShell>
       <CommandPalette />
       <Toaster richColors position="bottom-right" />
-    </div>
+    </>
   );
 }

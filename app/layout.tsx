@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { raleway } from "@/lib/fonts";
 import { ThemeProvider } from "@/components/shell/theme-provider";
 import "./globals.css";
@@ -6,6 +6,17 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Haven OS",
   description: "The operating system for Haven Vacation Rentals.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#161817" },
+  ],
 };
 
 export default function RootLayout({
