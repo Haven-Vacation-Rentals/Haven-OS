@@ -329,7 +329,7 @@ export function TaskDetailDrawer({
             exit={{ opacity: 0, scale: 0.99, y: 2 }}
             transition={{ duration: 0.14, ease: [0.2, 0.8, 0.2, 1] }}
             onClick={(e) => e.stopPropagation()}
-            className="flex max-h-[92vh] min-h-[420px] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
+            className="flex max-h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
           >
             <div className="flex items-center gap-2 border-b border-border px-4 py-3">
               <div className="h-5 w-64 animate-pulse rounded bg-surface-alt" />
@@ -379,7 +379,7 @@ export function TaskDetailDrawer({
           exit={{ opacity: 0, scale: 0.99, y: 2 }}
           transition={{ duration: 0.14, ease: [0.2, 0.8, 0.2, 1] }}
           onClick={(e) => e.stopPropagation()}
-          className="flex max-h-[92vh] min-h-[420px] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
+          className="flex max-h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
         >
         {/* ── Header ─────────────────────────────────────────────────── */}
         <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
@@ -408,7 +408,7 @@ export function TaskDetailDrawer({
         <Tabs
           value={activeTab}
           onValueChange={setActiveTab}
-          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          className="flex min-h-0 flex-col"
         >
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
             <TabsList className="h-8 gap-0.5 bg-transparent p-0">
@@ -443,7 +443,7 @@ export function TaskDetailDrawer({
           </div>
 
           {/* ── Details Tab ──────────────────────────────────────────── */}
-          <TabsContent value="details" className="mt-0 min-h-0 flex-1 overflow-y-auto">
+          <TabsContent value="details" className="mt-0 max-h-[calc(92vh-120px)] overflow-y-auto">
             <div className="grid grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_320px]">
               {/* LEFT — primary content (description) */}
               <div className="flex flex-col gap-5 px-6 py-5">
@@ -627,7 +627,7 @@ export function TaskDetailDrawer({
           </TabsContent>
 
           {/* ── Checklist Tab ────────────────────────────────────────── */}
-          <TabsContent value="checklist" className="mt-0 flex-1 min-h-0 overflow-y-auto">
+          <TabsContent value="checklist" className="mt-0 max-h-[calc(92vh-120px)] overflow-y-auto">
             <div className="h-full">
               <div className="space-y-4 px-4 py-4 pb-10">
                 {checklists.map((cl) => (
@@ -657,7 +657,7 @@ export function TaskDetailDrawer({
           </TabsContent>
 
           {/* ── Comments Tab ─────────────────────────────────────────── */}
-          <TabsContent value="comments" className="mt-0 flex-1 min-h-0 flex flex-col">
+          <TabsContent value="comments" className="mt-0 flex max-h-[calc(92vh-120px)] flex-col">
             <div className="flex-1 min-h-0 overflow-y-auto">
               <div className="space-y-4 px-4 py-4">
                 {comments.length === 0 && (
@@ -729,7 +729,7 @@ export function TaskDetailDrawer({
           </TabsContent>
 
           {/* ── Activity Tab ─────────────────────────────────────────── */}
-          <TabsContent value="activity" className="mt-0 flex-1 min-h-0 overflow-y-auto">
+          <TabsContent value="activity" className="mt-0 max-h-[calc(92vh-120px)] overflow-y-auto">
             <div className="h-full">
               <div className="space-y-1 px-4 py-4 pb-10">
                 {activity.length === 0 && (
@@ -771,7 +771,7 @@ export function TaskDetailDrawer({
           </TabsContent>
 
           {/* ── Time Tracking Tab ────────────────────────────────────── */}
-          <TabsContent value="time" className="mt-0 flex-1 min-h-0 overflow-y-auto">
+          <TabsContent value="time" className="mt-0 max-h-[calc(92vh-120px)] overflow-y-auto">
             <div className="h-full">
               <div className="space-y-4 px-4 py-4 pb-10">
                 {/* Total */}
