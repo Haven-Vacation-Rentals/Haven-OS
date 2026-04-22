@@ -9,6 +9,7 @@ import {
   Home,
   Settings,
   Sparkles,
+  Target,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,7 @@ const sections: NavSection[] = [
     heading: "Overview",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Northstar Scorecard", href: "/scorecard", icon: Target },
     ],
   },
   {
