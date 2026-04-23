@@ -13,6 +13,7 @@ import {
   Target,
   ShieldAlert,
   ClipboardList,
+  Bot,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -35,6 +36,7 @@ function buildSections(isHrAdmin: boolean): NavSection[] {
   const adminItems: NavItem[] = [];
   if (isHrAdmin) {
     adminItems.push({ label: "Onboarding", href: "/onboarding", icon: ClipboardList });
+    adminItems.push({ label: "Agents", href: "/agents", icon: Bot, badge: "Beta" });
     adminItems.push({ label: "HR", href: "/hr", icon: ShieldAlert });
   }
   adminItems.push({ label: "Settings", href: "/settings", icon: Settings });

@@ -483,7 +483,6 @@ export async function POST(req: Request) {
           const response = await getAnthropicClient().messages.create({
             model: "claude-opus-4-7",
             max_tokens: 8096,
-            // @ts-expect-error — "adaptive" is valid at runtime; SDK 0.54 types only know "enabled"/"disabled"
             thinking: { type: "adaptive" },
             system: [
               {
