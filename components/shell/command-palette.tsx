@@ -48,7 +48,7 @@ export function CommandPalette() {
   const entries: CommandEntry[] = [
     {
       id: "nav-dashboard",
-      label: "Go to Dashboard",
+      label: "Go to The Board",
       group: "Navigate",
       icon: LayoutDashboard,
       action: go("/dashboard"),

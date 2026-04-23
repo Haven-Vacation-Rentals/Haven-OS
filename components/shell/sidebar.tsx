@@ -33,7 +33,7 @@ const sections: NavSection[] = [
   {
     heading: "Overview",
     items: [
-      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "The Board", href: "/dashboard", icon: LayoutDashboard },
       { label: "Northstar Scorecard", href: "/scorecard", icon: Target },
     ],
   },
