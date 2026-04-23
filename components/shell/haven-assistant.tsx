@@ -1,8 +1,25 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Sparkles, X, Send, Loader2, ChevronDown } from "lucide-react";
+import { Sparkles, X, Send, Loader2, Database, CheckSquare, Building2, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const TOOL_LABELS: Record<string, { label: string; icon: React.ElementType }> = {
+  get_active_scorecard:   { label: "Reading scorecard…",    icon: BarChart3 },
+  list_scorecard_months:  { label: "Listing months…",       icon: BarChart3 },
+  get_scorecard_month:    { label: "Loading month…",        icon: BarChart3 },
+  update_scorecard_cell:  { label: "Updating scorecard…",   icon: BarChart3 },
+  search_tasks:           { label: "Searching tasks…",      icon: CheckSquare },
+  get_task:               { label: "Loading task…",         icon: CheckSquare },
+  get_my_tasks:           { label: "Getting your tasks…",   icon: CheckSquare },
+  list_spaces:            { label: "Loading spaces…",       icon: CheckSquare },
+  get_team_members:       { label: "Getting team…",         icon: CheckSquare },
+  create_task:            { label: "Creating task…",        icon: CheckSquare },
+  update_task:            { label: "Updating task…",        icon: CheckSquare },
+  add_task_comment:       { label: "Adding comment…",       icon: CheckSquare },
+  list_properties:        { label: "Loading properties…",   icon: Building2 },
+  get_property:           { label: "Loading property…",     icon: Building2 },
+};
 
 type Role = "user" | "assistant";
 
@@ -20,12 +37,19 @@ interface HavenAssistantProps {
 }
 
 function ToolCallBadge({ names }: { names: string[] }) {
-  const label = names.map((n) => n.replace(/_/g, " ")).join(", ");
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent">
-      <Loader2 className="h-2.5 w-2.5 animate-spin" />
-      {label}
-    </span>
+    <div className="flex flex-col gap-1">
+      {names.map((n) => {
+        const meta = TOOL_LABELS[n] ?? { label: n.replace(/_/g, " ") + "…", icon: Database };
+        const Icon = meta.icon;
+        return (
+          <span key={n} className="inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent">
+            <Icon className="h-3 w-3 shrink-0" />
+            {meta.label}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 
@@ -62,10 +86,11 @@ function MessageBubble({ msg }: { msg: Message }) {
 }
 
 const SUGGESTED_PROMPTS = [
-  "How are we tracking against targets this month?",
-  "Which metrics are red or yellow?",
+  "What are my open tasks this week?",
+  "Which scorecard metrics are red or yellow?",
+  "How many live properties do we have?",
+  "Show me all overdue tasks",
   "Summarize this month's scorecard",
-  "Show me last month's performance",
 ];
 
 export function HavenAssistant({ open, onClose }: HavenAssistantProps) {
