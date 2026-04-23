@@ -1,9 +1,18 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+function getAnthropicClient(): Anthropic {
+  const key = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!key) {
+    throw new Error(
+      "ANTHROPIC_API_KEY is not set. Add it to Vercel → Settings → Environment Variables (Production + Preview) and redeploy.",
+    );
+  }
+  return new Anthropic({ apiKey: key });
+}
 
 const SYSTEM_PROMPT = `You are Haven Assistant, the AI copilot for Haven Vacation Rentals' internal operating system (Haven OS).
 
@@ -135,6 +144,7 @@ export async function POST(req: Request) {
       };
 
       try {
+        const anthropic = getAnthropicClient();
         let currentMessages: Anthropic.MessageParam[] = messages;
 
         // Agentic loop — keep going until no more tool calls
