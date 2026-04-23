@@ -142,12 +142,12 @@ export async function POST(req: Request) {
           const response = await anthropic.messages.create({
             model: "claude-opus-4-7",
             max_tokens: 4096,
+            // @ts-expect-error — "adaptive" is valid at runtime; SDK 0.54 types only know "enabled"/"disabled"
             thinking: { type: "adaptive" },
             system: [
               {
                 type: "text",
                 text: SYSTEM_PROMPT,
-                // @ts-expect-error — cache_control is valid at runtime
                 cache_control: { type: "ephemeral" },
               },
             ],
@@ -195,7 +195,7 @@ export async function POST(req: Request) {
           }
 
           // Build assistant message for history
-          const assistantContent: Anthropic.ContentBlock[] = [];
+          const assistantContent: Anthropic.ContentBlockParam[] = [];
           if (assistantText) {
             assistantContent.push({ type: "text", text: assistantText });
           }
