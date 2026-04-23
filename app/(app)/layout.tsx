@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/shell/sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { requireUser } from "@/lib/auth/user";
+import { isHrAdmin } from "@/lib/hr/actions";
 import { Toaster } from "sonner";
 
 export default async function AppLayout({
@@ -12,10 +13,11 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const user = await requireUser();
+  const hrAdmin = await isHrAdmin(user.email);
 
   return (
     <div className="flex min-h-dvh">
-      <Sidebar user={user} />
+      <Sidebar user={user} isHrAdmin={hrAdmin} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar user={user} />
         <main className="flex-1 px-8 py-8">{children}</main>

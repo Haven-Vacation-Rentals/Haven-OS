@@ -3,9 +3,11 @@ import { requireUser } from "@/lib/auth/user";
 import { isConfigured as isHostawayConfigured } from "@/lib/hostaway/client";
 import { HostawayIntegrationCard } from "@/components/settings/hostaway-integration-card";
 import { BoardSettingsCard } from "@/components/settings/board-settings-card";
+import { HrAdminSettingsCard } from "@/components/settings/hr-admin-settings-card";
 import { createClient } from "@/lib/supabase/server";
 import { BOARD_KEYS } from "@/lib/board/types";
 import { isAdmin, listAdmins } from "@/lib/board/actions";
+import { isHrAdmin, listHrAdmins } from "@/lib/hr/actions";
 import type { DbBoardSetting } from "@/lib/board/types";
 
 export const dynamic = "force-dynamic";
@@ -34,8 +36,13 @@ async function loadBoardSettings(): Promise<{
 export default async function SettingsPage() {
   const user = await requireUser();
   const hostawayConfigured = isHostawayConfigured();
-  const userIsAdmin = await isAdmin(user.email);
-  const { loomUrl, loomTitle, admins } = await loadBoardSettings();
+  const [userIsAdmin, userIsHrAdmin, { loomUrl, loomTitle, admins }] =
+    await Promise.all([
+      isAdmin(user.email),
+      isHrAdmin(user.email),
+      loadBoardSettings(),
+    ]);
+  const hrAdmins = userIsHrAdmin ? await listHrAdmins() : [];
 
   return (
     <div className="mx-auto flex w-full max-w-[720px] flex-col gap-6">
@@ -52,6 +59,14 @@ export default async function SettingsPage() {
           initialLoomUrl={loomUrl}
           initialLoomTitle={loomTitle}
           initialAdmins={admins}
+          currentUserEmail={user.email}
+        />
+      )}
+
+      {/* HR (HR admins only) */}
+      {userIsHrAdmin && (
+        <HrAdminSettingsCard
+          initialAdmins={hrAdmins}
           currentUserEmail={user.email}
         />
       )}

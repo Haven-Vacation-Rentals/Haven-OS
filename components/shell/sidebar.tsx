@@ -11,6 +11,7 @@ import {
   Settings,
   Sparkles,
   Target,
+  ShieldAlert,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -29,36 +30,49 @@ type NavItem = {
 
 type NavSection = { heading: string; items: NavItem[] };
 
-const sections: NavSection[] = [
-  {
-    heading: "Overview",
-    items: [
-      { label: "The Board", href: "/dashboard", icon: LayoutDashboard },
-      { label: "Northstar Scorecard", href: "/scorecard", icon: Target },
-    ],
-  },
-  {
-    heading: "Work",
-    items: [
-      { label: "My Tasks", href: "/my-tasks", icon: ListTodo },
-      { label: "Project Management", href: "/work", icon: FolderKanban },
-    ],
-  },
-  {
-    heading: "Operations",
-    items: [
-      { label: "Properties", href: "/properties", icon: Home },
-    ],
-  },
-  {
-    heading: "Admin",
-    items: [
-      { label: "Settings", href: "/settings", icon: Settings },
-    ],
-  },
-];
+function buildSections(isHrAdmin: boolean): NavSection[] {
+  const adminItems: NavItem[] = [];
+  if (isHrAdmin) {
+    adminItems.push({ label: "HR", href: "/hr", icon: ShieldAlert });
+  }
+  adminItems.push({ label: "Settings", href: "/settings", icon: Settings });
 
-export function Sidebar({ user }: { user: HavenUser }) {
+  return [
+    {
+      heading: "Overview",
+      items: [
+        { label: "The Board", href: "/dashboard", icon: LayoutDashboard },
+        { label: "Northstar Scorecard", href: "/scorecard", icon: Target },
+      ],
+    },
+    {
+      heading: "Work",
+      items: [
+        { label: "My Tasks", href: "/my-tasks", icon: ListTodo },
+        { label: "Project Management", href: "/work", icon: FolderKanban },
+      ],
+    },
+    {
+      heading: "Operations",
+      items: [
+        { label: "Properties", href: "/properties", icon: Home },
+      ],
+    },
+    {
+      heading: "Admin",
+      items: adminItems,
+    },
+  ];
+}
+
+export function Sidebar({
+  user,
+  isHrAdmin = false,
+}: {
+  user: HavenUser;
+  isHrAdmin?: boolean;
+}) {
+  const sections = buildSections(isHrAdmin);
   const pathname = usePathname();
   const [assistantOpen, setAssistantOpen] = useState(false);
 
