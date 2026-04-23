@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/user";
-import { isOnboardingAdmin } from "@/lib/onboarding/actions";
 import { pingAgent } from "@/lib/agents/client";
 
 export const runtime = "nodejs";
@@ -10,10 +9,6 @@ export async function GET() {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  }
-  const ok = await isOnboardingAdmin(user.email);
-  if (!ok) {
-    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
 
   try {

@@ -2,7 +2,6 @@
 
 export type AgentStreamEvent =
   | { type: "status"; status: string }
-  | { type: "session"; sessionId: string }
   | { type: "text"; text: string }
   | { type: "tool_use"; name: string; input: unknown }
   | { type: "tool_result"; output: string; isError?: boolean }

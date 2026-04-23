@@ -1,7 +1,7 @@
-import AgentPlayground from "@/components/agents/agent-playground";
+import AgentChat from "@/components/agents/agent-chat";
 
 export const dynamic = "force-dynamic";
 
 export default function AgentsPage() {
-  return <AgentPlayground />;
+  return <AgentChat />;
 }

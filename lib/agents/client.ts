@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { AgentStreamEvent } from "./types";
 
 // ---------------------------------------------------------------------------
-// Singleton client
+// Singleton Anthropic client
 // ---------------------------------------------------------------------------
 
 let _client: Anthropic | null = null;
@@ -27,13 +27,9 @@ function requireAgentEnv(): { agentId: string; environmentId: string } {
 }
 
 // ---------------------------------------------------------------------------
-// Public helpers
+// Health check
 // ---------------------------------------------------------------------------
 
-/**
- * Minimal health check: confirms API key + IDs are valid by retrieving the
- * configured agent. Throws if anything is off.
- */
 export async function pingAgent(): Promise<{
   agentId: string;
   name: string;
@@ -41,7 +37,6 @@ export async function pingAgent(): Promise<{
 }> {
   const { agentId } = requireAgentEnv();
   const client = getClient();
-  // `agents.retrieve` returns the latest version by default.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const agent: any = await (client.beta.agents as any).retrieve(agentId);
   return {
@@ -54,41 +49,47 @@ export async function pingAgent(): Promise<{
   };
 }
 
+// ---------------------------------------------------------------------------
+// Session lifecycle
+// ---------------------------------------------------------------------------
+
 /**
- * Create a session against the configured agent + environment, send the
- * user's prompt, and stream events back as normalized AgentStreamEvents.
- *
- * The async generator yields small JSON-safe events suitable for forwarding
- * over SSE to the browser.
+ * Create a fresh session against the configured agent + environment.
+ * Returns the session id — store it client-side to reuse across turns.
  */
-export async function* runAgentTask(
-  prompt: string,
-): AsyncGenerator<AgentStreamEvent> {
+export async function createSession(): Promise<string> {
   const { agentId, environmentId } = requireAgentEnv();
   const client = getClient();
-
-  yield { type: "status", status: "creating_session" };
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const session: any = await (client.beta.sessions as any).create({
     agent: agentId,
     environment_id: environmentId,
   });
+  return session.id as string;
+}
 
-  yield { type: "session", sessionId: session.id };
-  yield { type: "status", status: "sending_message" };
+/**
+ * Send a user message to an existing session and stream normalized events.
+ *
+ * Yields a compact typed stream suitable for forwarding over SSE to the
+ * browser. Emits a final { type: "done" } when the turn settles.
+ */
+export async function* streamSend(
+  sessionId: string,
+  prompt: string,
+): AsyncGenerator<AgentStreamEvent> {
+  const client = getClient();
 
-  // Open the stream FIRST, then send the user message so we don't miss
+  // Open the stream BEFORE sending the user message so we don't miss
   // early events.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const stream: any = await (client.beta.sessions.events as any).stream(
-    session.id,
+    sessionId,
   );
 
-  // Kick off the task. Fire-and-forget — responses come via the stream.
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (client.beta.sessions.events as any).send(session.id, {
+    await (client.beta.sessions.events as any).send(sessionId, {
       events: [
         {
           type: "user.message",
@@ -108,13 +109,11 @@ export async function* runAgentTask(
 
   try {
     for await (const raw of stream) {
-      // The shape of events from the Managed Agents API is still in beta.
-      // We do a best-effort normalization here.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ev: any = raw;
       const t: string = ev?.type ?? "";
 
-      // Streamed text from the assistant.
+      // Streamed assistant text deltas.
       if (
         t === "assistant.message.delta" ||
         t === "assistant.text.delta" ||
@@ -134,6 +133,7 @@ export async function* runAgentTask(
         continue;
       }
 
+      // Full assistant message (non-streaming form).
       if (t === "assistant.message" || t === "message") {
         const blocks = ev.content ?? ev.message?.content ?? [];
         if (Array.isArray(blocks)) {
@@ -170,12 +170,21 @@ export async function* runAgentTask(
         continue;
       }
 
+      // Terminal events — turn is done, keep the session alive for the
+      // next user message.
       if (
-        t === "session.completed" ||
-        t === "session.stopped" ||
         t === "turn.completed" ||
-        t === "done"
+        t === "assistant.turn.completed" ||
+        t === "message.completed" ||
+        t === "session.idle" ||
+        t === "idle"
       ) {
+        yield { type: "done" };
+        return;
+      }
+
+      // Session was torn down (shouldn't happen mid-turn but handle it).
+      if (t === "session.completed" || t === "session.stopped") {
         yield { type: "done" };
         return;
       }
@@ -188,12 +197,13 @@ export async function* runAgentTask(
         return;
       }
 
-      // Surface other status events (e.g. session.status) as a status line.
+      // Everything else becomes a status line.
       if (t) {
         yield { type: "status", status: t };
       }
     }
 
+    // Stream ended naturally.
     yield { type: "done" };
   } catch (err) {
     yield {
