@@ -1,0 +1,147 @@
+# Onboarding Template — John Kuv 2948 (`86e10zreb`)
+
+Source: ClickUp live project used as template (no dedicated template-status task exists).
+
+- **John Kuvshinikov 2948** — status: `onboarding`, dept: `Onboarding` — id: `86e10zreb`
+  - **Start Onboarding** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrff`
+    - **Tag the Parent Task & All SubTasks with Internal Listing Name** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrgh`
+    - **Create Slack thread titled by the internal listing name in the onboarding slack channel** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrgk`
+    - **Confirm that service agreement has been signed. If not, assign to Dennis and change department to sales** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrj1`
+    - **Create Owner Profile Folder + Green Light Doc** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrj3`
+    - **Add Owner info to Owner Profile Worksheet** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrka`
+    - **Save pdf copy of SA in Owner Profile google folder (if signed)** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrkb`
+    - **Confirm Hubspot Template has been filled out** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrmk`
+    - **Create Skeleton Listing** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrmm`
+    - **Add Internal Listing Name in Hubspot Contact of Owner under "Property Name"** — status: `onboarding`, dept: `` — id: `86e10zrnj`
+  - **1st Email to Owner Using "Sales Handoff Template"> Hubspot** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrq4`
+  - **Allocate Owner Linens (Send to Owner,Locked Closet, or Dispose)** — status: `onboarding`, dept: `` — id: `86e10zrr3`
+  - **Use Playbook in Hubspot to Document First Call Notes** — status: `onboarding`, dept: `` — id: `86e10zrt1`
+  - **After first call add Key Dates in the Template (here & throughout the property list)** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrte`
+    - **Haven Full Access** — status: `onboarding`, dept: `Onboarding` ⭐ KEY DATE — id: `86e10zrtx`
+    - **Cleaning Fee Inspection** — status: `onboarding`, dept: `Cleaning` ⭐ KEY DATE — id: `86e10zrty`
+    - **Green Light Doc** — status: `onboarding`, dept: `Onboarding` ⭐ KEY DATE — id: `86e10zrut`
+      - **Breezeway information gathering** — status: `onboarding`, dept: `Onboarding` ⭐ KEY DATE — id: `86e10zrva`
+      - **Update GLD, PDM, BW, Conduit** — status: `onboarding`, dept: `Onboarding` ⭐ KEY DATE — id: `86e10zrvb`
+    - **Execute Owner's Linen Plan** — status: `onboarding`, dept: `Onboarding` ⭐ KEY DATE — id: `86e10zrux`
+    - **Tech Stack Install** — status: `onboarding`, dept: `Onboarding` ⭐ KEY DATE — id: `86e10zrvg`
+      - 📋 Checklist: _Checklist_
+        - [ ] After Tech Stack Install, connect lock to DACK / Smart Things
+        - [ ] Add Owner &amp; Vendor codes
+        - [ ] Update GLD : Yale lock has been installed, Lockbox code &amp; location, Owner Code, &amp; Vendor Code
+      - **Update to PDM, BW, GLD, Conduit** — status: `onboarding`, dept: `` — id: `86e10zrw2`
+    - **Listing Creation** — status: `onboarding`, dept: `Onboarding` ⭐ KEY DATE — id: `86e10zrw6`
+    - **Initial Listing Check** — status: `onboarding`, dept: `Onboarding` ⭐ KEY DATE — id: `86e10zrwn`
+    - **Deep/PreGuest clean** — status: `onboarding`, dept: `Cleaning` ⭐ KEY DATE — id: `86e10zrwt`
+    - **Pro Photos Taken Scheduled** — status: `onboarding`, dept: `Onboarding` ⭐ KEY DATE — id: `86e10zrx5`
+    - **Go no Go** — status: `onboarding`, dept: `Onboarding` ⭐ KEY DATE — id: `86e10zrxb`
+    - **Schedule/tasks created to Breezeway** — status: `onboarding`, dept: `` — id: `86e10zrxq`
+  - **2nd Email to Owner"Post First Call/Timeline Overview" > Hubspot** — status: `onboarding`, dept: `Onboarding` — id: `86e10zry6`
+    > https://docs.google.com/document/d/1QMhZsbX2RurwNM8mhMM0jeUVZDwHzgdfv56V9IF0pK0/edit?usp=sharing
+  - **Send Clearing Invite** — status: `onboarding`, dept: `` — id: `86e10zryc`
+  - **Send Owner Tax1099 Request for W9** — status: `onboarding`, dept: `Onboarding` — id: `86e10zryf`
+    > Purpose  Collect owners W9 for Tax purposes Procedure Go into Tax1099 Login using the info in Clickup passwords On the left hand column, go to People > Manage Recipient > Add Recipient Click W9 reques
+  - **Primary Listing creation** — status: `onboarding`, dept: `Onboarding` — id: `86e10zryv`
+    > Mission Control: Post Listing Creation Start Date + Due Date. Tag Alyssa & GM team as needed.  Alyssa: Take Start Date + Due Date, input them on this task, move task to in progress and begin assigning
+    - **Make copy of https://docs.google.com/spreadsheets/d/1mrXaSSE2gE-mUCAPNOP2piHSwdpujWLv_wa6r-3LJt0/edit?usp=sharing and save link here** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrz1`
+    - **Delete Skeleton Listing** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrz0`
+    - **Airbnb part 1** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrz8`
+    - **Airbnb part 2 (push to Hostaway)** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrza`
+    - **Hostaway** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrzg`
+    - **PDM Duplicate PDM Information into Clickup Property List (Linked here)** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrzq`
+    - **SuiteOp** — status: `onboarding`, dept: `Onboarding` — id: `86e10zrzu`
+    - **Breezeway** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt03`
+    - **Property Element Gathering & GLD Information Transfer** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt0a`
+    - **Conduit** — status: `onboarding`, dept: `` — id: `86e10zt0c`
+  - **After GLD is complete, 3rd owner email "Post GLD Purchase List + Documents"<Hubspot** — status: `onboarding`, dept: `` — id: `86e10zt0r`
+  - **Owner approved action items** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt0v`
+    - **Purchase Owner approved "Purchase List" items.** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt12`
+    - **Look at last delivery date of items ordered. Schedule a runner to pickup and deliver to the property in Breezeway. Schedule all other runner tasks on same day** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt13`
+    - **Send Approved Maintenance List to Dispatch** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt1d`
+    - **Install Haven sign** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt1n`
+  - **Add the owner's contact info (email+phone number) in the BW profile during onboarding** — status: `onboarding`, dept: `` — id: `86e10zt1z`
+  - **Set up appropriate vendors** — status: `onboarding`, dept: `Dispatch` — id: `86e10zt2r`
+    - 📋 Checklist: _Checklist_
+      - [ ] Pest Control
+      - [ ] Lawncare (if applicable)
+      - [ ] Pool Service (if applicable)
+      - [ ] Water Filtration (if applicable)
+      - [ ] Propane Service (if applicable)
+  - **Transfer guest (if applicable)** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt2z`
+    > Mark as done if no transfer guest Fill out guest transfer tracker Assign this task to Jack Change the department to Guest Communications Jack rebook transfer guests
+  - **Input Photography Fee Into Owner Profile Worksheet** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt38`
+  - **Set Prices** — status: `onboarding`, dept: `Revenue` — id: `86e10zt3m`
+    > Add gross rent projections given to owner, Owner notes or requests, Haven internal gross rent goal, & past performance to notes section of Pricelabs Send comment in the Onboarding Property Specific Sl
+  - **Primary Listing Check** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt42`
+    - **Onboarding Listing Check** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt4b`
+      - 📋 Checklist: _Checklist_
+        - [ ] Airbnb: Listing Details
+        - [ ] Hostaway: Basic Info, Additional Info, Bed Types, Channel Specifics, Amenities, Photos
+    - **Guest Communications & Dispatch Listing Check** — status: `onboarding`, dept: `Guest Communications` — id: `86e10zt4c`
+      - 📋 Checklist: _Checklist_
+        - [ ] Confirm that DACK guidebook information is accurate
+        - [ ] Confirm Lock + Hub are uploaded into DACK and placed into Access section
+        - [ ] Confirm that all relevant secondary codes (Building, Gates, etc.) are put within DACK Access section
+        - [ ] Confirm the property has Messaging Group tag AND the property is checked off within the Messaging Group Hostaway profile
+        - [ ] Confirm Address in Hostaway is properly inputted and is flowing to DACK
+        - [ ] Property Notes Filled Out
+        - [ ] If applicable, confirm the transfer guest process is complete
+        - [ ] Internal Listing Name and Emojis in BW property title
+    - **Finance + Revenue Listing Check** — status: `onboarding`, dept: `Finance` — id: `86e10zt4q`
+      - 📋 Checklist: _Checklist_
+        - [ ] Check Financial Settings Tab in Hostaway
+        - [ ] Check Prices &amp; Fees in Hostaway
+        - [ ] Check Cleaning Fee
+  - **Secondary Listing Creation** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt55`
+    - **Vrbo** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt59`
+    - **Marriott** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt5a`
+    - **Booking.com (including bank details)** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt5n`
+    - **Direct booking site** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt5r`
+  - **Secondary Listing Check** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt67`
+    - 📋 Checklist: _Checklist_
+      - [ ] VRBO
+      - [ ] Booking.com
+      - [ ] Marriott
+      - [ ] Direct Booking Website (check order)
+  - **Upload pro photos to Airbnb & HA** — status: `onboarding`, dept: `Owner Relations` — id: `86e10zt68`
+    > https://docs.google.com/document/d/1GDTYHtrSEChTm66SQ7CrwffVmVsziXC3t_aHQ_CuCkk/edit?usp=sharing
+    - **Upload all photos to professional photography folder in owner profile** — status: `onboarding`, dept: `Owner Relations` — id: `86e10zt6a`
+    - **Delete all temp Airbnb & Hostaway photos** — status: `onboarding`, dept: `Owner Relations` — id: `86e10zt6b`
+    - **Upload all new photos onto Airbnb** — status: `onboarding`, dept: `Owner Relations` — id: `86e10zt6e`
+    - **Organize them based on the layout of the house** — status: `onboarding`, dept: `Owner Relations` — id: `86e10zt6h`
+    - **Tag Summer & Kim in comment for approval on layout** — status: `onboarding`, dept: `Owner Relations` — id: `86e10zt6n`
+    - **Upload all photos to Hostaway once the layout is approved** — status: `onboarding`, dept: `Owner Relations` — id: `86e10zt6t`
+    - **Remove "pro photos coming soon" from all platforms** — status: `onboarding`, dept: `Owner Relations` — id: `86e10zt70`
+  - **Revenue Check** — status: `onboarding`, dept: `Revenue` — id: `86e10zt7k`
+    - **48 Hour Check** — status: `onboarding`, dept: `Revenue` — id: `86e10zt7q`
+    - **7 Day Check** — status: `onboarding`, dept: `Revenue` — id: `86e10zt7p`
+  - **Open Calendar!** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt8f`
+    - 📋 Checklist: _Checklist_
+      - [ ] Block owner requested block dates
+      - [ ] Confirm all maintenance requested block dates have been set
+      - [ ] Confirm transfer guest dates are blocked (if applicable)
+      - [ ] Confirm pricing is done
+      - [ ] Confirm with Dispatch there are no outstanding maintenance items that must be done before guests stay
+  - **Send Owner "Calendar Open Email"<Hubspot** — status: `onboarding`, dept: `` — id: `86e10zt8p`
+  - **Create class in Divvy, Bill.com, & Dext** — status: `onboarding`, dept: `Finance` — id: `86e10zt8x`
+  - **Final checks to pass to Owner to Accounts** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt92`
+    - 📋 Checklist: _Checklist_
+      - [ ] Onboarding to Accounts Hubspot Note - https://docs.google.com/document/d/1RW_AJXhj_oRf-IYN4LvyHdVIzTEXjMyqEC9PVXxBU-o/edit
+      - [ ] &quot;About this Deal&quot; in Hubspot: Property Name, GRP,  Haven Commission, Property Address, Tax Area Code, Date Haven Services Started (calendar open date), Property LLC
+      - [ ] Hubspot Contacts - Make sure they are all accurate
+      - [ ] Green Light Doc - fully filled out : Access Codes, Wifi, HOA, Community Amenities, Tax Code, Important Locations, PDM section, Utilities, Wifi account info, exploratory, etc.
+      - [ ] W9 - check in Tax1099
+      - [ ] Insurance - owner's insurance policy w/Haven as additionally insured is in Owner Profile Folder
+      - [ ] Permits &amp; Licenses: City BL, County BL, Tourist Residency Permit, Knoxville STR Permit if needed
+      - [ ] Owner Profile Worksheet - fill out calendar open date, W9 name, LLC name, GRP, Commission, Payment Date, Etc.
+      - [ ] Check Listing - pro photos, description, bed count, pricing, etc.
+      - [ ] Breezeway - review completed tasks, view future tasks, remove onboarding tag &amp; emoji
+      - [ ] Google Drive - move folder from Pending Owners to Owner Profiles
+      - [ ] Purchase List Tracker - ensure everything has arrived &amp; delivered
+      - [ ] Transfer Guests - Ensure Transfer guests are squared away
+      - [ ] Sales Hand Off - Reread it to make sure nothing was missed
+  - **Send Owner "Onboarding Invoice + Payout Info" Email <Hubspot** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt9f`
+  - **Send Onboarding Invoice** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt9p`
+  - **Complete 30 Day Post-Open Check** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt9x`
+    - **GM - Evaluate all messaging, reviews, and escalated issues for pain points and missing information** — status: `onboarding`, dept: `Guest Communications` — id: `86e10zta0`
+    - **OB - Evaluate all reviews, GM feedback, and update listing** — status: `onboarding`, dept: `Onboarding` — id: `86e10zt9z`
+  - **Send the onboarding to owner relations package to CEO, COO, EA** — status: `onboarding`, dept: `Onboarding` — id: `86e10ztak`
