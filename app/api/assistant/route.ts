@@ -10,6 +10,7 @@ import {
   updateTask,
   addComment,
 } from "@/lib/work/actions";
+import type { TaskPriority } from "@/lib/work/types";
 import { getProperties, getProperty } from "@/lib/properties/actions";
 import {
   getActiveMonth,
@@ -18,7 +19,19 @@ import {
   updateRowCell,
 } from "@/lib/scorecard/actions";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+let _anthropic: Anthropic | null = null;
+function getAnthropicClient(): Anthropic {
+  if (_anthropic) return _anthropic;
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY env var is not set");
+  }
+  _anthropic = new Anthropic({ apiKey });
+  return _anthropic;
+}
 
 // ---------------------------------------------------------------------------
 // System prompt
@@ -324,7 +337,7 @@ async function runTool(name: string, input: ToolInput, userId: string | null): P
       const tasks = await getGlobalTasks({
         search: input.search as string | undefined,
         due: input.due as "all" | "overdue" | "today" | "this_week" | "none" | undefined,
-        priorities: input.priorities as string[] | undefined,
+        priorities: input.priorities as TaskPriority[] | undefined,
         include_completed: (input.include_completed as boolean) ?? false,
       });
       return safe(tasks.slice(0, limit).map(summariseTask));
@@ -429,19 +442,20 @@ async function runTool(name: string, input: ToolInput, userId: string | null): P
 }
 
 // Strip heavy fields from task results to keep context window lean
-function summariseTask(t: Record<string, unknown>) {
+function summariseTask(t: unknown) {
+  const task = t as Record<string, unknown>;
   return {
-    id: t.id,
-    title: t.title,
-    priority: t.priority,
-    due_date: t.due_date,
-    completed_at: t.completed_at,
-    status: (t.status as Record<string, unknown> | null)?.name,
-    status_category: (t.status as Record<string, unknown> | null)?.category,
-    list: (t.list as Record<string, unknown> | null)?.name,
-    space: (t.space as Record<string, unknown> | null)?.name,
-    subtask_count: t.subtask_count,
-    assignees: t.assignees,
+    id: task.id,
+    title: task.title,
+    priority: task.priority,
+    due_date: task.due_date,
+    completed_at: task.completed_at,
+    status: (task.status as Record<string, unknown> | null)?.name,
+    status_category: (task.status as Record<string, unknown> | null)?.category,
+    list: (task.list as Record<string, unknown> | null)?.name,
+    space: (task.space as Record<string, unknown> | null)?.name,
+    subtask_count: task.subtask_count,
+    assignees: task.assignees,
   };
 }
 
@@ -466,7 +480,7 @@ export async function POST(req: Request) {
 
         // Agentic loop — keep going until the model stops calling tools
         while (true) {
-          const response = await anthropic.messages.create({
+          const response = await getAnthropicClient().messages.create({
             model: "claude-opus-4-7",
             max_tokens: 8096,
             // @ts-expect-error — "adaptive" is valid at runtime; SDK 0.54 types only know "enabled"/"disabled"
