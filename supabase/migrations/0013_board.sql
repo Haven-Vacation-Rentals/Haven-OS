@@ -35,9 +35,10 @@ create table if not exists public.board_announcements (
 -- Seed
 -- ---------------------------------------------------------------------------
 
--- Seed jack13zoppa@gmail.com as the first admin.
-insert into public.board_admins (email)
-values ('jack13zoppa@gmail.com')
+-- Seed initial admins.
+insert into public.board_admins (email) values
+  ('jack13zoppa@gmail.com'),
+  ('jack@havenvacationrentals.com')
 on conflict (email) do nothing;
 
 -- ---------------------------------------------------------------------------
