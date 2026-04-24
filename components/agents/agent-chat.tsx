@@ -27,9 +27,10 @@ type PingState =
   | { status: "error"; error: string };
 
 const SUGGESTED = [
-  "List the files in the working directory and summarize what you find.",
-  "Check the Haven OS public site for anything broken.",
-  "Search the web for recent Smoky Mountain vacation rental news.",
+  "What do I have on my plate this week?",
+  "Show me what's red on the scorecard and give me a plan to fix the top three.",
+  "List all onboarding projects in progress and flag any with blocked tasks.",
+  "Which properties are paused and why?",
 ];
 
 export default function AgentChat() {
