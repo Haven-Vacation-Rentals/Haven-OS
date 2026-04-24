@@ -70,6 +70,118 @@ export async function listProjects(filters?: {
   return (data ?? []) as DbOnboardingProject[];
 }
 
+/**
+ * Project + rollup stats (done/total/blocked/next key date) in one call.
+ * Used by the directory page so every card can show progress without N+1.
+ */
+export type ProjectWithStats = DbOnboardingProject & {
+  stats: {
+    total: number;
+    done: number;
+    inProgress: number;
+    blocked: number;
+    notStarted: number;
+    percentComplete: number;
+    keyDatesTotal: number;
+    keyDatesDone: number;
+    nextKeyDate: { title: string; due_date: string } | null;
+    overdueKeyDates: number;
+    lastActivity: string | null;
+  };
+};
+
+export async function listProjectsWithStats(): Promise<ProjectWithStats[]> {
+  await requireOnboardingAdmin();
+  const supabase = await db();
+  const [{ data: projects }, { data: tasks }] = await Promise.all([
+    supabase
+      .from("onboarding_projects")
+      .select("*")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("onboarding_tasks")
+      .select(
+        "id, project_id, title, status, is_key_date, due_date, updated_at",
+      ),
+  ]);
+
+  const projs = (projects ?? []) as DbOnboardingProject[];
+  const ts = (tasks ?? []) as Array<{
+    id: string;
+    project_id: string;
+    title: string;
+    status: OnboardingTaskStatus;
+    is_key_date: boolean;
+    due_date: string | null;
+    updated_at: string;
+  }>;
+
+  const byProj = new Map<string, typeof ts>();
+  for (const t of ts) {
+    const arr = byProj.get(t.project_id) ?? [];
+    arr.push(t);
+    byProj.set(t.project_id, arr);
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return projs.map((p) => {
+    const all = byProj.get(p.id) ?? [];
+    const countable = all.filter((t) => t.status !== "na");
+    const done = all.filter((t) => t.status === "done").length;
+    const inProgress = all.filter((t) => t.status === "in_progress").length;
+    const blocked = all.filter((t) => t.status === "blocked").length;
+    const notStarted = all.filter((t) => t.status === "not_started").length;
+    const percentComplete =
+      countable.length === 0
+        ? 0
+        : Math.round((done / countable.length) * 100);
+    const keyDates = all.filter((t) => t.is_key_date);
+    const keyDatesDone = keyDates.filter((t) => t.status === "done").length;
+
+    const upcomingKey = keyDates
+      .filter(
+        (t) =>
+          t.status !== "done" && t.status !== "na" && t.due_date !== null,
+      )
+      .sort((a, b) => (a.due_date! < b.due_date! ? -1 : 1))[0];
+    const overdueKeyDates = keyDates.filter(
+      (t) =>
+        t.status !== "done" &&
+        t.status !== "na" &&
+        t.due_date !== null &&
+        new Date(t.due_date!) < today,
+    ).length;
+    const lastActivity =
+      all.length === 0
+        ? null
+        : all.reduce(
+            (acc, t) => (t.updated_at > acc ? t.updated_at : acc),
+            all[0].updated_at,
+          );
+
+    return {
+      ...p,
+      stats: {
+        total: all.length,
+        done,
+        inProgress,
+        blocked,
+        notStarted,
+        percentComplete,
+        keyDatesTotal: keyDates.length,
+        keyDatesDone,
+        nextKeyDate: upcomingKey
+          ? { title: upcomingKey.title, due_date: upcomingKey.due_date! }
+          : null,
+        overdueKeyDates,
+        lastActivity,
+      },
+    };
+  });
+}
+
 export async function getProject(id: string): Promise<DbOnboardingProject | null> {
   await requireOnboardingAdmin();
   const supabase = await db();
