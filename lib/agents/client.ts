@@ -71,8 +71,14 @@ export async function createSession(): Promise<string> {
 /**
  * Send a user message to an existing session and stream normalized events.
  *
- * Yields a compact typed stream suitable for forwarding over SSE to the
- * browser. Emits a final { type: "done" } when the turn settles.
+ * Event type names come from the Anthropic Managed Agents SDK (v0.91+):
+ *   agent.message, agent.thinking, agent.tool_use, agent.tool_result,
+ *   agent.custom_tool_use, agent.mcp_tool_use, agent.mcp_tool_result,
+ *   session.status_running, session.status_idle, session.status_terminated,
+ *   session.error
+ *
+ * Yields a compact typed stream suitable for forwarding over SSE.
+ * Emits a final { type: "done" } when the turn settles (session.status_idle).
  */
 export async function* streamSend(
   sessionId: string,
@@ -105,105 +111,110 @@ export async function* streamSend(
     return;
   }
 
-  yield { type: "status", status: "running" };
-
   try {
     for await (const raw of stream) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ev: any = raw;
       const t: string = ev?.type ?? "";
 
-      // Streamed assistant text deltas.
-      if (
-        t === "assistant.message.delta" ||
-        t === "assistant.text.delta" ||
-        t === "message.delta"
-      ) {
-        const delta = ev.delta ?? ev.content ?? ev;
-        const text =
-          typeof delta === "string"
-            ? delta
-            : delta?.text ??
-              (Array.isArray(delta?.content)
-                ? delta.content
-                    .map((c: { text?: string }) => c?.text ?? "")
-                    .join("")
-                : "");
+      // ------- Session status -------
+      if (t === "session.status_running") {
+        yield { type: "status", status: "running" };
+        continue;
+      }
+
+      if (t === "session.status_idle") {
+        // Idle can mean "waiting for user tool confirmation" OR "end of turn".
+        // The SDK surfaces this via the inner `reason` object.
+        const reason = ev.reason?.type ?? ev.reason;
+        if (
+          reason === "end_turn" ||
+          reason === "retries_exhausted" ||
+          typeof reason === "undefined"
+        ) {
+          yield { type: "done" };
+          return;
+        }
+        if (reason === "requires_action") {
+          yield {
+            type: "status",
+            status: "Waiting for user confirmation",
+          };
+          // Don't return — stream may continue after user responds.
+          continue;
+        }
+        yield { type: "status", status: `idle: ${String(reason)}` };
+        continue;
+      }
+
+      if (t === "session.status_terminated" || t === "session.deleted") {
+        yield { type: "done" };
+        return;
+      }
+
+      // ------- Agent output -------
+      if (t === "agent.message") {
+        // Full text response (not delta). `content` is an array of text blocks.
+        const blocks = Array.isArray(ev.content) ? ev.content : [];
+        const text = blocks
+          .map((b: { type?: string; text?: string }) =>
+            b?.type === "text" ? b.text ?? "" : "",
+          )
+          .join("");
         if (text) yield { type: "text", text };
         continue;
       }
 
-      // Full assistant message (non-streaming form).
-      if (t === "assistant.message" || t === "message") {
-        const blocks = ev.content ?? ev.message?.content ?? [];
-        if (Array.isArray(blocks)) {
-          for (const b of blocks) {
-            if (b?.type === "text" && typeof b.text === "string") {
-              yield { type: "text", text: b.text };
-            } else if (b?.type === "tool_use") {
-              yield {
-                type: "tool_use",
-                name: b.name ?? "(tool)",
-                input: b.input ?? {},
-              };
-            }
-          }
-        }
+      if (t === "agent.thinking") {
+        yield { type: "status", status: "Thinking…" };
         continue;
       }
 
-      if (t === "tool_use" || t === "assistant.tool_use") {
+      if (
+        t === "agent.tool_use" ||
+        t === "agent.custom_tool_use" ||
+        t === "agent.mcp_tool_use"
+      ) {
         yield {
           type: "tool_use",
-          name: ev.name ?? ev.tool_name ?? "(tool)",
+          name: ev.name ?? "(tool)",
           input: ev.input ?? {},
         };
         continue;
       }
 
-      if (t === "tool_result" || t === "tool.result") {
-        const output =
-          typeof ev.output === "string"
-            ? ev.output
-            : JSON.stringify(ev.output ?? ev.content ?? "");
-        yield { type: "tool_result", output, isError: !!ev.is_error };
+      if (t === "agent.tool_result" || t === "agent.mcp_tool_result") {
+        const blocks = Array.isArray(ev.content) ? ev.content : [];
+        const text = blocks
+          .map((b: { type?: string; text?: string }) =>
+            b?.type === "text" ? b.text ?? "" : "",
+          )
+          .join("");
+        const output = text || JSON.stringify(blocks);
+        yield {
+          type: "tool_result",
+          output,
+          isError: !!ev.is_error,
+        };
         continue;
       }
 
-      // Terminal events — turn is done, keep the session alive for the
-      // next user message.
-      if (
-        t === "turn.completed" ||
-        t === "assistant.turn.completed" ||
-        t === "message.completed" ||
-        t === "session.idle" ||
-        t === "idle"
-      ) {
-        yield { type: "done" };
+      // ------- Errors -------
+      if (t === "session.error") {
+        const msg =
+          ev.error?.message ??
+          ev.message ??
+          (typeof ev.error === "string" ? ev.error : "Unknown session error");
+        yield { type: "error", message: String(msg) };
+        // Session-level error is terminal for this turn.
         return;
       }
 
-      // Session was torn down (shouldn't happen mid-turn but handle it).
-      if (t === "session.completed" || t === "session.stopped") {
-        yield { type: "done" };
-        return;
-      }
-
-      if (t === "error" || t === "session.error") {
-        yield {
-          type: "error",
-          message: ev.message ?? ev.error?.message ?? "Unknown error",
-        };
-        return;
-      }
-
-      // Everything else becomes a status line.
-      if (t) {
-        yield { type: "status", status: t };
-      }
+      // ------- Everything else — skip silently to avoid noise -------
+      // (span.model_request_start/end, agent.thread_context_compacted, etc.)
     }
 
-    // Stream ended naturally.
+    // Stream ended naturally without a terminal event.
     yield { type: "done" };
   } catch (err) {
     yield {
