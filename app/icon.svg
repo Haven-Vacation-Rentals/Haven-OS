@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Haven OS">
+  <rect width="64" height="64" rx="14" fill="#FF564E"/>
+  <path d="M19 16h6v13h14V16h6v32h-6V34H25v14h-6z" fill="#FFFFFF"/>
+</svg>

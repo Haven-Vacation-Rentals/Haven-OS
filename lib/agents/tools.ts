@@ -759,7 +759,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "update_onboarding_project",
     description:
-      "Update top-level fields on an onboarding project (status, owner info, start_date, etc.).",
+      "Update top-level fields on an onboarding project. Can change status, owner info, key dates, slack channel, folder URL, and notes.",
     input_schema: {
       type: "object",
       properties: {
@@ -767,7 +767,7 @@ export const TOOLS: ToolDef[] = [
         fields: {
           type: "object",
           description:
-            "Partial project. Keys: status, property_nickname, owner_name, owner_email, owner_phone, start_date.",
+            "Partial project. Keys: property_nickname, status (onboarding|owner_relations_onboarding|ready_to_pass|done|no_longer_onboarding|on_hold), owner_name, owner_email, owner_phone, start_date, target_open_date, actual_open_date, slack_channel, owner_profile_folder_url, notes.",
           additionalProperties: true,
         },
       },
@@ -883,6 +883,77 @@ export const TOOLS: ToolDef[] = [
       });
       return { ok: true };
     },
+  },
+  {
+    name: "update_onboarding_task",
+    description:
+      "Update any editable field on an onboarding task — title, description, department, due date, assignee email, key-date flag, or notes. Use set_onboarding_task_status for status changes.",
+    input_schema: {
+      type: "object",
+      properties: {
+        task_id: { type: "string" },
+        fields: {
+          type: "object",
+          additionalProperties: true,
+          description:
+            "Partial task. Keys: title, description, department (onboarding|owner_relations|revenue|cleaning|guest_comms|finance|dispatch|sales|maintenance|runner|leadership|haven|tendwell|stillwater or null), due_date (YYYY-MM-DD or null), assignee_email, is_key_date (boolean), notes.",
+        },
+      },
+      required: ["task_id", "fields"],
+    },
+    execute: async (input) => {
+      const fields = (input.fields ?? {}) as Parameters<typeof onb.updateTask>[1];
+      await onb.updateTask(s(input.task_id)!, fields);
+      return { ok: true };
+    },
+  },
+  {
+    name: "delete_onboarding_task",
+    description:
+      "Permanently delete an onboarding task (and all its children + checklist items). IRREVERSIBLE — confirm with the user before calling.",
+    input_schema: {
+      type: "object",
+      properties: { task_id: { type: "string" } },
+      required: ["task_id"],
+    },
+    execute: async (input) => {
+      await onb.deleteTask(s(input.task_id)!);
+      return { ok: true };
+    },
+  },
+  {
+    name: "delete_onboarding_checklist_item",
+    description: "Delete a single checklist item from an onboarding task.",
+    input_schema: {
+      type: "object",
+      properties: { item_id: { type: "string" } },
+      required: ["item_id"],
+    },
+    execute: async (input) => {
+      await onb.deleteChecklistItem(s(input.item_id)!);
+      return { ok: true };
+    },
+  },
+  {
+    name: "delete_onboarding_project",
+    description:
+      "Permanently delete an entire onboarding project along with all its tasks and checklist items. IRREVERSIBLE — always confirm with the user first. Prefer update_onboarding_project with status='no_longer_onboarding' for soft-archive.",
+    input_schema: {
+      type: "object",
+      properties: { project_id: { type: "string" } },
+      required: ["project_id"],
+    },
+    execute: async (input) => {
+      await onb.deleteProject(s(input.project_id)!);
+      return { ok: true };
+    },
+  },
+  {
+    name: "list_onboarding_projects_with_stats",
+    description:
+      "List every onboarding project with rollup stats embedded (percentComplete, done/inProgress/blocked/notStarted counts, next upcoming key date, overdueKeyDates, lastActivity). Use this to answer questions like 'which properties are behind?', 'what's blocking us?', 'whose target open date is closest?'.",
+    input_schema: { type: "object", properties: {}, required: [] },
+    execute: async () => onb.listProjectsWithStats(),
   },
 
   // =========================================================================
@@ -1407,7 +1478,7 @@ You have tools that give you live read + write access across the entire Haven OS
 - **Tasks / Work module** — spaces, folders, lists, tasks, comments, assignees. Full CRUD. Default view for "what am I working on" is \`get_my_tasks\`.
 - **Properties (PDM)** — the property master database. You can list, read, update any field (status, tier, account manager, access codes, etc.), and archive properties.
 - **Scorecard** — the Northstar weekly KPI tracker. You can read current + historical months, update cell values/targets/status (green/yellow/red), seed new months, and archive closed months.
-- **Onboarding** — property onboarding projects with templated tasks + checklists. You can create projects, mark tasks in progress/done, tick checklist items, add ad-hoc tasks.
+- **Onboarding** — property onboarding projects with templated tasks + checklists. Full control: create or delete projects; update every project field (status, owner info, target/actual open dates, slack channel, folder URL, notes); add / update / delete / restatus tasks; edit any task field (title, description, department, due date, assignee, key-date flag); add / toggle / delete checklist items. Use \`list_onboarding_projects_with_stats\` for rollup views (progress, blockers, next key date, overdue) and \`get_onboarding_tree\` when you need specific task_ids to update.
 - **HR** (permission-gated) — employees, performance reviews, issues/write-ups, roles, candidates, policy/procedure docs. Each call is row-level filtered by the caller's HR access grants.
 - **Admin** (super-admin only) — list users, change roles (user / admin / super_admin), grant or revoke HR access, manage departments.
 - **System** — test Hostaway connection, list team members.
