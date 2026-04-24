@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth/user";
-import { isOnboardingAdmin } from "@/lib/onboarding/actions";
+import { canAccessAgentChat } from "@/lib/auth/permissions";
 import { Bot, Lock } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -13,8 +13,8 @@ export default async function AgentsLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const user = await requireUser();
-  const ok = await isOnboardingAdmin(user.email);
+  await requireUser();
+  const ok = await canAccessAgentChat();
   if (!ok) redirect("/dashboard");
 
   return (

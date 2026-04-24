@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth/user";
-import { isHrAdmin } from "@/lib/hr/actions";
+import { canAccessHrModule } from "@/lib/auth/permissions";
 import { Users, Briefcase, FileText, ClipboardList, Lock } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -11,8 +11,8 @@ export const dynamic = "force-dynamic";
  * bounced to /dashboard.
  */
 export default async function HrLayout({ children }: { children: React.ReactNode }) {
-  const user = await requireUser();
-  const ok = await isHrAdmin(user.email);
+  await requireUser();
+  const ok = await canAccessHrModule();
   if (!ok) redirect("/dashboard");
 
   return (
@@ -20,7 +20,7 @@ export default async function HrLayout({ children }: { children: React.ReactNode
       <header className="flex flex-col gap-2">
         <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           <Lock className="h-3 w-3" />
-          Private · HR admins only
+          Private · HR access required
         </div>
         <h1 className="font-heading text-display-2 font-bold tracking-tight">
           HR

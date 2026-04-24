@@ -32,11 +32,29 @@ type NavItem = {
 
 type NavSection = { heading: string; items: NavItem[] };
 
-function buildSections(isHrAdmin: boolean): NavSection[] {
-  const adminItems: NavItem[] = [];
-  if (isHrAdmin) {
-    adminItems.push({ label: "Onboarding", href: "/onboarding", icon: ClipboardList });
+function buildSections(flags: {
+  canScorecard: boolean;
+  canAgents: boolean;
+  canHr: boolean;
+}): NavSection[] {
+  const overviewItems: NavItem[] = [
+    { label: "The Board", href: "/dashboard", icon: LayoutDashboard },
+  ];
+  if (flags.canScorecard) {
+    overviewItems.push({
+      label: "Northstar Scorecard",
+      href: "/scorecard",
+      icon: Target,
+    });
+  }
+
+  const adminItems: NavItem[] = [
+    { label: "Onboarding", href: "/onboarding", icon: ClipboardList },
+  ];
+  if (flags.canAgents) {
     adminItems.push({ label: "Agents", href: "/agents", icon: Bot, badge: "Beta" });
+  }
+  if (flags.canHr) {
     adminItems.push({ label: "HR", href: "/hr", icon: ShieldAlert });
   }
   adminItems.push({ label: "Settings", href: "/settings", icon: Settings });
@@ -44,10 +62,7 @@ function buildSections(isHrAdmin: boolean): NavSection[] {
   return [
     {
       heading: "Overview",
-      items: [
-        { label: "The Board", href: "/dashboard", icon: LayoutDashboard },
-        { label: "Northstar Scorecard", href: "/scorecard", icon: Target },
-      ],
+      items: overviewItems,
     },
     {
       heading: "Work",
@@ -58,9 +73,7 @@ function buildSections(isHrAdmin: boolean): NavSection[] {
     },
     {
       heading: "Operations",
-      items: [
-        { label: "Properties", href: "/properties", icon: Home },
-      ],
+      items: [{ label: "Properties", href: "/properties", icon: Home }],
     },
     {
       heading: "Admin",
@@ -71,12 +84,16 @@ function buildSections(isHrAdmin: boolean): NavSection[] {
 
 export function Sidebar({
   user,
-  isHrAdmin = false,
+  canScorecard = false,
+  canAgents = false,
+  canHr = false,
 }: {
   user: HavenUser;
-  isHrAdmin?: boolean;
+  canScorecard?: boolean;
+  canAgents?: boolean;
+  canHr?: boolean;
 }) {
-  const sections = buildSections(isHrAdmin);
+  const sections = buildSections({ canScorecard, canAgents, canHr });
   const pathname = usePathname();
   const [assistantOpen, setAssistantOpen] = useState(false);
 

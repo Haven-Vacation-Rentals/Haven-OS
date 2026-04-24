@@ -8,6 +8,9 @@ import { createClient } from "@/lib/supabase/server";
 import { BOARD_KEYS } from "@/lib/board/types";
 import { isAdmin, listAdmins } from "@/lib/board/actions";
 import { isHrAdmin, listHrAdmins } from "@/lib/hr/actions";
+import { getPermissions } from "@/lib/auth/permissions";
+import Link from "next/link";
+import { Users, Building2, ChevronRight, ShieldCheck } from "lucide-react";
 import type { DbBoardSetting } from "@/lib/board/types";
 
 export const dynamic = "force-dynamic";
@@ -36,10 +39,11 @@ async function loadBoardSettings(): Promise<{
 export default async function SettingsPage() {
   const user = await requireUser();
   const hostawayConfigured = isHostawayConfigured();
-  const [userIsAdmin, userIsHrAdmin, { loomUrl, loomTitle, admins }] =
+  const [userIsAdmin, userIsHrAdmin, perm, { loomUrl, loomTitle, admins }] =
     await Promise.all([
       isAdmin(user.email),
       isHrAdmin(user.email),
+      getPermissions(),
       loadBoardSettings(),
     ]);
   const hrAdmins = userIsHrAdmin ? await listHrAdmins() : [];
@@ -52,6 +56,57 @@ export default async function SettingsPage() {
           Manage your account and workspace preferences.
         </p>
       </header>
+
+      {/* Permissions (super admins only) */}
+      {perm.is_super_admin && (
+        <div className="flex flex-col gap-3">
+          <h2 className="font-heading text-[13px] font-bold uppercase tracking-wide text-muted-foreground">
+            Permissions
+          </h2>
+          <section className="rounded-card border border-border bg-surface shadow-card">
+            <Link
+              href={"/settings/users" as never}
+              className="flex items-center gap-3 border-b border-border px-5 py-4 transition-colors hover:bg-surface-alt/60"
+            >
+              <div className="rounded-md bg-surface-alt p-2">
+                <Users className="h-4 w-4 text-muted-foreground" aria-hidden />
+              </div>
+              <div className="flex-1">
+                <div className="font-heading text-[14px] font-bold">
+                  Users &amp; Permissions
+                </div>
+                <div className="text-[12px] text-muted-foreground">
+                  Manage roles (User / Admin / Super Admin) and grant HR access
+                  by department or individual employee.
+                </div>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
+            <Link
+              href={"/settings/departments" as never}
+              className="flex items-center gap-3 px-5 py-4 transition-colors hover:bg-surface-alt/60"
+            >
+              <div className="rounded-md bg-surface-alt p-2">
+                <Building2 className="h-4 w-4 text-muted-foreground" aria-hidden />
+              </div>
+              <div className="flex-1">
+                <div className="font-heading text-[14px] font-bold">
+                  Departments
+                </div>
+                <div className="text-[12px] text-muted-foreground">
+                  Add or rename departments used to tag employees and scope HR
+                  access.
+                </div>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
+          </section>
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <ShieldCheck className="h-3 w-3" />
+            You&apos;re signed in as <strong>Super Admin</strong>.
+          </div>
+        </div>
+      )}
 
       {/* The Board (admins only) */}
       {userIsAdmin && (

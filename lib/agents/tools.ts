@@ -20,6 +20,12 @@ import * as scorecard from "@/lib/scorecard/actions";
 import * as hr from "@/lib/hr/actions";
 import * as onb from "@/lib/onboarding/actions";
 import * as hostaway from "@/lib/hostaway/actions";
+import * as admin from "@/lib/admin/actions";
+import {
+  getPermissions,
+  requireHrAccess,
+  type HavenUserRole,
+} from "@/lib/auth/permissions";
 import { getCurrentUser } from "@/lib/auth/user";
 import type {
   TaskPriority,
@@ -77,13 +83,13 @@ function arr<T = unknown>(v: unknown): T[] | undefined {
   return Array.isArray(v) ? (v as T[]) : undefined;
 }
 
-async function requireHr(ctx: ToolContext): Promise<void> {
-  const ok = await hr.isHrAdmin(ctx.userEmail);
-  if (!ok) {
-    throw new Error(
-      "This tool requires HR admin access. Your account is not on the HR admin list.",
-    );
-  }
+/**
+ * Scoped HR access check: throws unless the caller is super_admin or has at
+ * least one HR access grant. Individual row-level filtering still happens
+ * inside each hr.* action via visibleEmployeeIds / canAccessEmployee.
+ */
+async function requireHr(_ctx: ToolContext): Promise<void> {
+  await requireHrAccess();
 }
 
 /** Condense a task for search results. */
@@ -124,13 +130,16 @@ export const TOOLS: ToolDef[] = [
     input_schema: { type: "object", properties: {}, required: [] },
     execute: async (_, ctx) => {
       const u = await getCurrentUser();
-      const isHrAdmin = await hr.isHrAdmin(ctx.userEmail);
+      const perm = await getPermissions();
       const isOnbAdmin = await onb.isOnboardingAdmin(ctx.userEmail);
       return {
         id: u?.id ?? null,
         email: u?.email ?? null,
         full_name: u?.name ?? null,
-        is_hr_admin: isHrAdmin,
+        role: perm.role,
+        is_super_admin: perm.is_super_admin,
+        is_admin_or_above: perm.is_admin_or_above,
+        has_hr_access: perm.has_any_hr_access,
         is_onboarding_admin: isOnbAdmin,
       };
     },
@@ -1211,6 +1220,143 @@ export const TOOLS: ToolDef[] = [
   },
 
   // =========================================================================
+  // ADMIN — users, roles, departments, HR grants (super admin only)
+  // =========================================================================
+  {
+    name: "list_users",
+    description:
+      "List all Haven OS users with their id, email, full name, and role (user / admin / super_admin). Super-admin only.",
+    input_schema: { type: "object", properties: {}, required: [] },
+    execute: async () => admin.listUsers(),
+  },
+  {
+    name: "set_user_role",
+    description:
+      "Change a user's role. Valid roles: 'user' (Work/Properties/Onboarding), 'admin' (everything except HR & user management), 'super_admin' (full access). You cannot demote yourself. Super-admin only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        user_id: { type: "string" },
+        role: { type: "string", enum: ["user", "admin", "super_admin"] },
+      },
+      required: ["user_id", "role"],
+    },
+    execute: async (input) => {
+      await admin.setUserRole(s(input.user_id)!, s(input.role) as HavenUserRole);
+      return { ok: true };
+    },
+  },
+  {
+    name: "list_departments",
+    description:
+      "List all departments (id, name, slug, archived). Available to any signed-in user.",
+    input_schema: {
+      type: "object",
+      properties: {
+        include_archived: { type: "boolean" },
+      },
+      required: [],
+    },
+    execute: async (input) => admin.listDepartments(b(input.include_archived) ?? false),
+  },
+  {
+    name: "create_department",
+    description: "Create a new department. Super-admin only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        description: { type: "string" },
+      },
+      required: ["name"],
+    },
+    execute: async (input) =>
+      admin.createDepartment({
+        name: s(input.name)!,
+        description: s(input.description),
+      }),
+  },
+  {
+    name: "update_department",
+    description: "Rename, archive, or change sort order of a department. Super-admin only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+        description: { type: "string" },
+        archived: { type: "boolean" },
+        sort_order: { type: "number" },
+      },
+      required: ["id"],
+    },
+    execute: async (input) => {
+      await admin.updateDepartment(s(input.id)!, {
+        name: s(input.name),
+        description: sOrNull(input.description) ?? undefined,
+        archived: b(input.archived),
+        sort_order: n(input.sort_order),
+      });
+      return { ok: true };
+    },
+  },
+  {
+    name: "list_hr_access_grants",
+    description:
+      "List all HR access grants (who can see whose HR records). Optionally filter by grantee user id. Super-admin only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        grantee_id: { type: "string" },
+      },
+      required: [],
+    },
+    execute: async (input) =>
+      admin.listHrAccessGrants({ grantee_id: s(input.grantee_id) }),
+  },
+  {
+    name: "grant_hr_access",
+    description:
+      "Give a user HR access. scope='all' grants access to every employee; scope='department' requires department_id; scope='employee' requires employee_id. Super-admin only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        grantee_id: { type: "string" },
+        scope: { type: "string", enum: ["all", "department", "employee"] },
+        department_id: { type: "string" },
+        employee_id: { type: "string" },
+        note: { type: "string" },
+      },
+      required: ["grantee_id", "scope"],
+    },
+    execute: async (input) => {
+      await admin.grantHrAccess({
+        grantee_id: s(input.grantee_id)!,
+        scope: s(input.scope) as "all" | "department" | "employee",
+        department_id: s(input.department_id),
+        employee_id: s(input.employee_id),
+        note: s(input.note),
+      });
+      return { ok: true };
+    },
+  },
+  {
+    name: "revoke_hr_access",
+    description: "Revoke a specific HR access grant by id. Super-admin only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        grant_id: { type: "string" },
+      },
+      required: ["grant_id"],
+    },
+    execute: async (input) => {
+      await admin.revokeHrAccess(s(input.grant_id)!);
+      return { ok: true };
+    },
+  },
+
+  // =========================================================================
   // SYSTEM
   // =========================================================================
   {
@@ -1262,7 +1408,8 @@ You have tools that give you live read + write access across the entire Haven OS
 - **Properties (PDM)** — the property master database. You can list, read, update any field (status, tier, account manager, access codes, etc.), and archive properties.
 - **Scorecard** — the Northstar weekly KPI tracker. You can read current + historical months, update cell values/targets/status (green/yellow/red), seed new months, and archive closed months.
 - **Onboarding** — property onboarding projects with templated tasks + checklists. You can create projects, mark tasks in progress/done, tick checklist items, add ad-hoc tasks.
-- **HR** (admin-gated) — employees, performance reviews, issues/write-ups, roles, candidates, policy/procedure docs.
+- **HR** (permission-gated) — employees, performance reviews, issues/write-ups, roles, candidates, policy/procedure docs. Each call is row-level filtered by the caller's HR access grants.
+- **Admin** (super-admin only) — list users, change roles (user / admin / super_admin), grant or revoke HR access, manage departments.
 - **System** — test Hostaway connection, list team members.
 
 ## How to work
@@ -1271,9 +1418,10 @@ You have tools that give you live read + write access across the entire Haven OS
 3. **Resolve names → IDs** before writes. If a user says "assign the pool task to Sarah", call \`list_team_members\` + \`list_tasks\` to find IDs first.
 4. **Confirm destructive actions.** Before deleting a task, archiving a property, deleting an employee, or archiving the scorecard, ask the user "Just to confirm — delete X? (yes/no)" and wait for their response, unless their prompt explicitly said "delete X" in which case you can proceed.
 5. **Be concise.** This is a business tool. Lead with the answer. If you're reporting data, prioritise what needs action (red scorecard metrics, overdue tasks, etc.).
-6. **On HR access denied:** if you hit "requires HR admin access", tell the user their account isn't on the HR admin list and they can add themselves at /hr/settings if they have owner access.
-7. **When in doubt about a column on Property or Employee,** use \`get_property\` / \`get_employee\` first to see what's available — then call the update tool with the exact field names.
-8. **Format lists** as short markdown — either a table or bullets. Never paste raw JSON at the user.
+6. **On HR access denied:** if you hit "HR access required" or "You don't have access to this employee's HR record", tell the user their account doesn't have HR access for that employee and that a Super Admin can grant access at /settings/users.
+7. **Three roles:** 'user' (Work/Properties/Onboarding), 'admin' (everything except HR & user management), 'super_admin' (full). HR access can be granted to any user scoped to all employees, a department, or a single employee.
+8. **When in doubt about a column on Property or Employee,** use \`get_property\` / \`get_employee\` first to see what's available — then call the update tool with the exact field names.
+9. **Format lists** as short markdown — either a table or bullets. Never paste raw JSON at the user.
 
 ## Style
 - Plain, direct, operator tone.
