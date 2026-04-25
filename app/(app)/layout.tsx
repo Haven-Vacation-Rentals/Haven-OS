@@ -8,6 +8,7 @@ import {
   canAccessScorecard,
   canAccessAgentChat,
   canAccessHrModule,
+  canAccessSales,
 } from "@/lib/auth/permissions";
 import { Toaster } from "sonner";
 
@@ -17,10 +18,11 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const user = await requireUser();
-  const [canScorecard, canAgents, canHr] = await Promise.all([
+  const [canScorecard, canAgents, canHr, canSales] = await Promise.all([
     canAccessScorecard(),
     canAccessAgentChat(),
     canAccessHrModule(),
+    canAccessSales(),
   ]);
 
   return (
@@ -30,6 +32,7 @@ export default async function AppLayout({
         canScorecard={canScorecard}
         canAgents={canAgents}
         canHr={canHr}
+        canSales={canSales}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar user={user} />

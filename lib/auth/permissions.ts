@@ -112,6 +112,11 @@ export async function canManageUsers(): Promise<boolean> {
   return p.is_super_admin;
 }
 
+export async function canAccessSales(): Promise<boolean> {
+  const p = await getPermissions();
+  return p.is_admin_or_above;
+}
+
 // Work / Properties / Onboarding are accessible to all signed-in users.
 // Exposed as functions anyway so callers can be uniform + we can change later.
 export async function canAccessWork(): Promise<boolean> {

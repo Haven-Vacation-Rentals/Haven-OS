@@ -21,6 +21,8 @@ import * as hr from "@/lib/hr/actions";
 import * as onb from "@/lib/onboarding/actions";
 import * as hostaway from "@/lib/hostaway/actions";
 import * as admin from "@/lib/admin/actions";
+import * as sales from "@/lib/sales/actions";
+import { extractListing } from "@/lib/sales/listing-extractor";
 import {
   getPermissions,
   requireHrAccess,
@@ -1488,6 +1490,166 @@ export const TOOLS: ToolDef[] = [
   },
 
   // =========================================================================
+  // SALES — PROPERTY PITCHES
+  // =========================================================================
+  {
+    name: "extract_listing_details",
+    description:
+      "Fetch a Zillow / Airbnb / VRBO / Booking listing URL and extract address, beds, baths, sleeps, and a hero photo. Use this BEFORE create_sales_pitch when the user gives you a listing URL so you can pre-fill what we know. Returns ok=false (with reason) if the site blocked the fetch — in that case ask the user for the missing fields.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Public listing URL." },
+      },
+      required: ["url"],
+    },
+    execute: async (input) => extractListing(s(input.url)!),
+  },
+  {
+    name: "create_sales_pitch",
+    description:
+      "Create a new Haven property pitch — a personalized one-pager at /pitch/<slug> that we send to a prospective property owner. The pitch expires 30 days after creation. Required: owner_name, property_address, projection_low, projection_high (annual gross revenue range, USD). All other fields are optional but a listing_url + hero_image_url makes the pitch much better. Returns the new pitch with its public URL slug.",
+    input_schema: {
+      type: "object",
+      properties: {
+        owner_name: { type: "string" },
+        owner_email: { type: "string" },
+        property_address: { type: "string" },
+        listing_url: { type: "string" },
+        listing_source: {
+          type: "string",
+          enum: ["zillow", "airbnb", "vrbo", "booking", "other"],
+        },
+        beds: { type: "number" },
+        baths: { type: "number" },
+        sleeps: { type: "number" },
+        hero_image_url: { type: "string" },
+        projection_low: { type: "number", description: "Annual gross revenue, low end, USD" },
+        projection_high: { type: "number", description: "Annual gross revenue, high end, USD" },
+        projection_note: { type: "string" },
+      },
+      required: ["owner_name", "property_address", "projection_low", "projection_high"],
+    },
+    execute: async (input) =>
+      sales.createPitchOrThrow({
+        owner_name: s(input.owner_name)!,
+        owner_email: s(input.owner_email),
+        property_address: s(input.property_address)!,
+        listing_url: s(input.listing_url),
+        listing_source: s(input.listing_source) as
+          | sales.SalesListingSource
+          | undefined,
+        beds: n(input.beds),
+        baths: n(input.baths),
+        sleeps: n(input.sleeps),
+        hero_image_url: s(input.hero_image_url),
+        projection_low: n(input.projection_low)!,
+        projection_high: n(input.projection_high)!,
+        projection_note: s(input.projection_note),
+      }),
+  },
+  {
+    name: "list_sales_pitches",
+    description:
+      "List Haven sales pitches. By default returns active pitches (not archived). Pass include_archived=true to include archived ones too.",
+    input_schema: {
+      type: "object",
+      properties: {
+        include_archived: { type: "boolean" },
+      },
+      required: [],
+    },
+    execute: async (input) =>
+      sales.listPitches({ includeArchived: !!b(input.include_archived) }),
+  },
+  {
+    name: "get_sales_pitch",
+    description: "Get a single sales pitch by id.",
+    input_schema: {
+      type: "object",
+      properties: { pitch_id: { type: "string" } },
+      required: ["pitch_id"],
+    },
+    execute: async (input) => sales.getPitch(s(input.pitch_id)!),
+  },
+  {
+    name: "update_sales_pitch",
+    description:
+      "Update fields on an existing sales pitch. You can change owner / property fields, projection range, hero image, listing URL, status (active|archived), or expires_at (ISO timestamp — useful if the user wants to extend the pitch).",
+    input_schema: {
+      type: "object",
+      properties: {
+        pitch_id: { type: "string" },
+        owner_name: { type: "string" },
+        owner_email: { type: "string" },
+        property_address: { type: "string" },
+        listing_url: { type: "string" },
+        listing_source: {
+          type: "string",
+          enum: ["zillow", "airbnb", "vrbo", "booking", "other"],
+        },
+        beds: { type: "number" },
+        baths: { type: "number" },
+        sleeps: { type: "number" },
+        hero_image_url: { type: "string" },
+        projection_low: { type: "number" },
+        projection_high: { type: "number" },
+        projection_note: { type: "string" },
+        status: { type: "string", enum: ["active", "archived"] },
+        expires_at: { type: "string", description: "ISO timestamp" },
+      },
+      required: ["pitch_id"],
+    },
+    execute: async (input) => {
+      const patch: sales.UpdatePitchInput = {};
+      if (s(input.owner_name) !== undefined) patch.owner_name = s(input.owner_name);
+      if (s(input.owner_email) !== undefined) patch.owner_email = s(input.owner_email);
+      if (s(input.property_address) !== undefined)
+        patch.property_address = s(input.property_address);
+      if (s(input.listing_url) !== undefined) patch.listing_url = s(input.listing_url);
+      if (s(input.listing_source) !== undefined)
+        patch.listing_source = s(input.listing_source) as sales.SalesListingSource;
+      if (n(input.beds) !== undefined) patch.beds = n(input.beds);
+      if (n(input.baths) !== undefined) patch.baths = n(input.baths);
+      if (n(input.sleeps) !== undefined) patch.sleeps = n(input.sleeps);
+      if (s(input.hero_image_url) !== undefined)
+        patch.hero_image_url = s(input.hero_image_url);
+      if (n(input.projection_low) !== undefined)
+        patch.projection_low = n(input.projection_low);
+      if (n(input.projection_high) !== undefined)
+        patch.projection_high = n(input.projection_high);
+      if (s(input.projection_note) !== undefined)
+        patch.projection_note = s(input.projection_note);
+      if (s(input.status) !== undefined)
+        patch.status = s(input.status) as sales.SalesPitchStatus;
+      if (s(input.expires_at) !== undefined) patch.expires_at = s(input.expires_at);
+      return sales.updatePitchOrThrow(s(input.pitch_id)!, patch);
+    },
+  },
+  {
+    name: "archive_sales_pitch",
+    description:
+      "Archive a sales pitch. The public URL will start showing the 'expired — contact Jack' page. Reversible via update_sales_pitch with status='active'.",
+    input_schema: {
+      type: "object",
+      properties: { pitch_id: { type: "string" } },
+      required: ["pitch_id"],
+    },
+    execute: async (input) => sales.archivePitchOrThrow(s(input.pitch_id)!),
+  },
+  {
+    name: "delete_sales_pitch",
+    description:
+      "Permanently delete a sales pitch. Use only when the user explicitly says delete — otherwise prefer archive_sales_pitch.",
+    input_schema: {
+      type: "object",
+      properties: { pitch_id: { type: "string" } },
+      required: ["pitch_id"],
+    },
+    execute: async (input) => sales.deletePitchOrThrow(s(input.pitch_id)!),
+  },
+
+  // =========================================================================
   // SYSTEM
   // =========================================================================
   {
@@ -1541,6 +1703,7 @@ You have tools that give you live read + write access across the entire Haven OS
 - **Onboarding** — property onboarding projects with templated tasks + checklists. Full control: create or delete projects; update every project field (status, owner info, target/actual open dates, slack channel, folder URL, notes); add / update / delete / restatus tasks; edit any task field (title, description, department, due date, assignee, key-date flag); add / toggle / delete checklist items. Use \`list_onboarding_projects_with_stats\` for rollup views (progress, blockers, next key date, overdue) and \`get_onboarding_tree\` when you need specific task_ids to update.
 - **HR** (permission-gated) — employees, performance reviews, issues/write-ups, roles, candidates, policy/procedure docs. Each call is row-level filtered by the caller's HR access grants.
 - **Admin** (super-admin only) — list users; create users (default invite-by-email, optionally direct-create with password); change roles (user / admin / super_admin); delete users; grant or revoke HR access; manage departments. When the user asks to "add" or "invite" someone, default to invite mode (email-based) unless they say otherwise.
+- **Sales / Property Pitches** (admin or super_admin) — generate a personalized one-pager that gets sent to a prospective property owner, hosted at \`/pitch/<slug>\`. Workflow: when the user gives you a Zillow / Airbnb / VRBO / Booking link, call \`extract_listing_details\` first to auto-fill address, beds/baths/sleeps, and a hero photo. Then call \`create_sales_pitch\` with the owner's name and a projection range (annual gross revenue, low + high in USD). The pitch expires 30 days after creation; you can extend it via \`update_sales_pitch\` with a new \`expires_at\`. Use \`archive_sales_pitch\` to retire a pitch (the public URL flips to a friendly contact page); only use \`delete_sales_pitch\` when the user explicitly says delete. After creating, surface the public URL — it's \`<site>/pitch/<slug>\`.
 - **System** — test Hostaway connection, list team members.
 
 ## How to work

@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   ClipboardList,
   Bot,
+  Megaphone,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ function buildSections(flags: {
   canScorecard: boolean;
   canAgents: boolean;
   canHr: boolean;
+  canSales: boolean;
 }): NavSection[] {
   const overviewItems: NavItem[] = [
     { label: "The Board", href: "/dashboard", icon: LayoutDashboard },
@@ -59,7 +61,7 @@ function buildSections(flags: {
   }
   adminItems.push({ label: "Settings", href: "/settings", icon: Settings });
 
-  return [
+  const sections: NavSection[] = [
     {
       heading: "Overview",
       items: overviewItems,
@@ -75,11 +77,23 @@ function buildSections(flags: {
       heading: "Operations",
       items: [{ label: "Properties", href: "/properties", icon: Home }],
     },
-    {
-      heading: "Admin",
-      items: adminItems,
-    },
   ];
+
+  if (flags.canSales) {
+    sections.push({
+      heading: "Sales",
+      items: [
+        { label: "Pitches", href: "/sales/pitches", icon: Megaphone },
+      ],
+    });
+  }
+
+  sections.push({
+    heading: "Admin",
+    items: adminItems,
+  });
+
+  return sections;
 }
 
 export function Sidebar({
@@ -87,13 +101,15 @@ export function Sidebar({
   canScorecard = false,
   canAgents = false,
   canHr = false,
+  canSales = false,
 }: {
   user: HavenUser;
   canScorecard?: boolean;
   canAgents?: boolean;
   canHr?: boolean;
+  canSales?: boolean;
 }) {
-  const sections = buildSections({ canScorecard, canAgents, canHr });
+  const sections = buildSections({ canScorecard, canAgents, canHr, canSales });
   const pathname = usePathname();
   const [assistantOpen, setAssistantOpen] = useState(false);
 
