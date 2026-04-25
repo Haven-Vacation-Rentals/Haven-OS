@@ -80,21 +80,44 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
   const fallbackHero = pickFallbackHero(pitch.slug);
   const heroImage = pitch.hero_image_url || fallbackHero;
 
-  // Build the property gallery: prefer extractor-supplied photos, fall back
-  // to a curated mix of Haven cabin photos so every pitch feels alive.
+  // Build the "Your Property" photo set.
+  //
+  // Priority order:
+  //   1. If the pitch has any photos from the actual listing (hero or
+  //      gallery), show ONLY those. We never want to mix a generic Haven
+  //      cabin in next to the owner's real property — that looks fake.
+  //   2. If the pitch has nothing from a listing, fall back to a curated
+  //      Smoky Mountain set so the page still feels alive instead of grey.
   const galleryUrls = (pitch.gallery ?? [])
     .map((g) => g.url)
     .filter((u): u is string => typeof u === "string" && u.length > 0);
+  const hasListingPhotos =
+    Boolean(pitch.hero_image_url) || galleryUrls.length > 0;
+
   const propertyPhotos: string[] = (() => {
-    if (galleryUrls.length >= 2) return galleryUrls.slice(0, 4);
-    // Stitch together hero + curated fallbacks (deduped) to fill the rail.
     const seen = new Set<string>();
     const photos: string[] = [];
-    for (const u of [heroImage, ...galleryUrls, ...HAVEN_HERO_FALLBACKS]) {
-      if (seen.has(u)) continue;
+    const push = (u: string) => {
+      if (!u || seen.has(u)) return;
       seen.add(u);
       photos.push(u);
+    };
+
+    if (hasListingPhotos) {
+      // Only listing-derived photos. Hero first, then the gallery.
+      if (pitch.hero_image_url) push(pitch.hero_image_url);
+      for (const u of galleryUrls) {
+        if (photos.length >= 4) break;
+        push(u);
+      }
+      return photos;
+    }
+
+    // No listing photos at all — fall back to curated Haven cabin shots.
+    push(heroImage);
+    for (const u of HAVEN_HERO_FALLBACKS) {
       if (photos.length >= 4) break;
+      push(u);
     }
     return photos;
   })();

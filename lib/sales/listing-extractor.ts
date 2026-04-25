@@ -134,14 +134,32 @@ export async function extractListing(url: string): Promise<ExtractedListing> {
   const ogImages = collectOgImages(html);
   const merged = new Set<string>();
   const galleryFinal: string[] = [];
-  for (const u of [...(out.gallery ?? []), ...ldImages, ...ogImages]) {
-    if (!u || merged.has(u)) continue;
-    if (out.hero_image_url && u === out.hero_image_url) continue;
+  const stripParams = (u: string) => stripQuery(u);
+  for (const raw of [...(out.gallery ?? []), ...ldImages, ...ogImages]) {
+    if (!raw) continue;
+    const u = stripParams(raw);
+    if (merged.has(u)) continue;
+    // Filter out obvious non-property photos (Airbnb UI, review icons, etc).
+    // Other platform CDN URLs are kept as-is — it's better to show them
+    // than fall back to a generic Smoky Mountain photo.
+    if (
+      /a0\.muscache\.com\/im\/pictures\//i.test(u) &&
+      !isAirbnbPropertyPhoto(u)
+    ) {
+      continue;
+    }
+    if (out.hero_image_url && u === stripParams(out.hero_image_url)) continue;
     merged.add(u);
     galleryFinal.push(u);
     if (galleryFinal.length >= 8) break;
   }
   out.gallery = galleryFinal;
+
+  // If the hero we picked was a platform asset rather than a real property
+  // photo, swap it for the first real gallery photo.
+  if (out.hero_image_url && isAirbnbPlatformAsset(out.hero_image_url)) {
+    out.hero_image_url = galleryFinal[0] ?? undefined;
+  }
 
   // Normalize numeric fields.
   if (out.beds && !Number.isFinite(out.beds)) out.beds = undefined;
@@ -232,18 +250,49 @@ function applyAirbnb(
     if (cityState) out.property_address = cityState;
   }
   // Best-effort image scrape: Airbnb embeds picture URLs in markup as
-  // https://a0.muscache.com/im/pictures/... — useful when we got HTML
-  // back but no JSON-LD or og:image.
-  const muscache = collectMatches(
+  // https://a0.muscache.com/im/pictures/... but mixes property photos
+  // ("prohost-api/Hosting-", "miso/Hosting-", "hosting/") in with platform
+  // assets, review icons, and host avatars. We only want the property ones.
+  const muscacheAll = collectMatches(
     html,
     /https:\/\/a0\.muscache\.com\/im\/pictures\/[^"'\s)]+\.(?:jpe?g|png|webp)/gi,
   );
-  if (muscache.length && (!out.gallery || out.gallery.length === 0)) {
-    out.gallery = dedupeKeepFirst(muscache).slice(0, 8);
+  const propertyOnly = dedupeKeepFirst(muscacheAll).filter(isAirbnbPropertyPhoto);
+  if (propertyOnly.length) {
+    // Strip any querystring so the database stores a stable canonical URL,
+    // and prefer larger renditions when Airbnb gives us a choice.
+    const cleaned = propertyOnly.map(stripQuery);
+    if (!out.hero_image_url || isAirbnbPlatformAsset(out.hero_image_url)) {
+      out.hero_image_url = cleaned[0];
+    }
+    out.gallery = dedupeKeepFirst(cleaned).slice(0, 12);
   }
-  if (!out.hero_image_url && muscache.length) {
-    out.hero_image_url = muscache[0];
-  }
+}
+
+function isAirbnbPropertyPhoto(u: string): boolean {
+  // Match real listing photos and exclude UI assets and host avatars.
+  if (!/^https:\/\/a0\.muscache\.com\/im\/pictures\//i.test(u)) return false;
+  if (/airbnbplatformassets/i.test(u)) return false;
+  if (/airbnb-platform-assets/i.test(u)) return false;
+  if (/\/user\//i.test(u)) return false;
+  if (/\/avatars?\//i.test(u)) return false;
+  return (
+    /\/prohost-api\/Hosting-/i.test(u) ||
+    /\/miso\/Hosting-/i.test(u) ||
+    /\/Hosting-\d/i.test(u) ||
+    /\/hosting\//i.test(u)
+  );
+}
+
+function isAirbnbPlatformAsset(u: string): boolean {
+  return /a0\.muscache\.com\/im\/pictures\/(?:AirbnbPlatformAssets|airbnb-platform-assets|user|avatar)/i.test(
+    u,
+  );
+}
+
+function stripQuery(u: string): string {
+  const i = u.indexOf("?");
+  return i === -1 ? u : u.slice(0, i);
 }
 
 function applyVrbo(
