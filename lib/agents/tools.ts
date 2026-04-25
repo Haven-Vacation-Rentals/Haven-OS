@@ -1352,7 +1352,7 @@ export const TOOLS: ToolDef[] = [
       required: ["email"],
     },
     execute: async (input) => {
-      return admin.createUser({
+      return admin.createUserOrThrow({
         email: s(input.email)!,
         full_name: s(input.full_name),
         role: s(input.role) as HavenUserRole | undefined,

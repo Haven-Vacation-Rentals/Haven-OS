@@ -88,33 +88,55 @@ export async function setUserRole(
  *
  * Super-admin only.
  */
-export async function createUser(input: {
+export type CreateUserInput = {
   email: string;
   full_name?: string;
   role?: HavenUserRole;
   mode?: "invite" | "direct";
   password?: string;
   redirect_to?: string;
-}): Promise<AdminUser> {
-  await requireSuperAdmin();
+};
+
+export type CreateUserResult =
+  | { ok: true; user: AdminUser }
+  | { ok: false; error: string };
+
+/**
+ * Internal implementation. Returns a result object instead of throwing
+ * so the calling Server Action can return errors verbatim to the client
+ * (Next.js production strips error.message from thrown Server Action
+ * errors).
+ */
+async function createUserImpl(input: CreateUserInput): Promise<CreateUserResult> {
+  try {
+    await requireSuperAdmin();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 
   const email = input.email?.trim().toLowerCase();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new Error("Please provide a valid email address.");
+    return { ok: false, error: "Please provide a valid email address." };
   }
   const role: HavenUserRole = input.role ?? "user";
   const mode = input.mode ?? "invite";
   const fullName = input.full_name?.trim() || null;
 
-  const admin = getAdminClient();
+  let admin: ReturnType<typeof getAdminClient>;
+  try {
+    admin = getAdminClient();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 
   let userId: string;
 
   if (mode === "direct") {
     if (!input.password || input.password.length < 8) {
-      throw new Error(
-        "Direct-create requires a password of at least 8 characters.",
-      );
+      return {
+        ok: false,
+        error: "Direct-create requires a password of at least 8 characters.",
+      };
     }
     const { data, error } = await admin.auth.admin.createUser({
       email,
@@ -123,11 +145,18 @@ export async function createUser(input: {
       user_metadata: fullName ? { full_name: fullName } : undefined,
     });
     if (error) {
-      throw new Error(
-        error.message?.includes("already")
-          ? "A user with that email already exists."
-          : `Failed to create user: ${error.message}`,
-      );
+      const msg = error.message ?? "";
+      const code = (error as { code?: string }).code;
+      const isExisting =
+        msg.toLowerCase().includes("already") ||
+        msg.toLowerCase().includes("registered") ||
+        code === "email_exists";
+      return {
+        ok: false,
+        error: isExisting
+          ? `A user with email ${email} already exists.`
+          : `Failed to create user: ${msg}`,
+      };
     }
     userId = data.user.id;
   } else {
@@ -137,12 +166,18 @@ export async function createUser(input: {
       redirectTo: input.redirect_to,
     });
     if (error) {
-      throw new Error(
-        error.message?.includes("already") ||
-        error.message?.toLowerCase().includes("registered")
-          ? "A user with that email already exists."
-          : `Failed to invite user: ${error.message}`,
-      );
+      const msg = error.message ?? "";
+      const code = (error as { code?: string }).code;
+      const isExisting =
+        msg.toLowerCase().includes("already") ||
+        msg.toLowerCase().includes("registered") ||
+        code === "email_exists";
+      return {
+        ok: false,
+        error: isExisting
+          ? `A user with email ${email} already exists.`
+          : `Failed to invite user: ${msg}`,
+      };
     }
     userId = data.user.id;
   }
@@ -150,28 +185,63 @@ export async function createUser(input: {
   // The auth trigger creates a profiles row with role='user'. Upgrade if
   // needed and ensure full_name lands on the profile too (the trigger
   // only copies metadata if present).
-  const supabase = await db();
+  //
+  // We use the service-role admin client here so this works regardless
+  // of profiles RLS — the regular SSR client only allows users to update
+  // / read their own profile.
   const updates: { full_name?: string; role?: HavenUserRole } = {};
   if (fullName) updates.full_name = fullName;
   if (role !== "user") updates.role = role;
   if (Object.keys(updates).length > 0) {
-    const { error: updErr } = await supabase
+    const { error: updErr } = await admin
       .from("profiles")
       .update(updates)
       .eq("id", userId);
-    if (updErr) throw updErr;
+    if (updErr) {
+      console.error("createUser: profiles update failed", updErr);
+      return {
+        ok: false,
+        error: `User created, but failed to apply role/name: ${updErr.message}`,
+      };
+    }
   }
 
-  // Read back the canonical profile.
-  const { data: profile, error: readErr } = await supabase
+  // Read back the canonical profile (service-role bypasses RLS).
+  const { data: profile, error: readErr } = await admin
     .from("profiles")
     .select("id, email, full_name, avatar_url, role, created_at")
     .eq("id", userId)
     .single();
-  if (readErr) throw readErr;
+  if (readErr) {
+    console.error("createUser: profiles readback failed", readErr);
+    return {
+      ok: false,
+      error: `User created, but couldn't read back profile: ${readErr.message}`,
+    };
+  }
 
   revalidatePath("/settings/users");
-  return profile as AdminUser;
+  return { ok: true, user: profile as AdminUser };
+}
+
+/**
+ * Server-action-friendly variant that returns a result object so the
+ * client can surface error messages (Next.js production sanitizes
+ * thrown Server Action errors into a generic digest).
+ */
+export async function createUser(input: CreateUserInput): Promise<CreateUserResult> {
+  return createUserImpl(input);
+}
+
+/**
+ * Throws-on-error variant for callers that prefer exceptions (e.g.,
+ * the in-app agent tool runtime, which converts thrown errors into
+ * tool error responses for the model).
+ */
+export async function createUserOrThrow(input: CreateUserInput): Promise<AdminUser> {
+  const r = await createUserImpl(input);
+  if (!r.ok) throw new Error(r.error);
+  return r.user;
 }
 
 /**

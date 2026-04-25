@@ -89,13 +89,18 @@ export function AddUserDialog({
     }
     startTransition(async () => {
       try {
-        const u = await createUser({
+        const result = await createUser({
           email: email.trim(),
           full_name: fullName.trim() || undefined,
           role,
           mode,
           password: mode === "direct" ? password : undefined,
         });
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        const u = result.user;
         setSuccess(
           mode === "invite"
             ? `Invite sent to ${u.email}. They’ll receive an email to set a password.`
@@ -108,7 +113,12 @@ export function AddUserDialog({
           handleClose(false);
         }, 1400);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        // Network failures or unexpected exceptions still surface here.
+        setError(
+          e instanceof Error
+            ? e.message
+            : "Something went wrong. Please try again.",
+        );
       }
     });
   };
