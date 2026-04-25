@@ -138,10 +138,10 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
             <img src={HAVEN_LOGO} alt="Haven Vacation Rentals" className="h-9 w-auto" />
           </a>
           <a
-            href="mailto:jack@havenvacationrentals.com"
+            href="mailto:Sales@havenvacationrentals.com"
             className="hidden items-center gap-2 rounded-[30px] bg-[#FF564E] px-5 py-2 text-[12px] font-black uppercase tracking-[2px] text-white transition-all hover:brightness-95 sm:inline-flex"
           >
-            Talk to Jack
+            Contact Us
           </a>
         </div>
       </header>
@@ -209,7 +209,7 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
             {pitch.property_address}
           </h2>
 
-          <div className="mt-8 grid grid-cols-1 items-start gap-6 md:grid-cols-2">
+          <div className="mt-8 grid grid-cols-1 items-center gap-6 md:grid-cols-2">
             {/* Photos: large lead + small thumbnail rail */}
             <div className="flex flex-col gap-3">
               <div className="overflow-hidden rounded-[14px] bg-[#EDF0EE]">
@@ -478,10 +478,10 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <a
-              href="mailto:jack@havenvacationrentals.com"
+              href="mailto:Sales@havenvacationrentals.com"
               className="inline-flex items-center gap-2 rounded-[30px] bg-[#FF564E] px-8 py-3.5 text-[14px] font-black uppercase tracking-[2px] text-white transition-all hover:brightness-95"
             >
-              Email Jack
+              Contact Us
               <ArrowRight className="h-4 w-4" />
             </a>
             <a

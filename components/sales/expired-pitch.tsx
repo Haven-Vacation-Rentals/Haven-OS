@@ -1,6 +1,6 @@
 /**
  * Expired pitch — shown when /pitch/<slug> has passed expires_at or
- * been archived. Friendly contact-Jack page.
+ * been archived. Friendly contact page.
  */
 
 export function ExpiredPitch({ ownerName }: { ownerName: string }) {
@@ -36,10 +36,10 @@ export function ExpiredPitch({ ownerName }: { ownerName: string }) {
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
           <a
-            href="mailto:jack@havenvacationrentals.com"
+            href="mailto:Sales@havenvacationrentals.com"
             className="inline-flex items-center justify-center gap-2 rounded-[30px] bg-[#FF564E] px-7 py-3 text-[14px] font-black uppercase tracking-[2px] text-white transition-all hover:brightness-95"
           >
-            Email Jack
+            Contact Us
           </a>
           <a
             href="https://havenvacationrentals.com/contact-us/"

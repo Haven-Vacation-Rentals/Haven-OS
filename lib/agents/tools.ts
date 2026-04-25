@@ -1508,7 +1508,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "create_sales_pitch",
     description:
-      "Create a new Haven property pitch — a personalized one-pager at /pitch/<slug> that we send to a prospective property owner. The pitch expires 30 days after creation. Required: owner_name, property_address, projection_low, projection_high (annual gross revenue range, USD). All other fields are optional but a listing_url + hero_image_url makes the pitch much better. Returns the new pitch with its public URL slug.",
+      "Create a new Haven property pitch — a personalized one-pager at https://haven-os-five.vercel.app/pitch/<slug> that we send to a prospective property owner. The pitch expires 30 days after creation. Required: owner_name, property_address, projection_low, projection_high (annual gross revenue range, USD). All other fields are optional but a listing_url + hero_image_url makes the pitch much better. WORKFLOW: when a user says something like 'create a pitch for Dylan at 3741 Heritage Hills with the Airbnb listing https://...', call extract_listing_details on the URL FIRST to auto-fill beds/baths/sleeps/hero, then call this tool. After creating, ALWAYS share the full public URL (https://haven-os-five.vercel.app/pitch/<slug>) back to the user as a clickable link so they can preview and send it.",
     input_schema: {
       type: "object",
       properties: {
