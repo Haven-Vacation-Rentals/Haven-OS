@@ -9,6 +9,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getAdminClient } from "@/lib/supabase/admin";
 import {
   requireSuperAdmin,
   getPermissions,
@@ -69,6 +70,122 @@ export async function setUserRole(
     .update({ role })
     .eq("id", userId);
   if (error) throw error;
+  revalidatePath("/settings/users");
+}
+
+/**
+ * Create a new Haven OS user.
+ *
+ * Two modes:
+ *  - mode='invite' (default): send a Supabase invite email. The user
+ *    confirms the email, sets a password, and lands in Haven OS.
+ *  - mode='direct': create the user immediately with a provided
+ *    password. Email is auto-confirmed.
+ *
+ * In either case the `handle_new_user` trigger creates the matching
+ * `profiles` row; we then upgrade the role if the caller specified one
+ * other than 'user'.
+ *
+ * Super-admin only.
+ */
+export async function createUser(input: {
+  email: string;
+  full_name?: string;
+  role?: HavenUserRole;
+  mode?: "invite" | "direct";
+  password?: string;
+  redirect_to?: string;
+}): Promise<AdminUser> {
+  await requireSuperAdmin();
+
+  const email = input.email?.trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Please provide a valid email address.");
+  }
+  const role: HavenUserRole = input.role ?? "user";
+  const mode = input.mode ?? "invite";
+  const fullName = input.full_name?.trim() || null;
+
+  const admin = getAdminClient();
+
+  let userId: string;
+
+  if (mode === "direct") {
+    if (!input.password || input.password.length < 8) {
+      throw new Error(
+        "Direct-create requires a password of at least 8 characters.",
+      );
+    }
+    const { data, error } = await admin.auth.admin.createUser({
+      email,
+      password: input.password,
+      email_confirm: true,
+      user_metadata: fullName ? { full_name: fullName } : undefined,
+    });
+    if (error) {
+      throw new Error(
+        error.message?.includes("already")
+          ? "A user with that email already exists."
+          : `Failed to create user: ${error.message}`,
+      );
+    }
+    userId = data.user.id;
+  } else {
+    // invite flow
+    const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
+      data: fullName ? { full_name: fullName } : undefined,
+      redirectTo: input.redirect_to,
+    });
+    if (error) {
+      throw new Error(
+        error.message?.includes("already") ||
+        error.message?.toLowerCase().includes("registered")
+          ? "A user with that email already exists."
+          : `Failed to invite user: ${error.message}`,
+      );
+    }
+    userId = data.user.id;
+  }
+
+  // The auth trigger creates a profiles row with role='user'. Upgrade if
+  // needed and ensure full_name lands on the profile too (the trigger
+  // only copies metadata if present).
+  const supabase = await db();
+  const updates: { full_name?: string; role?: HavenUserRole } = {};
+  if (fullName) updates.full_name = fullName;
+  if (role !== "user") updates.role = role;
+  if (Object.keys(updates).length > 0) {
+    const { error: updErr } = await supabase
+      .from("profiles")
+      .update(updates)
+      .eq("id", userId);
+    if (updErr) throw updErr;
+  }
+
+  // Read back the canonical profile.
+  const { data: profile, error: readErr } = await supabase
+    .from("profiles")
+    .select("id, email, full_name, avatar_url, role, created_at")
+    .eq("id", userId)
+    .single();
+  if (readErr) throw readErr;
+
+  revalidatePath("/settings/users");
+  return profile as AdminUser;
+}
+
+/**
+ * Permanently delete a user (auth + profile cascade).
+ * Super-admin only. Cannot delete yourself.
+ */
+export async function deleteUser(userId: string): Promise<void> {
+  const superId = await requireSuperAdmin();
+  if (userId === superId) {
+    throw new Error("You can't delete your own account.");
+  }
+  const admin = getAdminClient();
+  const { error } = await admin.auth.admin.deleteUser(userId);
+  if (error) throw new Error(`Failed to delete user: ${error.message}`);
   revalidatePath("/settings/users");
 }
 

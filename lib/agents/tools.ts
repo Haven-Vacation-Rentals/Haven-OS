@@ -1318,6 +1318,66 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "create_user",
+    description:
+      "Add a new Haven OS user. Two modes: 'invite' (default) sends a Supabase magic-link email so the new user confirms and sets their own password \u2014 the typical onboarding path; 'direct' creates the account immediately with a provided password (for service accounts or when email isn't desired). Role defaults to 'user' if not specified. Super-admin only. Returns the created user record.",
+    input_schema: {
+      type: "object",
+      properties: {
+        email: {
+          type: "string",
+          description: "User's email address.",
+        },
+        full_name: {
+          type: "string",
+          description: "Optional. The user's full display name.",
+        },
+        role: {
+          type: "string",
+          enum: ["user", "admin", "super_admin"],
+          description: "Defaults to 'user'.",
+        },
+        mode: {
+          type: "string",
+          enum: ["invite", "direct"],
+          description:
+            "Defaults to 'invite'. Use 'direct' only when the user explicitly asks to skip email and provides a password.",
+        },
+        password: {
+          type: "string",
+          description:
+            "Required when mode='direct'. Must be at least 8 characters.",
+        },
+      },
+      required: ["email"],
+    },
+    execute: async (input) => {
+      return admin.createUser({
+        email: s(input.email)!,
+        full_name: s(input.full_name),
+        role: s(input.role) as HavenUserRole | undefined,
+        mode: s(input.mode) as "invite" | "direct" | undefined,
+        password: s(input.password),
+      });
+    },
+  },
+  {
+    name: "delete_user",
+    description:
+      "Permanently delete a Haven OS user (auth account + profile). IRREVERSIBLE \u2014 confirm with the user before calling. You cannot delete yourself. Super-admin only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        user_id: { type: "string" },
+      },
+      required: ["user_id"],
+    },
+    execute: async (input) => {
+      await admin.deleteUser(s(input.user_id)!);
+      return { ok: true };
+    },
+  },
+  {
     name: "list_departments",
     description:
       "List all departments (id, name, slug, archived). Available to any signed-in user.",
@@ -1480,7 +1540,7 @@ You have tools that give you live read + write access across the entire Haven OS
 - **Scorecard** — the Northstar weekly KPI tracker. You can read current + historical months, update cell values/targets/status (green/yellow/red), seed new months, and archive closed months.
 - **Onboarding** — property onboarding projects with templated tasks + checklists. Full control: create or delete projects; update every project field (status, owner info, target/actual open dates, slack channel, folder URL, notes); add / update / delete / restatus tasks; edit any task field (title, description, department, due date, assignee, key-date flag); add / toggle / delete checklist items. Use \`list_onboarding_projects_with_stats\` for rollup views (progress, blockers, next key date, overdue) and \`get_onboarding_tree\` when you need specific task_ids to update.
 - **HR** (permission-gated) — employees, performance reviews, issues/write-ups, roles, candidates, policy/procedure docs. Each call is row-level filtered by the caller's HR access grants.
-- **Admin** (super-admin only) — list users, change roles (user / admin / super_admin), grant or revoke HR access, manage departments.
+- **Admin** (super-admin only) — list users; create users (default invite-by-email, optionally direct-create with password); change roles (user / admin / super_admin); delete users; grant or revoke HR access; manage departments. When the user asks to "add" or "invite" someone, default to invite mode (email-based) unless they say otherwise.
 - **System** — test Hostaway connection, list team members.
 
 ## How to work

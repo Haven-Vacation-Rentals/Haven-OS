@@ -1,17 +1,19 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import {
   Shield,
   ShieldCheck,
   ShieldAlert,
   User as UserIcon,
+  UserPlus,
   Plus,
   X,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AddUserDialog } from "@/components/settings/add-user-dialog";
 import {
   setUserRole,
   grantHrAccess,
@@ -61,7 +63,17 @@ export function UserPermissionsTable({
   const [grants, setGrants] = useState(initialGrants);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+
+  // Resync local state when the server-rendered page is refreshed
+  // (e.g., after Add user calls router.refresh()).
+  useEffect(() => {
+    setUsers(initialUsers);
+  }, [initialUsers]);
+  useEffect(() => {
+    setGrants(initialGrants);
+  }, [initialGrants]);
 
   const handleRoleChange = (userId: string, role: HavenUserRole) => {
     setError(null);
@@ -127,6 +139,24 @@ export function UserPermissionsTable({
           {error}
         </div>
       )}
+
+      {/* Toolbar */}
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+        <div className="text-[12px] text-muted-foreground">
+          {users.length} user{users.length === 1 ? "" : "s"}
+        </div>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => setAddOpen(true)}
+          className="gap-1.5"
+        >
+          <UserPlus className="h-4 w-4" />
+          Add user
+        </Button>
+      </div>
+
+      <AddUserDialog open={addOpen} onOpenChange={setAddOpen} />
 
       <div className="grid grid-cols-[1fr_160px_220px_40px] items-center gap-3 border-b border-border bg-surface-alt/60 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         <div>User</div>
