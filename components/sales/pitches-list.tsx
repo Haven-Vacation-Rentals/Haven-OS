@@ -20,6 +20,7 @@ import {
   Eye,
   Check,
   Megaphone,
+  ImageIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ import {
   type SalesPitch,
 } from "@/lib/sales/actions";
 import { CreatePitchDialog } from "@/components/sales/create-pitch-dialog";
+import { EditPhotosDialog } from "@/components/sales/edit-photos-dialog";
 
 type Tab = "active" | "archived";
 
@@ -149,6 +151,7 @@ function PitchRow({
 }) {
   const [pending, startTransition] = useTransition();
   const [copied, setCopied] = useState(false);
+  const [photosOpen, setPhotosOpen] = useState(false);
 
   const publicUrl = useMemo(() => {
     if (typeof window === "undefined") return `/pitch/${pitch.slug}`;
@@ -253,6 +256,13 @@ function PitchRow({
               <Copy className="h-3.5 w-3.5" />
             )}
           </IconAction>
+          <IconAction
+            title="Edit photos"
+            onClick={() => setPhotosOpen(true)}
+            disabled={pending}
+          >
+            <ImageIcon className="h-3.5 w-3.5" />
+          </IconAction>
           <a
             href={publicUrl}
             target="_blank"
@@ -280,6 +290,12 @@ function PitchRow({
             <Trash2 className="h-3.5 w-3.5" />
           </IconAction>
         </div>
+        <EditPhotosDialog
+          pitch={pitch}
+          open={photosOpen}
+          onOpenChange={setPhotosOpen}
+          onSaved={onChanged}
+        />
       </td>
     </tr>
   );

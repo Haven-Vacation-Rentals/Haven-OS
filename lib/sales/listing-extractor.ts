@@ -102,9 +102,14 @@ export async function extractListing(url: string): Promise<ExtractedListing> {
       "og:image",
       "twitter:image",
     ]),
+    gallery: [],
   };
 
   const ld = extractJsonLd(html);
+
+  // Always try JSON-LD images for the gallery — most listing sites embed
+  // them, and they're high quality.
+  const ldImages = collectJsonLdImages(ld);
 
   switch (source) {
     case "zillow":
@@ -123,6 +128,21 @@ export async function extractListing(url: string): Promise<ExtractedListing> {
       applyGeneric(out, html, ld);
   }
 
+  // Build a deduped gallery: extractor-supplied (already in out.gallery from
+  // a per-source adapter) + JSON-LD images + og:image-style siblings, with
+  // the hero filtered out so we don't show it twice.
+  const ogImages = collectOgImages(html);
+  const merged = new Set<string>();
+  const galleryFinal: string[] = [];
+  for (const u of [...(out.gallery ?? []), ...ldImages, ...ogImages]) {
+    if (!u || merged.has(u)) continue;
+    if (out.hero_image_url && u === out.hero_image_url) continue;
+    merged.add(u);
+    galleryFinal.push(u);
+    if (galleryFinal.length >= 8) break;
+  }
+  out.gallery = galleryFinal;
+
   // Normalize numeric fields.
   if (out.beds && !Number.isFinite(out.beds)) out.beds = undefined;
   if (out.baths && !Number.isFinite(out.baths)) out.baths = undefined;
@@ -133,7 +153,8 @@ export async function extractListing(url: string): Promise<ExtractedListing> {
       out.beds ||
       out.baths ||
       out.sleeps ||
-      out.hero_image_url,
+      out.hero_image_url ||
+      (out.gallery && out.gallery.length > 0),
   );
   if (!out.ok && !out.reason) {
     out.reason =
@@ -209,6 +230,19 @@ function applyAirbnb(
       /(?:in|·)\s*([A-Z][a-zA-Z .'-]+,\s*[A-Z]{2})/,
     );
     if (cityState) out.property_address = cityState;
+  }
+  // Best-effort image scrape: Airbnb embeds picture URLs in markup as
+  // https://a0.muscache.com/im/pictures/... — useful when we got HTML
+  // back but no JSON-LD or og:image.
+  const muscache = collectMatches(
+    html,
+    /https:\/\/a0\.muscache\.com\/im\/pictures\/[^"'\s)]+\.(?:jpe?g|png|webp)/gi,
+  );
+  if (muscache.length && (!out.gallery || out.gallery.length === 0)) {
+    out.gallery = dedupeKeepFirst(muscache).slice(0, 8);
+  }
+  if (!out.hero_image_url && muscache.length) {
+    out.hero_image_url = muscache[0];
   }
 }
 
@@ -436,6 +470,84 @@ function parseIntSafe(v: string | undefined): number | undefined {
 
 function escape(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Pull image-like URLs out of any JSON-LD blob (Place / Product / Hotel). */
+function collectJsonLdImages(ld: JsonLdNode[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (v: unknown) => {
+    if (typeof v !== "string") return;
+    const u = v.trim();
+    if (!u || !/^https?:\/\//i.test(u)) return;
+    if (seen.has(u)) return;
+    seen.add(u);
+    out.push(u);
+  };
+  for (const node of ld) {
+    const img = (node as Record<string, unknown>).image;
+    if (!img) continue;
+    if (typeof img === "string") {
+      push(img);
+    } else if (Array.isArray(img)) {
+      for (const it of img) {
+        if (typeof it === "string") push(it);
+        else if (it && typeof it === "object") {
+          push((it as Record<string, unknown>).url);
+          push((it as Record<string, unknown>).contentUrl);
+        }
+      }
+    } else if (typeof img === "object") {
+      push((img as Record<string, unknown>).url);
+      push((img as Record<string, unknown>).contentUrl);
+    }
+  }
+  return out;
+}
+
+/** Collect every <meta property="og:image*" content="..."> URL on the page. */
+function collectOgImages(html: string): string[] {
+  const re =
+    /<meta[^>]+(?:property|name)=["'](?:og:image(?::[a-z_]+)?|twitter:image[0-9]?)["'][^>]*content=["']([^"']+)["']/gi;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const u = decodeHtml(m[1]);
+    if (!/^https?:\/\//i.test(u)) continue;
+    if (seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  // Reverse pattern: content first, then property.
+  const re2 =
+    /<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:og:image(?::[a-z_]+)?|twitter:image[0-9]?)["']/gi;
+  while ((m = re2.exec(html)) !== null) {
+    const u = decodeHtml(m[1]);
+    if (!/^https?:\/\//i.test(u)) continue;
+    if (seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}
+
+function collectMatches(s: string, re: RegExp): string[] {
+  const out: string[] = [];
+  let m;
+  while ((m = re.exec(s)) !== null) out.push(m[0]);
+  return out;
+}
+
+function dedupeKeepFirst<T>(arr: T[]): T[] {
+  const seen = new Set<T>();
+  const out: T[] = [];
+  for (const v of arr) {
+    if (seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
 }
 
 function decodeHtml(s: string): string {

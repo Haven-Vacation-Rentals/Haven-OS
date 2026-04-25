@@ -31,8 +31,30 @@ import type { SalesPitch } from "@/lib/sales/actions";
 const HAVEN_LOGO =
   "https://havenvacationrentals.com/wp-content/uploads/2023/07/Haven-Logo-Black-Transparent-4.png";
 
-const DEFAULT_HERO =
-  "https://havenvacationrentals.com/wp-content/uploads/2023/07/Smoky-Mountain-Cabin-1.jpg";
+/**
+ * Verified-working hero photos from havenvacationrentals.com (CDN cached).
+ * Used when an extracted listing didn't yield a hero image (Airbnb 403s,
+ * generic listing sites with no og:image, etc.). We rotate by pitch slug
+ * so different owners see different cabins — every pitch gets a real
+ * Smoky Mountain photo, not a grey rectangle.
+ */
+const HAVEN_HERO_FALLBACKS = [
+  "https://havenvacationrentals.com/wp-content/uploads/2020/03/cabin.jpg",
+  "https://havenvacationrentals.com/wp-content/uploads/2020/03/1.jpg",
+  "https://havenvacationrentals.com/wp-content/uploads/2020/03/2.jpg",
+  "https://havenvacationrentals.com/wp-content/uploads/2020/03/3.jpg",
+  "https://havenvacationrentals.com/wp-content/uploads/2020/03/4.jpg",
+  "https://havenvacationrentals.com/wp-content/uploads/2020/05/IMG_2853.jpg",
+] as const;
+
+function pickFallbackHero(slug: string): string {
+  // Stable per-slug rotation so the same pitch always shows the same photo.
+  let h = 0;
+  for (let i = 0; i < slug.length; i++) {
+    h = (h * 31 + slug.charCodeAt(i)) >>> 0;
+  }
+  return HAVEN_HERO_FALLBACKS[h % HAVEN_HERO_FALLBACKS.length];
+}
 
 // 3 most-on-brand blog posts — Haven Standard always first.
 const BLOG_LINKS: { url: string; title: string; eyebrow: string }[] = [
@@ -55,7 +77,28 @@ const BLOG_LINKS: { url: string; title: string; eyebrow: string }[] = [
 
 export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
   const ownerFirstName = pitch.owner_name.split(" ")[0] || pitch.owner_name;
-  const heroImage = pitch.hero_image_url || DEFAULT_HERO;
+  const fallbackHero = pickFallbackHero(pitch.slug);
+  const heroImage = pitch.hero_image_url || fallbackHero;
+
+  // Build the property gallery: prefer extractor-supplied photos, fall back
+  // to a curated mix of Haven cabin photos so every pitch feels alive.
+  const galleryUrls = (pitch.gallery ?? [])
+    .map((g) => g.url)
+    .filter((u): u is string => typeof u === "string" && u.length > 0);
+  const propertyPhotos: string[] = (() => {
+    if (galleryUrls.length >= 2) return galleryUrls.slice(0, 4);
+    // Stitch together hero + curated fallbacks (deduped) to fill the rail.
+    const seen = new Set<string>();
+    const photos: string[] = [];
+    for (const u of [heroImage, ...galleryUrls, ...HAVEN_HERO_FALLBACKS]) {
+      if (seen.has(u)) continue;
+      seen.add(u);
+      photos.push(u);
+      if (photos.length >= 4) break;
+    }
+    return photos;
+  })();
+
   const formattedRange = formatProjectionRange(
     pitch.projection_low,
     pitch.projection_high,
@@ -144,14 +187,33 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
           </h2>
 
           <div className="mt-8 grid grid-cols-1 gap-6 md:grid-cols-2">
-            {/* Photo */}
-            <div className="overflow-hidden rounded-[14px] bg-[#EDF0EE]">
-              <img
-                src={heroImage}
-                alt={pitch.property_address}
-                className="h-full w-full object-cover"
-                style={{ minHeight: 280 }}
-              />
+            {/* Photos: large lead + small thumbnail rail */}
+            <div className="flex flex-col gap-3">
+              <div className="overflow-hidden rounded-[14px] bg-[#EDF0EE]">
+                <img
+                  src={propertyPhotos[0]}
+                  alt={pitch.property_address}
+                  className="h-full w-full object-cover"
+                  style={{ minHeight: 280 }}
+                />
+              </div>
+              {propertyPhotos.length > 1 ? (
+                <div className="grid grid-cols-3 gap-3">
+                  {propertyPhotos.slice(1, 4).map((src, idx) => (
+                    <div
+                      key={src + idx}
+                      className="overflow-hidden rounded-[10px] bg-[#EDF0EE]"
+                    >
+                      <img
+                        src={src}
+                        alt={`${pitch.property_address} — photo ${idx + 2}`}
+                        className="h-full w-full object-cover"
+                        style={{ minHeight: 90, aspectRatio: "4 / 3" }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             {/* Stats card */}

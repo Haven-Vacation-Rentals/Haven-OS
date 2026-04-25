@@ -22,6 +22,8 @@ import {
   Copy,
   Check,
   ExternalLink,
+  ImagePlus,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -64,6 +66,7 @@ export function CreatePitchDialog({
   const [baths, setBaths] = useState("");
   const [sleeps, setSleeps] = useState("");
   const [heroImageUrl, setHeroImageUrl] = useState("");
+  const [galleryUrls, setGalleryUrls] = useState<string[]>([]);
   const [projectionLow, setProjectionLow] = useState("");
   const [projectionHigh, setProjectionHigh] = useState("");
   const [projectionNote, setProjectionNote] = useState("");
@@ -82,6 +85,7 @@ export function CreatePitchDialog({
     setBaths("");
     setSleeps("");
     setHeroImageUrl("");
+    setGalleryUrls([]);
     setProjectionLow("");
     setProjectionHigh("");
     setProjectionNote("");
@@ -119,6 +123,17 @@ export function CreatePitchDialog({
       if (e.sleeps != null && !sleeps) setSleeps(String(e.sleeps));
       if (e.hero_image_url && !heroImageUrl)
         setHeroImageUrl(e.hero_image_url);
+      if (
+        Array.isArray(e.gallery) &&
+        e.gallery.length > 0 &&
+        galleryUrls.length === 0
+      ) {
+        setGalleryUrls(
+          e.gallery
+            .filter((u): u is string => typeof u === "string" && u.length > 0)
+            .slice(0, 6),
+        );
+      }
       if (!e.ok && e.reason) {
         setExtractWarning(e.reason);
       } else if (e.ok) {
@@ -154,6 +169,10 @@ export function CreatePitchDialog({
         baths: baths ? parseFloat(baths) : undefined,
         sleeps: sleeps ? parseInt(sleeps, 10) : undefined,
         hero_image_url: heroImageUrl.trim() || undefined,
+        gallery: galleryUrls
+          .map((u) => u.trim())
+          .filter((u) => u.length > 0)
+          .map((url) => ({ url })),
         projection_low: low,
         projection_high: high,
         projection_note: projectionNote.trim() || undefined,
@@ -302,7 +321,7 @@ export function CreatePitchDialog({
               </Field>
             </div>
 
-            <Field label="Hero image URL" optional>
+            <Field label="Hero photo URL" optional>
               <Input
                 value={heroImageUrl}
                 onChange={(e) => setHeroImageUrl(e.target.value)}
@@ -310,6 +329,13 @@ export function CreatePitchDialog({
                 disabled={pending}
               />
             </Field>
+
+            <GalleryEditor
+              urls={galleryUrls}
+              onChange={setGalleryUrls}
+              disabled={pending}
+              extractWarning={extractWarning}
+            />
 
             {/* Projection */}
             <div className="rounded-card border border-haven-coral/30 bg-accent-soft/30 p-3">
@@ -375,6 +401,101 @@ export function CreatePitchDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function GalleryEditor({
+  urls,
+  onChange,
+  disabled,
+  extractWarning,
+}: {
+  urls: string[];
+  onChange: (urls: string[]) => void;
+  disabled?: boolean;
+  extractWarning: string | null;
+}) {
+  const addRow = () => onChange([...urls, ""]);
+  const updateRow = (i: number, v: string) => {
+    const next = [...urls];
+    next[i] = v;
+    onChange(next);
+  };
+  const removeRow = (i: number) => onChange(urls.filter((_, idx) => idx !== i));
+
+  return (
+    <div className="rounded-card border border-border bg-surface-alt/30 p-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Gallery photos
+            <span className="ml-1 text-muted-foreground/70 normal-case font-normal">
+              (optional, up to 6)
+            </span>
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Paste 2–4 high-quality photo URLs to give the pitch a richer feel.
+            If we couldn't auto-fill, this is the easiest way to add real
+            photos of the property.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={addRow}
+          disabled={disabled || urls.length >= 6}
+        >
+          <ImagePlus className="h-3.5 w-3.5" />
+          Add photo
+        </Button>
+      </div>
+
+      {extractWarning && urls.length === 0 ? (
+        <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800">
+          Heads up: we couldn't read photos from that listing. Paste 2–4 photo
+          URLs (right-click any image on the listing and copy its address) so
+          the pitch shows the actual property.
+        </p>
+      ) : null}
+
+      {urls.length > 0 ? (
+        <div className="mt-3 flex flex-col gap-2">
+          {urls.map((u, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="w-6 shrink-0 text-[11px] font-semibold text-muted-foreground">
+                {i + 1}.
+              </span>
+              <Input
+                value={u}
+                onChange={(e) => updateRow(i, e.target.value)}
+                placeholder="https://…/photo.jpg"
+                disabled={disabled}
+              />
+              {u && /^https?:\/\//i.test(u) ? (
+                <img
+                  src={u}
+                  alt={`Gallery preview ${i + 1}`}
+                  className="h-9 w-12 shrink-0 rounded-sm border border-border object-cover"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.visibility =
+                      "hidden";
+                  }}
+                />
+              ) : null}
+              <button
+                type="button"
+                onClick={() => removeRow(i)}
+                disabled={disabled}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                title="Remove"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
