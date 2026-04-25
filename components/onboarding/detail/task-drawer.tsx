@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TaskStatusMenu } from "@/components/onboarding/status-menu";
+import { TaskCheckbox } from "@/components/onboarding/task-checkbox";
 import {
   ONBOARDING_DEPARTMENTS,
   DEPARTMENT_LABELS,
@@ -178,16 +179,31 @@ function DrawerBody({ task }: { task: OnboardingTaskNode }) {
             />
           </div>
         </div>
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={() => {
-            const t = title.trim();
-            if (t && t !== task.title) save({ title: t });
-          }}
-          className="font-heading text-xl font-bold bg-transparent border-0 outline-none focus:outline-none focus:ring-0 p-0"
-          placeholder="Task title"
-        />
+        <div className="flex items-start gap-3">
+          <div className="pt-1">
+            <TaskCheckbox
+              status={task.status}
+              onToggle={onStatus}
+              disabled={pending}
+              size="md"
+            />
+          </div>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => {
+              const t = title.trim();
+              if (t && t !== task.title) save({ title: t });
+            }}
+            className={
+              "flex-1 font-heading text-xl font-bold bg-transparent border-0 outline-none focus:outline-none focus:ring-0 p-0 " +
+              (task.status === "done"
+                ? "line-through text-muted-foreground"
+                : "")
+            }
+            placeholder="Task title"
+          />
+        </div>
       </div>
 
       {/* Fields */}
@@ -351,6 +367,8 @@ function Checklist({
     });
   };
 
+  const doneCount = items.filter((i) => i.is_checked).length;
+
   return (
     <div className="flex flex-col gap-1 rounded-card border border-border bg-surface-alt/30 p-2">
       {items.length === 0 && !adding ? (
@@ -358,29 +376,72 @@ function Checklist({
           No checklist items yet.
         </p>
       ) : null}
+      {items.length > 0 ? (
+        <div className="flex items-center gap-2 px-2 pt-0.5 pb-1">
+          <span className="flex-1 h-1 rounded-full bg-surface overflow-hidden">
+            <span
+              className={
+                "block h-full " +
+                (doneCount === items.length
+                  ? "bg-emerald-500"
+                  : "bg-haven-coral-600")
+              }
+              style={{
+                width: `${Math.round((doneCount / items.length) * 100)}%`,
+              }}
+            />
+          </span>
+          <span className="text-[10.5px] text-muted-foreground tabular-nums">
+            {doneCount}/{items.length}
+          </span>
+        </div>
+      ) : null}
       {items.map((it) => (
         <div
           key={it.id}
-          className="flex items-center gap-2 px-2 py-1 rounded hover:bg-surface group"
+          className="group flex items-center gap-2 rounded-md hover:bg-surface"
         >
-          <input
-            type="checkbox"
-            checked={it.is_checked}
-            onChange={() => toggle(it)}
+          <button
+            type="button"
+            onClick={() => toggle(it)}
             disabled={pending}
-            className="h-3.5 w-3.5 rounded border-border text-accent focus:ring-0"
-          />
-          <span
-            className={`text-[13px] flex-1 ${
-              it.is_checked ? "line-through text-muted-foreground" : ""
-            }`}
+            className="flex flex-1 items-center gap-2 px-2 py-1.5 text-left disabled:opacity-50"
           >
-            {it.label}
-          </span>
+            <span
+              className={
+                "shrink-0 inline-flex items-center justify-center rounded-md transition-colors h-4 w-4 " +
+                (it.is_checked
+                  ? "bg-emerald-600 border border-emerald-600 text-white"
+                  : "border border-border bg-surface group-hover:border-emerald-500/70 group-hover:bg-emerald-50")
+              }
+            >
+              {it.is_checked ? (
+                <svg
+                  viewBox="0 0 16 16"
+                  className="h-3 w-3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="3 8.5 6.5 12 13 4.5" />
+                </svg>
+              ) : null}
+            </span>
+            <span
+              className={`text-[13px] flex-1 ${
+                it.is_checked ? "line-through text-muted-foreground" : ""
+              }`}
+            >
+              {it.label}
+            </span>
+          </button>
           <button
             type="button"
             onClick={() => remove(it.id)}
-            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-rose-700"
+            title="Delete item"
+            className="opacity-0 group-hover:opacity-100 focus:opacity-100 mr-1 text-muted-foreground hover:text-rose-700 h-7 w-7 inline-flex items-center justify-center rounded"
           >
             <Trash2 className="h-3 w-3" />
           </button>

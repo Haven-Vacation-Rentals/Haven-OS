@@ -2,23 +2,23 @@
 
 /**
  * ByDeptTab — tasks grouped by department, with per-dept progress bar.
- * Row click opens the drawer.
+ * Click the checkbox to mark done; click the title to open the drawer.
  */
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { ChevronDown, ChevronRight, Star } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { TaskCheckbox } from "@/components/onboarding/task-checkbox";
 import {
   ONBOARDING_DEPARTMENTS,
   DEPARTMENT_LABELS,
-  TASK_STATUS_LABELS,
   type OnboardingTaskNode,
+  type OnboardingTaskStatus,
   type OnboardingDepartment,
 } from "@/lib/onboarding/types";
-import {
-  DEPARTMENT_TONE,
-  TASK_STATUS_TONE,
-} from "@/lib/onboarding/utils";
+import { DEPARTMENT_TONE } from "@/lib/onboarding/utils";
+import { updateTaskStatus } from "@/lib/onboarding/actions";
 
 export function ByDeptTab({
   tasks,
@@ -101,7 +101,10 @@ function DeptGroup({
         <Badge tone={tone}>{label}</Badge>
         <div className="flex-1 h-1.5 rounded-full bg-surface-alt overflow-hidden max-w-[280px]">
           <div
-            className="h-full bg-haven-coral-600"
+            className={
+              "h-full " +
+              (pct === 100 ? "bg-emerald-500" : "bg-haven-coral-600")
+            }
             style={{ width: `${pct}%` }}
           />
         </div>
@@ -114,33 +117,60 @@ function DeptGroup({
       </button>
 
       {open ? (
-        <div className="border-t border-border/50 p-2 flex flex-col gap-1">
+        <div className="border-t border-border/50 p-1.5 flex flex-col">
           {items.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => onOpenTask(t)}
-              className="flex items-center gap-2 text-[13px] py-1.5 px-2 rounded-md hover:bg-surface-alt text-left"
-            >
-              {t.is_key_date ? (
-                <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-500 shrink-0" />
-              ) : (
-                <span className="h-3.5 w-3.5 shrink-0" />
-              )}
-              <span
-                className={`flex-1 min-w-0 truncate ${
-                  t.status === "done" ? "line-through text-muted-foreground" : ""
-                }`}
-              >
-                {t.title}
-              </span>
-              <Badge tone={TASK_STATUS_TONE[t.status]}>
-                {TASK_STATUS_LABELS[t.status]}
-              </Badge>
-            </button>
+            <DeptTaskRow key={t.id} task={t} onOpenTask={onOpenTask} />
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function DeptTaskRow({
+  task,
+  onOpenTask,
+}: {
+  task: OnboardingTaskNode;
+  onOpenTask: (t: OnboardingTaskNode) => void;
+}) {
+  const [pending, startTransition] = useTransition();
+  const onStatus = (status: OnboardingTaskStatus) => {
+    startTransition(async () => {
+      try {
+        await updateTaskStatus(task.id, status);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed");
+      }
+    });
+  };
+  return (
+    <div className="flex items-center gap-2 py-0.5 pl-1 pr-1 rounded-md hover:bg-surface-alt/40">
+      <TaskCheckbox
+        status={task.status}
+        onToggle={onStatus}
+        disabled={pending}
+        size="sm"
+      />
+      <button
+        type="button"
+        onClick={() => onOpenTask(task)}
+        className="flex-1 min-w-0 flex items-center gap-2 text-[13px] py-1 text-left"
+      >
+        {task.is_key_date ? (
+          <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-500 shrink-0" />
+        ) : null}
+        <span
+          className={
+            "flex-1 min-w-0 truncate " +
+            (task.status === "done"
+              ? "line-through text-muted-foreground"
+              : "")
+          }
+        >
+          {task.title}
+        </span>
+      </button>
     </div>
   );
 }
