@@ -209,7 +209,7 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
             {pitch.property_address}
           </h2>
 
-          <div className="mt-8 grid grid-cols-1 gap-6 md:grid-cols-2">
+          <div className="mt-8 grid grid-cols-1 items-start gap-6 md:grid-cols-2">
             {/* Photos: large lead + small thumbnail rail */}
             <div className="flex flex-col gap-3">
               <div className="overflow-hidden rounded-[14px] bg-[#EDF0EE]">
@@ -217,7 +217,7 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
                   src={propertyPhotos[0]}
                   alt={pitch.property_address}
                   className="h-full w-full object-cover"
-                  style={{ minHeight: 280 }}
+                  style={{ minHeight: 280, aspectRatio: "4 / 3" }}
                 />
               </div>
               {propertyPhotos.length > 1 ? (
@@ -231,7 +231,7 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
                         src={src}
                         alt={`${pitch.property_address} — photo ${idx + 2}`}
                         className="h-full w-full object-cover"
-                        style={{ minHeight: 90, aspectRatio: "4 / 3" }}
+                        style={{ aspectRatio: "4 / 3" }}
                       />
                     </div>
                   ))}
@@ -239,30 +239,30 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
               ) : null}
             </div>
 
-            {/* Stats card */}
-            <div className="flex flex-col justify-between rounded-[14px] border border-[#E2E4E2] bg-white p-7 shadow-[0_1px_2px_rgba(66,66,66,0.06)]">
+            {/* Stats card — sized to its content, not stretched to photo column */}
+            <div className="rounded-[14px] border border-[#E2E4E2] bg-white p-7 shadow-[0_1px_2px_rgba(66,66,66,0.06)]">
               <div className="grid grid-cols-3 gap-4">
                 <PropStat icon={<BedDouble className="h-5 w-5" />} label="Bedrooms" value={fmtNum(pitch.beds)} />
                 <PropStat icon={<Bath className="h-5 w-5" />} label="Bathrooms" value={fmtNum(pitch.baths)} />
                 <PropStat icon={<Users className="h-5 w-5" />} label="Sleeps" value={fmtNum(pitch.sleeps)} />
               </div>
-              {pitch.listing_url ? (
-                <a
-                  href={pitch.listing_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-6 inline-flex items-center gap-1.5 self-start text-[13px] font-semibold text-[#FF564E] hover:underline"
-                >
-                  View original listing
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </a>
-              ) : null}
-              <p className="mt-6 text-[13px] leading-relaxed text-[#424242]/70">
+              <p className="mt-5 border-t border-[#E2E4E2] pt-5 text-[13px] leading-relaxed text-[#424242]/75">
                 Below is our annual gross-revenue projection for this
                 property under Haven management. We arrive at this number
                 from active comps, demand seasonality in the Smokies, and
                 our own portfolio benchmarks.
               </p>
+              {pitch.listing_url ? (
+                <a
+                  href={pitch.listing_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#FF564E] hover:underline"
+                >
+                  View original listing
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </a>
+              ) : null}
             </div>
           </div>
         </div>
