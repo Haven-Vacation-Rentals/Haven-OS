@@ -37,12 +37,12 @@ export default async function LoginPage({
           <HavenLogo size={140} variant="cream" />
 
           <div>
-            <h1 className="font-heading text-display-2 font-bold leading-tight">
+            <h1 className="font-heading text-[32px] font-black leading-[1.15] tracking-tight text-white">
               The operating system
               <br />
               for Haven.
             </h1>
-            <p className="mt-3 text-sm text-background/70">
+            <p className="mt-3 text-sm text-background/80">
               Every cabin, every task, every owner — in one place.
             </p>
           </div>
