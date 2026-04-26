@@ -15,6 +15,7 @@ import {
   ClipboardList,
   Bot,
   Megaphone,
+  PenSquare,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -84,6 +85,12 @@ function buildSections(flags: {
       heading: "Sales",
       items: [
         { label: "Pitches", href: "/sales/pitches", icon: Megaphone },
+      ],
+    });
+    sections.push({
+      heading: "Content",
+      items: [
+        { label: "Content Studio", href: "/content", icon: PenSquare },
       ],
     });
   }

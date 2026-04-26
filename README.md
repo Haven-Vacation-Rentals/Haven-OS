@@ -41,6 +41,11 @@ Without a Supabase project the app still boots; the login page just shows a setu
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only privileged key |
 | `ANTHROPIC_API_KEY` | For Haven Assistant (Phase 4) |
 | `NEXT_PUBLIC_APP_URL` | Absolute app URL (e.g. `https://os.havenvacationrentals.com`) |
+| `CLAUDE_CONTENT_AGENT_ID` | Optional Content Studio managed agent. Falls back to a local rule-based agent. |
+| `CLAUDE_CONTENT_ENVIRONMENT_ID` | Optional companion environment for the Content Studio agent. |
+| `HAVEN_WP_URL` | WordPress site for the Content Studio draft queue (defaults to `https://havenvacationrentals.com`). |
+| `HAVEN_WP_USER` | WordPress user with draft permissions. |
+| `HAVEN_WP_APP_PASSWORD` | WordPress application password. Drafts only — never publishes directly. |
 
 ---
 
@@ -157,6 +162,7 @@ If `supabase: "missing"` the env vars didn't take — go re-check step 2 and red
 | 4 | **Haven Assistant** — Claude Agent SDK in ⌘J drawer, context-aware, tool-use on Haven data | |
 | 5 | **Managed Agents** — YAML-defined long-horizon agents, audit log, spend caps, webhook ingest | |
 | 6 | Properties module — lifecycle, revenue, checklists | |
+| 7 | **Content Studio** — app-native SEO + GEO blog workspace, agent-driven editing, WordPress draft queue. See [`docs/CONTENT_STUDIO.md`](docs/CONTENT_STUDIO.md). | ✅ v1 |
 
 ---
 
