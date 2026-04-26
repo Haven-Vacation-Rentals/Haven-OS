@@ -20,7 +20,6 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  // Already signed in? Go straight through.
   const user = await getCurrentUser();
   if (user) redirect("/dashboard");
 
@@ -28,35 +27,71 @@ export default async function LoginPage({
   const { error } = await searchParams;
 
   return (
-    <div className="relative grid min-h-dvh grid-cols-1 lg:grid-cols-2">
-      {/* Left hero — brand panel with values + verse */}
-      <div className="relative hidden items-center justify-center overflow-hidden bg-foreground text-background lg:flex">
-        <TopographicBg className="text-background" />
+    <div className="relative min-h-dvh overflow-hidden bg-foreground text-background">
+      <TopographicBg className="text-background" />
 
-        <div className="relative z-10 flex w-full max-w-md flex-col items-center gap-8 p-12 text-center">
-          <HavenLogo size={140} variant="cream" />
+      <div className="relative z-10 flex min-h-dvh items-center justify-center px-6 py-16">
+        <div className="w-full max-w-xl">
+          {/* Brand mark + headline */}
+          <div className="flex flex-col items-center text-center">
+            <HavenLogo size={120} variant="cream" />
 
-          <div>
-            <h1 className="font-heading text-[32px] font-black leading-[1.15] tracking-tight text-white">
+            <h1 className="mt-6 font-heading text-[34px] font-black leading-[1.15] tracking-tight text-white sm:text-[40px]">
               The operating system
               <br />
               for Haven.
             </h1>
-            <p className="mt-3 text-sm text-background/80">
+            <p className="mt-3 max-w-md text-sm text-background/75">
               Every cabin, every task, every owner — in one place.
             </p>
           </div>
 
+          {/* Sign-in card */}
+          <div className="mx-auto mt-10 w-full max-w-sm rounded-2xl border border-background/10 bg-background/[0.04] p-6 backdrop-blur-sm">
+            <div className="mb-1 text-center text-[11px] font-bold uppercase tracking-[3px] text-[#FF564E]">
+              Sign in
+            </div>
+            <p className="mb-5 text-center text-[13px] text-background/70">
+              Internal access only. Use your Haven Google account.
+            </p>
+
+            {!configured ? <NotConfiguredBanner /> : null}
+
+            {error ? (
+              <div className="mb-4 flex items-start gap-2 rounded-md border border-rose-300/40 bg-rose-500/10 px-3 py-2 text-[12px] text-rose-100">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  {error === "missing_code"
+                    ? "Sign-in didn't complete. Please try again."
+                    : error === "not_configured"
+                      ? "Supabase is not configured yet."
+                      : decodeURIComponent(error)}
+                </span>
+              </div>
+            ) : null}
+
+            <GoogleSignInButton disabled={!configured} />
+
+            <div className="mt-5 text-center text-[11px] text-background/55">
+              <Link href="/dashboard" className="hover:text-[#FF564E]">
+                Skip to demo dashboard →
+              </Link>
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div className="mx-auto mt-12 h-px w-24 bg-background/15" />
+
           {/* Core values */}
-          <div className="w-full">
-            <div className="mb-3 text-[11px] font-bold uppercase tracking-[3px] text-[#FF564E]">
+          <div className="mt-8 text-center">
+            <div className="mb-4 text-[11px] font-bold uppercase tracking-[3px] text-[#FF564E]">
               Core Values
             </div>
-            <ul className="flex flex-wrap justify-center gap-x-2 gap-y-2">
+            <ul className="flex flex-wrap justify-center gap-2">
               {CORE_VALUES.map((value) => (
                 <li
                   key={value}
-                  className="rounded-full border border-background/20 bg-background/5 px-3 py-1 text-[12px] font-medium text-background/90"
+                  className="rounded-full border border-background/20 bg-background/5 px-3.5 py-1.5 text-[12px] font-medium text-background/90"
                 >
                   {value}
                 </li>
@@ -64,9 +99,9 @@ export default async function LoginPage({
             </ul>
           </div>
 
-          {/* Scripture — James 4:13–15 ESV */}
-          <figure className="mt-2 w-full border-t border-background/15 pt-6">
-            <blockquote className="text-left text-[13px] leading-relaxed text-background/75">
+          {/* Scripture */}
+          <figure className="mx-auto mt-10 max-w-lg text-center">
+            <blockquote className="text-[13px] leading-relaxed text-background/75">
               <p>
                 <sup className="mr-0.5 text-[10px] text-[#FF564E]">13</sup>
                 Come now, you who say, &ldquo;Today or tomorrow we will go into
@@ -81,50 +116,10 @@ export default async function LoginPage({
                 live and do this or that.&rdquo;
               </p>
             </blockquote>
-            <figcaption className="mt-3 text-[11px] font-bold uppercase tracking-[2px] text-background/55">
+            <figcaption className="mt-4 text-[11px] font-bold uppercase tracking-[2px] text-background/55">
               James 4:13–15 · ESV
             </figcaption>
           </figure>
-        </div>
-      </div>
-
-      {/* Right auth panel */}
-      <div className="relative flex items-center justify-center px-6 py-12">
-        <div className="w-full max-w-sm">
-          <div className="mb-10 flex items-center justify-center lg:hidden">
-            <HavenLogo size={96} />
-          </div>
-
-          <div className="haven-eyebrow mb-2">Sign in</div>
-          <h2 className="mb-2 font-heading text-display-3 font-bold">
-            Welcome back
-          </h2>
-          <p className="mb-8 text-sm text-muted-foreground">
-            Internal access only. Use your Haven Google account.
-          </p>
-
-          {!configured ? <NotConfiguredBanner /> : null}
-
-          {error ? (
-            <div className="mb-6 flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>
-                {error === "missing_code"
-                  ? "Sign-in didn't complete. Please try again."
-                  : error === "not_configured"
-                    ? "Supabase is not configured yet."
-                    : decodeURIComponent(error)}
-              </span>
-            </div>
-          ) : null}
-
-          <GoogleSignInButton disabled={!configured} />
-
-          <div className="mt-10 text-center text-[12px] text-muted-foreground">
-            <Link href="/dashboard" className="text-accent hover:underline">
-              Skip to demo dashboard →
-            </Link>
-          </div>
         </div>
       </div>
     </div>
@@ -133,19 +128,16 @@ export default async function LoginPage({
 
 function NotConfiguredBanner() {
   return (
-    <div className="mb-6 rounded-card border border-amber-200 bg-amber-50 p-4 text-[13px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+    <div className="mb-4 rounded-md border border-amber-300/40 bg-amber-500/10 p-3 text-[12px] text-amber-100">
       <div className="mb-1 flex items-center gap-2 font-heading font-bold">
         <AlertCircle className="h-4 w-4" /> Supabase not configured
       </div>
-      <p className="mb-2 text-amber-900/90 dark:text-amber-200/90">
-        Add these to <code className="rounded bg-amber-100 px-1 py-0.5 text-[11px] dark:bg-amber-500/20">.env.local</code> and restart:
+      <p className="mb-2 text-amber-100/90">
+        Add these to <code className="rounded bg-amber-500/20 px-1 py-0.5 text-[11px]">.env.local</code> and restart:
       </p>
-      <pre className="overflow-x-auto rounded bg-amber-100/60 p-2 font-mono text-[11px] dark:bg-amber-500/15">
+      <pre className="overflow-x-auto rounded bg-amber-500/15 p-2 font-mono text-[10px]">
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR-ANON-KEY</pre>
-      <p className="mt-2 text-[12px] text-amber-900/80 dark:text-amber-200/80">
-        See <code className="text-[11px]">README.md § Supabase setup</code>.
-      </p>
     </div>
   );
 }
