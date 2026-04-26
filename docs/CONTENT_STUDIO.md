@@ -196,7 +196,7 @@ Each stage advances by either:
 
 | Var | Purpose | Required for build? |
 |---|---|---|
-| `CLAUDE_CONTENT_AGENT_ID` | Optional Claude Managed Agent ID. Falls back to local rule-based agent if unset. | No |
+| `CLAUDE_CONTENT_AGENT_ID` | Optional Claude Managed Agent ID. Falls back to local rule-based agent if unset. Recommended: `agent_011CaT8cFgxnMar5p8jGrr4q`. | No |
 | `CLAUDE_CONTENT_ENVIRONMENT_ID` | Companion environment ID for the managed agent. | No |
 | `HAVEN_WP_URL` | `https://havenvacationrentals.com`. | No |
 | `HAVEN_WP_USER` | WordPress user with draft-create permission. | No |
@@ -204,6 +204,25 @@ Each stage advances by either:
 
 Build/typecheck don't touch any of these — the workspace runs on local
 fallbacks.
+
+### Managed agent provisioning
+
+The Content Studio managed agent has been created in the Claude Console:
+
+- **Agent ID:** `agent_011CaT8cFgxnMar5p8jGrr4q`
+- **Console:** [config tab](https://platform.claude.com/workspaces/default/agents/agent_011CaT8cFgxnMar5p8jGrr4q?tab=config)
+
+Set `CLAUDE_CONTENT_AGENT_ID` to this value in Vercel (Production +
+Preview) once the dispatcher in `lib/content/agent.ts` is wired to call
+the Anthropic SDK. Until then the local rule-based fallback runs.
+
+> **Heads up — auto-added connectors.** During agent creation, the
+> Claude Console automatically attached **WordPress.com** and **Slack**
+> entries to this agent's connector list. Neither is required for the
+> Content Studio flow (publishing goes through the Haven WordPress REST
+> API using `HAVEN_WP_*` credentials, not the WordPress.com connector).
+> Jack may want to review and remove these in the Console if they
+> aren't intentional.
 
 ---
 

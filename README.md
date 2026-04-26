@@ -41,7 +41,7 @@ Without a Supabase project the app still boots; the login page just shows a setu
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only privileged key |
 | `ANTHROPIC_API_KEY` | For Haven Assistant (Phase 4) |
 | `NEXT_PUBLIC_APP_URL` | Absolute app URL (e.g. `https://os.havenvacationrentals.com`) |
-| `CLAUDE_CONTENT_AGENT_ID` | Optional Content Studio managed agent. Falls back to a local rule-based agent. |
+| `CLAUDE_CONTENT_AGENT_ID` | Optional Content Studio managed agent. Falls back to a local rule-based agent. Recommended value: `agent_011CaT8cFgxnMar5p8jGrr4q` (created in the Claude Console). See [`docs/CONTENT_STUDIO.md`](docs/CONTENT_STUDIO.md) for the auto-added WordPress.com / Slack connector caveat. |
 | `CLAUDE_CONTENT_ENVIRONMENT_ID` | Optional companion environment for the Content Studio agent. |
 | `HAVEN_WP_URL` | WordPress site for the Content Studio draft queue (defaults to `https://havenvacationrentals.com`). |
 | `HAVEN_WP_USER` | WordPress user with draft permissions. |
