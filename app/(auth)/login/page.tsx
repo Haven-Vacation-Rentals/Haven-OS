@@ -7,6 +7,14 @@ import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { getCurrentUser } from "@/lib/auth/user";
 import { redirect } from "next/navigation";
 
+const CORE_VALUES = [
+  "Faithful Stewardship",
+  "Excellence",
+  "Humility",
+  "Teamwork",
+  "Continuous Improvement",
+];
+
 export default async function LoginPage({
   searchParams,
 }: {
@@ -21,22 +29,62 @@ export default async function LoginPage({
 
   return (
     <div className="relative grid min-h-dvh grid-cols-1 lg:grid-cols-2">
-      {/* Left hero */}
+      {/* Left hero — brand panel with values + verse */}
       <div className="relative hidden items-center justify-center overflow-hidden bg-foreground text-background lg:flex">
         <TopographicBg className="text-background" />
-        <div className="relative z-10 flex flex-col items-center gap-6 p-12 text-center">
-          <HavenLogo size={160} className="text-background" />
+
+        <div className="relative z-10 flex w-full max-w-md flex-col items-center gap-8 p-12 text-center">
+          <HavenLogo size={140} variant="cream" />
+
           <div>
-            <h1 className="font-heading text-display-1 font-bold leading-tight">
+            <h1 className="font-heading text-display-2 font-bold leading-tight">
               The operating system
               <br />
               for Haven.
             </h1>
-            <p className="mt-3 max-w-sm text-sm text-background/70">
-              Every cabin, every task, every owner — in one place. Built for
-              the team, with an assistant that actually helps.
+            <p className="mt-3 text-sm text-background/70">
+              Every cabin, every task, every owner — in one place.
             </p>
           </div>
+
+          {/* Core values */}
+          <div className="w-full">
+            <div className="mb-3 text-[11px] font-bold uppercase tracking-[3px] text-[#FF564E]">
+              Core Values
+            </div>
+            <ul className="flex flex-wrap justify-center gap-x-2 gap-y-2">
+              {CORE_VALUES.map((value) => (
+                <li
+                  key={value}
+                  className="rounded-full border border-background/20 bg-background/5 px-3 py-1 text-[12px] font-medium text-background/90"
+                >
+                  {value}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Scripture — James 4:13–15 ESV */}
+          <figure className="mt-2 w-full border-t border-background/15 pt-6">
+            <blockquote className="text-left text-[13px] leading-relaxed text-background/75">
+              <p>
+                <sup className="mr-0.5 text-[10px] text-[#FF564E]">13</sup>
+                Come now, you who say, &ldquo;Today or tomorrow we will go into
+                such and such a town and spend a year there and trade and make
+                a profit&rdquo;—{" "}
+                <sup className="mx-0.5 text-[10px] text-[#FF564E]">14</sup>
+                yet you do not know what tomorrow will bring. What is your
+                life? For you are a mist that appears for a little time and
+                then vanishes.{" "}
+                <sup className="mx-0.5 text-[10px] text-[#FF564E]">15</sup>
+                Instead you ought to say, &ldquo;If the Lord wills, we will
+                live and do this or that.&rdquo;
+              </p>
+            </blockquote>
+            <figcaption className="mt-3 text-[11px] font-bold uppercase tracking-[2px] text-background/55">
+              James 4:13–15 · ESV
+            </figcaption>
+          </figure>
         </div>
       </div>
 
