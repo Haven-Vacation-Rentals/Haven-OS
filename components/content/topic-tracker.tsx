@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Plus,
   Calendar,
@@ -9,6 +10,20 @@ import {
   ListIcon,
   ArrowRight,
 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  DndContext,
+  type DragEndEvent,
+  type DragStartEvent,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCorners,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -21,6 +36,7 @@ import {
   type ContentTopicStage,
   type TopicWithArticle,
 } from "@/lib/content/types";
+import { setTopicStage } from "@/lib/content/actions";
 import { CreateTopicDialog } from "@/components/content/create-topic-dialog";
 import { StudioChat } from "@/components/content/studio-chat";
 
@@ -68,13 +84,26 @@ export function TopicTracker({
   const [createOpen, setCreateOpen] = useState(false);
   const [pillarFilter, setPillarFilter] = useState<ContentPillar | "all">("all");
 
+  // Local board state so DnD updates feel instant. Resyncs whenever the
+  // server-rendered topics change (after revalidation).
+  const [board, setBoard] = useState<TopicWithArticle[]>(topics);
+  useEffect(() => {
+    setBoard(topics);
+  }, [topics]);
+
   const filtered = useMemo(() => {
-    return topics.filter(
+    return board.filter(
       (t) =>
         t.stage !== "archived" &&
         (pillarFilter === "all" || t.pillar === pillarFilter),
     );
-  }, [topics, pillarFilter]);
+  }, [board, pillarFilter]);
+
+  const moveTopic = (topicId: string, nextStage: ContentTopicStage) => {
+    setBoard((curr) =>
+      curr.map((t) => (t.id === topicId ? { ...t, stage: nextStage } : t)),
+    );
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -97,7 +126,7 @@ export function TopicTracker({
       {filtered.length === 0 ? (
         <EmptyState onCreate={() => setCreateOpen(true)} />
       ) : view === "pipeline" ? (
-        <PipelineView topics={filtered} />
+        <PipelineView topics={filtered} onMove={moveTopic} />
       ) : view === "list" ? (
         <ListView topics={filtered} />
       ) : (
@@ -178,59 +207,214 @@ function PillarFilter({
 
 // ---------------------------------------------------------------------------
 
-function PipelineView({ topics }: { topics: TopicWithArticle[] }) {
+function PipelineView({
+  topics,
+  onMove,
+}: {
+  topics: TopicWithArticle[];
+  onMove: (topicId: string, stage: ContentTopicStage) => void;
+}) {
+  const router = useRouter();
   const stages = STAGE_ORDER.filter((s) => s !== "monitor");
   const grouped = new Map<ContentTopicStage, TopicWithArticle[]>();
   for (const s of stages) grouped.set(s, []);
   for (const t of topics) {
     if (grouped.has(t.stage)) grouped.get(t.stage)!.push(t);
   }
+
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const activeTopic = activeId
+    ? topics.find((t) => t.id === activeId) ?? null
+    : null;
+
+  // 6px activation distance keeps clicks → navigation working; small
+  // movements past that threshold start a drag.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor),
+  );
+
+  const onDragStart = (e: DragStartEvent) => {
+    setActiveId(String(e.active.id));
+  };
+
+  const onDragCancel = () => setActiveId(null);
+
+  const onDragEnd = (e: DragEndEvent) => {
+    setActiveId(null);
+    const topicId = String(e.active.id);
+    const overId = e.over?.id ? String(e.over.id) : null;
+    if (!overId) return;
+
+    // Resolve drop target → stage. Columns use stage id; cards expose
+    // their own stage via data.current.
+    let nextStage: ContentTopicStage | null = null;
+    if ((stages as string[]).includes(overId)) {
+      nextStage = overId as ContentTopicStage;
+    } else {
+      const overStage = e.over?.data.current?.stage as
+        | ContentTopicStage
+        | undefined;
+      if (overStage) nextStage = overStage;
+    }
+    if (!nextStage) return;
+
+    const topic = topics.find((t) => t.id === topicId);
+    if (!topic || topic.stage === nextStage) return;
+
+    const prevStage = topic.stage;
+    onMove(topicId, nextStage);
+
+    void (async () => {
+      const result = await setTopicStage(topicId, nextStage);
+      if (!result.ok) {
+        onMove(topicId, prevStage);
+        toast.error(result.error || "Failed to move topic");
+        return;
+      }
+      toast.success(`Moved to ${STAGE_LABELS[nextStage]}`);
+      // Refresh server data so other views see the new stage.
+      router.refresh();
+    })();
+  };
+
   return (
-    <div className="overflow-x-auto pb-2">
-      <div className="flex min-w-max gap-3">
-        {stages.map((stage) => {
-          const items = grouped.get(stage) ?? [];
-          return (
-            <div
-              key={stage}
-              className="flex w-[260px] shrink-0 flex-col gap-2 rounded-card border border-border bg-surface-alt/30 p-2"
-            >
-              <div className="flex items-center justify-between px-1">
-                <span
-                  className={cn(
-                    "rounded-full border px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-wider",
-                    STAGE_TONE[stage],
-                  )}
-                >
-                  {STAGE_LABELS[stage]}
-                </span>
-                <span className="text-[11px] text-muted-foreground">
-                  {items.length}
-                </span>
-              </div>
-              <div className="flex flex-col gap-2">
-                {items.map((t) => (
-                  <TopicCard key={t.id} topic={t} />
-                ))}
-                {items.length === 0 ? (
-                  <div className="rounded-md border border-dashed border-border/60 bg-surface/40 py-6 text-center text-[11px] text-muted-foreground">
-                    Empty
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          );
-        })}
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragCancel={onDragCancel}
+    >
+      <div className="overflow-x-auto pb-2">
+        <div className="flex min-w-max gap-3">
+          {stages.map((stage) => {
+            const items = grouped.get(stage) ?? [];
+            return (
+              <PipelineColumn
+                key={stage}
+                stage={stage}
+                items={items}
+                activeId={activeId}
+              />
+            );
+          })}
+        </div>
+      </div>
+      <DragOverlay dropAnimation={null}>
+        {activeTopic ? <TopicCard topic={activeTopic} isOverlay /> : null}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+
+function PipelineColumn({
+  stage,
+  items,
+  activeId,
+}: {
+  stage: ContentTopicStage;
+  items: TopicWithArticle[];
+  activeId: string | null;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: stage,
+    data: { stage },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "flex w-[260px] shrink-0 flex-col gap-2 rounded-card border bg-surface-alt/30 p-2 transition-colors",
+        isOver
+          ? "border-haven-coral/50 bg-accent-soft/30 ring-1 ring-haven-coral/30"
+          : "border-border",
+      )}
+    >
+      <div className="flex items-center justify-between px-1">
+        <span
+          className={cn(
+            "rounded-full border px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-wider",
+            STAGE_TONE[stage],
+          )}
+        >
+          {STAGE_LABELS[stage]}
+        </span>
+        <span className="text-[11px] text-muted-foreground">
+          {items.length}
+        </span>
+      </div>
+      <div className="flex min-h-[40px] flex-col gap-2">
+        {items.map((t) => (
+          <DraggableTopicCard
+            key={t.id}
+            topic={t}
+            stage={stage}
+            isOverlayActive={activeId === t.id}
+          />
+        ))}
+        {items.length === 0 ? (
+          <div
+            className={cn(
+              "rounded-md border border-dashed py-6 text-center text-[11px] transition-colors",
+              isOver
+                ? "border-haven-coral/40 bg-accent-soft/30 text-haven-coral-700"
+                : "border-border/60 bg-surface/40 text-muted-foreground",
+            )}
+          >
+            {isOver ? "Drop here" : "Empty"}
+          </div>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function TopicCard({ topic }: { topic: TopicWithArticle }) {
+function DraggableTopicCard({
+  topic,
+  stage,
+  isOverlayActive,
+}: {
+  topic: TopicWithArticle;
+  stage: ContentTopicStage;
+  isOverlayActive: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: topic.id,
+    data: { stage },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      style={{ opacity: isDragging || isOverlayActive ? 0.4 : 1 }}
+      className="touch-none cursor-grab rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-haven-coral/40 active:cursor-grabbing"
+    >
+      <TopicCard topic={topic} />
+    </div>
+  );
+}
+
+function TopicCard({
+  topic,
+  isOverlay,
+}: {
+  topic: TopicWithArticle;
+  isOverlay?: boolean;
+}) {
+  // The whole card drags via PointerSensor with a 6px activation
+  // distance, so a click still navigates. We use Link for native
+  // accessibility (Enter, middle-click open in new tab, etc.).
   return (
     <Link
       href={`/content/${topic.id}` as never}
-      className="group flex flex-col gap-1.5 rounded-md border border-border bg-surface p-3 shadow-card transition hover:border-haven-coral/40 hover:shadow-card-hover"
+      draggable={false}
+      onDragStart={(e) => e.preventDefault()}
+      className={cn(
+        "group flex flex-col gap-1.5 rounded-md border border-border bg-surface p-3 shadow-card transition hover:border-haven-coral/40 hover:shadow-card-hover",
+        isOverlay && "rotate-1 border-haven-coral/40 shadow-card-hover",
+      )}
     >
       <div className="flex items-start justify-between gap-2">
         <span className="line-clamp-2 text-[13px] font-semibold text-foreground">
