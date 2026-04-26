@@ -40,6 +40,13 @@ import {
   markdownToHtml,
   readWpEnv,
 } from "./wordpress";
+import {
+  detectIntent,
+  generateLocalTopicIdeas,
+  parseTopicDraft,
+  type TopicDraft,
+  type TopicIdea,
+} from "./topic-intent";
 
 async function db() {
   const supabase = await createClient();
@@ -937,4 +944,262 @@ export async function getWordPressEnvStatus(): Promise<WordPressEnvStatus> {
     configured: !!env,
     url: env?.url ?? null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Conversational topic creation + research
+// ---------------------------------------------------------------------------
+
+/**
+ * One-shot result for the chat box on /content. The UI renders one of:
+ *   - kind: "created" → render link to the new topic
+ *   - kind: "ideas"   → render list with one-click "Add to backlog"
+ *   - kind: "message" → render a chat-style assistant reply
+ */
+export type StudioChatResult =
+  | {
+      kind: "created";
+      topic: TopicWithArticle;
+      draft: TopicDraft;
+      message: string;
+    }
+  | {
+      kind: "ideas";
+      ideas: TopicIdea[];
+      message: string;
+    }
+  | {
+      kind: "message";
+      message: string;
+    };
+
+/**
+ * Tool: create_topic_from_conversation
+ *
+ * Build a topic + seeded article from a free-form Jack message and
+ * persist it. Brief and key-points are written into the article's
+ * brief_md so the workspace opens with usable scaffolding.
+ */
+export async function createTopicFromConversation(input: {
+  space_id: string;
+  message: string;
+}): Promise<Result<{ topic: TopicWithArticle; draft: TopicDraft }>> {
+  try {
+    const userId = await requireAdminOrAbove();
+    const draft = parseTopicDraft(input.message);
+    const supabase = await db();
+
+    const { data: topicRow, error: topicErr } = await supabase
+      .from("content_topics")
+      .insert({
+        space_id: input.space_id,
+        title: draft.title,
+        pillar: draft.pillar,
+        priority: draft.priority,
+        target_keyword: draft.target_keyword,
+        secondary_keywords: draft.secondary_keywords,
+        angle: draft.angle,
+        hypothesis: draft.hypothesis,
+        created_by: userId,
+        owner_id: userId,
+      })
+      .select("*")
+      .single();
+    if (topicErr) return { ok: false, error: topicErr.message };
+    const topic = rowToTopic(topicRow);
+
+    const briefMd = buildBriefMarkdown(draft);
+    await supabase.from("content_articles").insert({
+      topic_id: topic.id,
+      title: draft.title,
+      brief_md: briefMd,
+      outline_md: "",
+      body_md: "",
+    });
+
+    revalidatePath(CONTENT_PATH, "layout");
+    const full = await getTopic(topic.id);
+    return {
+      ok: true,
+      data: {
+        topic: full ?? { ...topic, article: null },
+        draft,
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Tool: generate_topic_ideas
+ *
+ * Returns N seasonally-shaped Smoky Mountain homeowner blog ideas. The
+ * implementation is a deterministic local generator today; a managed
+ * agent with web search can be plugged in here later without changing
+ * the call sites.
+ */
+export async function generateTopicIdeas(input: {
+  count?: number;
+}): Promise<Result<{ ideas: TopicIdea[] }>> {
+  try {
+    await requireAdminOrAbove();
+    const ideas = generateLocalTopicIdeas({ count: input.count });
+    return { ok: true, data: { ideas } };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Tool: add_suggested_topic_to_backlog
+ *
+ * One-click promote a generated idea to a real topic + seeded article.
+ */
+export async function addSuggestedTopicToBacklog(input: {
+  space_id: string;
+  idea: TopicIdea;
+}): Promise<Result<TopicWithArticle>> {
+  try {
+    const userId = await requireAdminOrAbove();
+    const supabase = await db();
+    const { idea } = input;
+
+    const { data, error } = await supabase
+      .from("content_topics")
+      .insert({
+        space_id: input.space_id,
+        title: idea.title,
+        pillar: idea.pillar,
+        priority: idea.priority,
+        target_keyword: idea.target_keyword,
+        secondary_keywords: idea.secondary_keywords,
+        angle: idea.angle,
+        hypothesis: idea.hypothesis,
+        created_by: userId,
+        owner_id: userId,
+      })
+      .select("*")
+      .single();
+    if (error) return { ok: false, error: error.message };
+    const topic = rowToTopic(data);
+
+    await supabase.from("content_articles").insert({
+      topic_id: topic.id,
+      title: idea.title,
+      brief_md: buildBriefMarkdown(idea),
+      outline_md: "",
+      body_md: "",
+    });
+
+    revalidatePath(CONTENT_PATH, "layout");
+    const full = await getTopic(topic.id);
+    return { ok: true, data: full ?? { ...topic, article: null } };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Studio-level chat dispatcher (separate from the per-article agent
+ * chat). Routes a free-form Jack message to the right capability:
+ *   - topic creation intent      → createTopicFromConversation
+ *   - research / ideation intent → generateTopicIdeas
+ *   - otherwise                  → instructional reply
+ *
+ * This is the entry point the UI calls. The agent prompt + tool list
+ * lives in `agent-prompt.ts`; this dispatcher is the local fallback.
+ */
+export async function runStudioChat(input: {
+  space_id: string;
+  message: string;
+}): Promise<Result<StudioChatResult>> {
+  try {
+    await requireAdminOrAbove();
+    const intent = detectIntent(input.message);
+
+    if (intent.kind === "create_topic") {
+      const created = await createTopicFromConversation({
+        space_id: input.space_id,
+        message: input.message,
+      });
+      if (!created.ok) return created;
+      return {
+        ok: true,
+        data: {
+          kind: "created",
+          topic: created.data.topic,
+          draft: created.data.draft,
+          message: `Added "${created.data.draft.title}" to the backlog as ${created.data.draft.pillar.replaceAll("_", " ")}. Brief and key points are pre-filled — open the workspace to refine.`,
+        },
+      };
+    }
+
+    if (intent.kind === "generate_ideas") {
+      const result = await generateTopicIdeas({ count: intent.count });
+      if (!result.ok) return result;
+      return {
+        ok: true,
+        data: {
+          kind: "ideas",
+          ideas: result.data.ideas,
+          message: `Pulled ${result.data.ideas.length} ideas tuned to the current season. One click adds any of them to the backlog.`,
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      data: {
+        kind: "message",
+        message:
+          'Tell me what to write about — for example, "write about gap nights in Pigeon Forge" or "I want a post on owner tax prep". You can also tap "Research ideas" and I will pull a fresh list.',
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+function buildBriefMarkdown(draft: TopicDraft | TopicIdea): string {
+  const lines: string[] = [];
+  lines.push("## Brief");
+  lines.push("");
+  lines.push(draft.brief);
+  lines.push("");
+  lines.push("## Angle");
+  lines.push("");
+  lines.push(draft.angle);
+  lines.push("");
+  lines.push("## Hypothesis");
+  lines.push("");
+  lines.push(draft.hypothesis);
+  lines.push("");
+  if (draft.key_points.length > 0) {
+    lines.push("## Key points to cover");
+    lines.push("");
+    for (const point of draft.key_points) {
+      lines.push(`- ${point}`);
+    }
+    lines.push("");
+  }
+  lines.push("## Keywords");
+  lines.push("");
+  lines.push(`- Primary: ${draft.target_keyword}`);
+  if (draft.secondary_keywords.length > 0) {
+    lines.push(`- Secondary: ${draft.secondary_keywords.join(", ")}`);
+  }
+  return lines.join("\n");
 }

@@ -86,8 +86,22 @@ The Content Studio agent is intended to run as its own Claude Managed
 Agent. The system prompt + brand voice rules live in this module so the
 managed-agent definition is the single source of truth.
 
+Tools the agent exposes (declared in the system prompt — implementations
+live in `lib/content/actions.ts` and `lib/content/topic-intent.ts`):
+
+- `create_topic_from_conversation(message)` — parse a free-form Jack
+  line into a structured topic and persist it. Picks pillar, builds a
+  50-70 char title, derives keywords, angle, hypothesis, brief, and key
+  points. No form required.
+- `generate_topic_ideas(count?)` — return seasonally-aware Smoky
+  Mountain homeowner blog ideas anchored to the current month. The
+  current implementation is deterministic / local; structured for clean
+  upgrade to a live web-search backed generator.
+- `add_suggested_topic_to_backlog(idea)` — one-click promote a
+  suggestion to a real topic + seeded article.
+
 Until `CLAUDE_CONTENT_AGENT_ID` is set, a local rule-based fallback
-runs. It recognizes:
+runs. The article-pane fallback recognizes:
 
 - "score this" / "how does this look" → returns SEO + GEO summary
 - "set the title to ..." → suggestion `set_title`
@@ -96,6 +110,15 @@ runs. It recognizes:
 - "add the Jack sign-off" → suggestion `replace_body`
 - "remove em dashes" → suggestion `replace_body`
 - otherwise → "tell me what you want changed"
+
+The studio-pane fallback (`runStudioChat` in `lib/content/actions.ts`)
+recognizes:
+
+- "write about ...", "I want a post on ...", "add a topic about ..."
+  → `create_topic_from_conversation`
+- "research ideas", "brainstorm topics", "give me 6 ideas"
+  → `generate_topic_ideas`
+- otherwise → instructional reply with example prompts
 
 Suggestions are recorded with the agent message and the user clicks
 **Apply** to write them onto the article (creating a new version row).
@@ -132,13 +155,19 @@ explicitly invoked by an admin from the Publish tab — fires it.
 
 - Header: space name, brand voice summary, status pills for WP +
   managed agent.
+- **Topic agent** chat box at the top — tell it what to write about
+  in plain English ("write about gap nights in Pigeon Forge", "I want
+  a post on owner tax prep") and it adds the topic to the backlog with
+  a brief and key points already filled in. Quick action chips next to
+  the box: **Add topic**, **Research ideas**, **Build outline**, **SEO
+  pass**.
 - `TopicTracker` — three views:
   - **Pipeline** (default): kanban by stage, color-coded stage chips.
   - **List**: sortable rows with priority/stage/scores.
   - **Calendar**: month grid pinned to publish target (or due date).
-- **New topic** dialog captures pillar, priority, keyword, angle,
-  hypothesis, due date, publish target. Creating a topic also seeds an
-  empty article so the workspace opens cleanly.
+- **Advanced form** (the original new-topic dialog) is still available
+  for full-control entry — pillar, priority, keyword, angle,
+  hypothesis, due date, publish target.
 
 `/content/[topicId]` (`app/(app)/content/[topicId]/page.tsx`):
 

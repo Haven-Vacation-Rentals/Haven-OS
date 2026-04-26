@@ -1,8 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   Plus,
   Calendar,
@@ -10,7 +9,6 @@ import {
   ListIcon,
   ArrowRight,
 } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -24,6 +22,7 @@ import {
   type TopicWithArticle,
 } from "@/lib/content/types";
 import { CreateTopicDialog } from "@/components/content/create-topic-dialog";
+import { StudioChat } from "@/components/content/studio-chat";
 
 type View = "pipeline" | "list" | "calendar";
 
@@ -78,15 +77,20 @@ export function TopicTracker({
   }, [topics, pillarFilter]);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
+      <StudioChat
+        spaceId={space.id}
+        onAdvancedTopic={() => setCreateOpen(true)}
+      />
+
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
         <div className="flex flex-wrap items-center gap-2">
           <ViewToggle view={view} setView={setView} />
           <PillarFilter value={pillarFilter} setValue={setPillarFilter} />
         </div>
-        <Button variant="primary" onClick={() => setCreateOpen(true)}>
+        <Button variant="outline" onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4" />
-          New topic
+          Advanced form
         </Button>
       </div>
 
@@ -478,13 +482,13 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         No topics yet
       </h3>
       <p className="max-w-md text-[13px] text-muted-foreground">
-        Pop a topic onto the backlog. The studio will spin up a draft, walk
-        through research → outline → draft, score it for SEO and GEO, and
-        queue a WordPress draft when it's ready.
+        Tell the topic agent above what to write about, or tap "Research
+        ideas" to pull a fresh seasonal list. The advanced form is here
+        for full-control entry.
       </p>
-      <Button variant="primary" onClick={onCreate}>
+      <Button variant="outline" onClick={onCreate}>
         <Plus className="h-4 w-4" />
-        New topic
+        Advanced form
       </Button>
     </div>
   );
