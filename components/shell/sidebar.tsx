@@ -42,18 +42,23 @@ function buildSections(flags: {
 }): NavSection[] {
   const overviewItems: NavItem[] = [
     { label: "The Board", href: "/dashboard", icon: LayoutDashboard },
+    { label: "My Tasks", href: "/my-tasks", icon: ListTodo },
   ];
+
+  const operationsItems: NavItem[] = [
+    { label: "Project Management", href: "/work", icon: FolderKanban },
+    { label: "Properties", href: "/properties", icon: Home },
+    { label: "Onboarding", href: "/onboarding", icon: ClipboardList },
+  ];
+
+  const adminItems: NavItem[] = [];
   if (flags.canScorecard) {
-    overviewItems.push({
+    adminItems.push({
       label: "Northstar Scorecard",
       href: "/scorecard",
       icon: Target,
     });
   }
-
-  const adminItems: NavItem[] = [
-    { label: "Onboarding", href: "/onboarding", icon: ClipboardList },
-  ];
   if (flags.canAgents) {
     adminItems.push({ label: "Agents", href: "/agents", icon: Bot, badge: "Beta" });
   }
@@ -68,28 +73,16 @@ function buildSections(flags: {
       items: overviewItems,
     },
     {
-      heading: "Work",
-      items: [
-        { label: "My Tasks", href: "/my-tasks", icon: ListTodo },
-        { label: "Project Management", href: "/work", icon: FolderKanban },
-      ],
-    },
-    {
       heading: "Operations",
-      items: [{ label: "Properties", href: "/properties", icon: Home }],
+      items: operationsItems,
     },
   ];
 
   if (flags.canSales) {
     sections.push({
-      heading: "Sales",
+      heading: "GTM",
       items: [
         { label: "Pitches", href: "/sales/pitches", icon: Megaphone },
-      ],
-    });
-    sections.push({
-      heading: "Content",
-      items: [
         { label: "Content Studio", href: "/content", icon: PenSquare },
       ],
     });
