@@ -6,19 +6,35 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createEmployee, updateEmployee } from "@/lib/hr/actions";
 import { EMPLOYEE_STATUSES, type DbEmployee } from "@/lib/hr/types";
+import type { Department } from "@/lib/admin/actions";
+
+type LinkableProfile = { id: string; email: string; full_name: string | null };
 
 type Props = {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   employee?: DbEmployee | null;
+  departments: Department[];
+  profiles?: LinkableProfile[];
 };
 
-export function EmployeeEditor({ open, onOpenChange, employee }: Props) {
+export function EmployeeEditor({
+  open,
+  onOpenChange,
+  employee,
+  departments,
+  profiles,
+}: Props) {
   const editing = !!employee;
   const [fullName, setFullName] = useState(employee?.full_name ?? "");
   const [email, setEmail] = useState(employee?.email ?? "");
   const [roleTitle, setRoleTitle] = useState(employee?.role_title ?? "");
-  const [department, setDepartment] = useState(employee?.department ?? "");
+  const [departmentId, setDepartmentId] = useState<string>(
+    employee?.department_id ?? "",
+  );
+  const [profileId, setProfileId] = useState<string>(
+    employee?.profile_id ?? "",
+  );
   const [startDate, setStartDate] = useState(employee?.start_date ?? "");
   const [status, setStatus] = useState(employee?.status ?? "active");
   const [notes, setNotes] = useState(employee?.notes ?? "");
@@ -29,7 +45,8 @@ export function EmployeeEditor({ open, onOpenChange, employee }: Props) {
     setFullName("");
     setEmail("");
     setRoleTitle("");
-    setDepartment("");
+    setDepartmentId("");
+    setProfileId("");
     setStartDate("");
     setStatus("active");
     setNotes("");
@@ -42,6 +59,8 @@ export function EmployeeEditor({ open, onOpenChange, employee }: Props) {
       setError("Name is required");
       return;
     }
+    const departmentName =
+      departments.find((d) => d.id === departmentId)?.name ?? null;
     startTransition(async () => {
       try {
         if (editing && employee) {
@@ -49,7 +68,9 @@ export function EmployeeEditor({ open, onOpenChange, employee }: Props) {
             full_name: fullName,
             email: email || null,
             role_title: roleTitle || null,
-            department: department || null,
+            department: departmentName,
+            department_id: departmentId || null,
+            profile_id: profileId || null,
             start_date: startDate || null,
             status,
             notes,
@@ -59,7 +80,9 @@ export function EmployeeEditor({ open, onOpenChange, employee }: Props) {
             full_name: fullName,
             email: email || undefined,
             role_title: roleTitle || undefined,
-            department: department || undefined,
+            department: departmentName ?? undefined,
+            department_id: departmentId || null,
+            profile_id: profileId || null,
             start_date: startDate || undefined,
             status,
             notes,
@@ -86,11 +109,26 @@ export function EmployeeEditor({ open, onOpenChange, employee }: Props) {
           <Field label="Email">
             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
-          <Field label="Role">
-            <Input value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} placeholder="Operations Manager" />
+          <Field label="Title">
+            <Input
+              value={roleTitle}
+              onChange={(e) => setRoleTitle(e.target.value)}
+              placeholder="e.g. Maintenance Technician"
+            />
           </Field>
           <Field label="Department">
-            <Input value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="Operations" />
+            <select
+              value={departmentId}
+              onChange={(e) => setDepartmentId(e.target.value)}
+              className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm focus:outline-none focus:shadow-ring"
+            >
+              <option value="">Unassigned</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
           </Field>
           <Field label="Start date">
             <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
@@ -108,6 +146,24 @@ export function EmployeeEditor({ open, onOpenChange, employee }: Props) {
               ))}
             </select>
           </Field>
+          {profiles && profiles.length > 0 && (
+            <div className="sm:col-span-2">
+              <Field label="Linked Haven OS user (optional)">
+                <select
+                  value={profileId}
+                  onChange={(e) => setProfileId(e.target.value)}
+                  className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm focus:outline-none focus:shadow-ring"
+                >
+                  <option value="">— Not linked —</option>
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.full_name ? `${p.full_name} (${p.email})` : p.email}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          )}
           <div className="sm:col-span-2">
             <Field label="Notes">
               <textarea

@@ -8,6 +8,8 @@ export type DbEmployee = {
   email: string | null;
   role_title: string | null;
   department: string | null;
+  department_id: string | null;
+  profile_id: string | null;
   start_date: string | null;
   status: string; // active | inactive | terminated
   avatar_url: string | null;

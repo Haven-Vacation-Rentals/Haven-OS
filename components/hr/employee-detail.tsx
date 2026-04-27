@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Pencil, Trash2, Plus } from "lucide-react";
+import { Pencil, Trash2, Plus, Link as LinkIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -10,7 +10,9 @@ import { ReviewEditor } from "./review-editor";
 import { IssueEditor } from "./issue-editor";
 import { ReviewCard } from "./review-card";
 import { IssueCard } from "./issue-card";
-import { deleteEmployee } from "@/lib/hr/actions";
+import { EmployeeAccessManager } from "./employee-access-manager";
+import { deleteEmployee, type EmployeeAccessEntry } from "@/lib/hr/actions";
+import type { AdminUser, Department } from "@/lib/admin/actions";
 import { useRouter } from "next/navigation";
 import type {
   DbEmployee,
@@ -18,13 +20,29 @@ import type {
   DbHrIssue,
 } from "@/lib/hr/types";
 
+type LinkableProfile = { id: string; email: string; full_name: string | null };
+
 type Props = {
   employee: DbEmployee;
   reviews: DbPerformanceReview[];
   issues: DbHrIssue[];
+  departments: Department[];
+  access: EmployeeAccessEntry[];
+  profiles: LinkableProfile[];
+  users: AdminUser[];
+  canManageAccess: boolean;
 };
 
-export function EmployeeDetail({ employee, reviews, issues }: Props) {
+export function EmployeeDetail({
+  employee,
+  reviews,
+  issues,
+  departments,
+  access,
+  profiles,
+  users,
+  canManageAccess,
+}: Props) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -53,6 +71,14 @@ export function EmployeeDetail({ employee, reviews, issues }: Props) {
 
   const openIssues = issues.filter((i) => i.status !== "resolved").length;
 
+  const departmentName = employee.department_id
+    ? departments.find((d) => d.id === employee.department_id)?.name ?? null
+    : employee.department;
+
+  const linkedProfile = employee.profile_id
+    ? profiles.find((p) => p.id === employee.profile_id)
+    : null;
+
   return (
     <div className="flex flex-col gap-5">
       {/* Header card */}
@@ -71,11 +97,17 @@ export function EmployeeDetail({ employee, reviews, issues }: Props) {
               )}
             </div>
             <div className="mt-0.5 text-[13px] text-muted-foreground">
-              {[employee.role_title, employee.department].filter(Boolean).join(" · ") || "—"}
+              {[employee.role_title, departmentName].filter(Boolean).join(" · ") || "—"}
             </div>
             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
               {employee.email && <span>{employee.email}</span>}
               {employee.start_date && <span>Started {formatDate(employee.start_date)}</span>}
+              {linkedProfile && (
+                <span className="inline-flex items-center gap-1">
+                  <LinkIcon className="h-3 w-3" />
+                  Linked to {linkedProfile.full_name ?? linkedProfile.email}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -114,6 +146,10 @@ export function EmployeeDetail({ employee, reviews, issues }: Props) {
               </Badge>
             )}
           </TabsTrigger>
+          <TabsTrigger value="access">
+            Access
+            <span className="ml-1.5 text-[11px] text-muted-foreground">{access.length}</span>
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="reviews" className="mt-4 flex flex-col gap-3">
@@ -147,9 +183,25 @@ export function EmployeeDetail({ employee, reviews, issues }: Props) {
             issues.map((i) => <IssueCard key={i.id} issue={i} employeeId={employee.id} />)
           )}
         </TabsContent>
+
+        <TabsContent value="access" className="mt-4">
+          <EmployeeAccessManager
+            employeeId={employee.id}
+            employeeName={employee.full_name}
+            initialAccess={access}
+            users={users}
+            canManage={canManageAccess}
+          />
+        </TabsContent>
       </Tabs>
 
-      <EmployeeEditor open={editOpen} onOpenChange={setEditOpen} employee={employee} />
+      <EmployeeEditor
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        employee={employee}
+        departments={departments}
+        profiles={profiles}
+      />
       <ReviewEditor
         open={reviewOpen}
         onOpenChange={setReviewOpen}

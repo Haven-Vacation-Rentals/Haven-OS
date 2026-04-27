@@ -159,6 +159,8 @@ export async function createEmployee(input: {
   email?: string;
   role_title?: string;
   department?: string;
+  department_id?: string | null;
+  profile_id?: string | null;
   start_date?: string;
   status?: string;
   notes?: string;
@@ -173,6 +175,8 @@ export async function createEmployee(input: {
       email: input.email?.trim() || null,
       role_title: input.role_title?.trim() || null,
       department: input.department?.trim() || null,
+      department_id: input.department_id ?? null,
+      profile_id: input.profile_id ?? null,
       start_date: input.start_date || null,
       status: input.status || "active",
       notes: input.notes ?? "",
@@ -192,6 +196,7 @@ export async function updateEmployee(
     role_title: string | null;
     department: string | null;
     department_id: string | null;
+    profile_id: string | null;
     start_date: string | null;
     status: string;
     notes: string;
@@ -209,6 +214,198 @@ export async function deleteEmployee(id: string): Promise<void> {
   const supabase = await db();
   await supabase.from("hr_employees").delete().eq("id", id);
   revalidateHr();
+}
+
+// ---------------------------------------------------------------------------
+// Per-employee access view
+// ---------------------------------------------------------------------------
+
+export type EmployeeAccessGrantSource = "super_admin" | "all" | "department" | "employee";
+
+export type EmployeeAccessEntry = {
+  user_id: string;
+  email: string | null;
+  full_name: string | null;
+  role: string;
+  source: EmployeeAccessGrantSource;
+  // For 'department' / 'employee' sources, the grant id we'd revoke. Null
+  // when access is inherited (super_admin) or via an 'all' grant.
+  grant_id: string | null;
+  // For 'department' source, the department name that grants the access.
+  department_name: string | null;
+};
+
+/**
+ * Who can currently see this employee's HR file?
+ * Returns one entry per (user, source-of-access). Super-admins are listed
+ * with source='super_admin'. Users with an 'all' grant are listed with
+ * source='all'. Department/employee grants are listed individually so the
+ * UI can show how a user got access and offer a revoke action when relevant.
+ *
+ * Caller must already have access to the employee (caller is the HR person
+ * file viewer).
+ */
+export async function listEmployeeAccess(
+  employeeId: string,
+): Promise<EmployeeAccessEntry[]> {
+  await requireEmployeeAccess(employeeId);
+  const supabase = await db();
+
+  const { data: emp } = await supabase
+    .from("hr_employees")
+    .select("id, department_id")
+    .eq("id", employeeId)
+    .maybeSingle();
+  const deptId = emp?.department_id ?? null;
+
+  const [supersRes, allGrantsRes, deptGrantsRes, empGrantsRes] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, email, full_name, role")
+      .eq("role", "super_admin"),
+    supabase
+      .from("hr_access_grants")
+      .select(
+        "id, scope, grantee:profiles!hr_access_grants_grantee_id_fkey(id, email, full_name, role)",
+      )
+      .eq("scope", "all"),
+    deptId
+      ? supabase
+          .from("hr_access_grants")
+          .select(
+            "id, scope, department_id, grantee:profiles!hr_access_grants_grantee_id_fkey(id, email, full_name, role), department:departments(id, name)",
+          )
+          .eq("scope", "department")
+          .eq("department_id", deptId)
+      : Promise.resolve({ data: [] as unknown[] }),
+    supabase
+      .from("hr_access_grants")
+      .select(
+        "id, scope, employee_id, grantee:profiles!hr_access_grants_grantee_id_fkey(id, email, full_name, role)",
+      )
+      .eq("scope", "employee")
+      .eq("employee_id", employeeId),
+  ]);
+
+  const out: EmployeeAccessEntry[] = [];
+
+  for (const s of (supersRes.data ?? []) as Array<{
+    id: string;
+    email: string | null;
+    full_name: string | null;
+    role: string;
+  }>) {
+    out.push({
+      user_id: s.id,
+      email: s.email,
+      full_name: s.full_name,
+      role: s.role,
+      source: "super_admin",
+      grant_id: null,
+      department_name: null,
+    });
+  }
+
+  type GranteeShape = {
+    id: string;
+    email: string | null;
+    full_name: string | null;
+    role: string;
+  };
+
+  for (const g of (allGrantsRes.data ?? []) as unknown as Array<{
+    id: string;
+    grantee: GranteeShape | null;
+  }>) {
+    if (!g.grantee) continue;
+    out.push({
+      user_id: g.grantee.id,
+      email: g.grantee.email,
+      full_name: g.grantee.full_name,
+      role: g.grantee.role,
+      source: "all",
+      grant_id: g.id,
+      department_name: null,
+    });
+  }
+
+  for (const g of (deptGrantsRes.data ?? []) as unknown as Array<{
+    id: string;
+    grantee: GranteeShape | null;
+    department: { id: string; name: string } | null;
+  }>) {
+    if (!g.grantee) continue;
+    out.push({
+      user_id: g.grantee.id,
+      email: g.grantee.email,
+      full_name: g.grantee.full_name,
+      role: g.grantee.role,
+      source: "department",
+      grant_id: g.id,
+      department_name: g.department?.name ?? null,
+    });
+  }
+
+  for (const g of (empGrantsRes.data ?? []) as unknown as Array<{
+    id: string;
+    grantee: GranteeShape | null;
+  }>) {
+    if (!g.grantee) continue;
+    out.push({
+      user_id: g.grantee.id,
+      email: g.grantee.email,
+      full_name: g.grantee.full_name,
+      role: g.grantee.role,
+      source: "employee",
+      grant_id: g.id,
+      department_name: null,
+    });
+  }
+
+  // De-duplicate: if a user has multiple paths (e.g. super_admin AND a grant),
+  // keep the most "authoritative" first. We dedupe by user_id, preferring the
+  // source order: super_admin → all → department → employee.
+  const order: Record<EmployeeAccessGrantSource, number> = {
+    super_admin: 0,
+    all: 1,
+    department: 2,
+    employee: 3,
+  };
+  const byUser = new Map<string, EmployeeAccessEntry>();
+  for (const e of out) {
+    const existing = byUser.get(e.user_id);
+    if (!existing || order[e.source] < order[existing.source]) {
+      byUser.set(e.user_id, e);
+    }
+  }
+  return Array.from(byUser.values()).sort((a, b) => {
+    const r = order[a.source] - order[b.source];
+    if (r !== 0) return r;
+    const an = (a.full_name ?? a.email ?? "").toLowerCase();
+    const bn = (b.full_name ?? b.email ?? "").toLowerCase();
+    return an.localeCompare(bn);
+  });
+}
+
+/**
+ * Lightweight list of profile candidates for linking an HR person file to
+ * a Haven OS user account. Returns id, email, full_name. Available to HR
+ * admins (anyone with HR access) so they can pick a user from a dropdown.
+ */
+export async function listLinkableProfiles(): Promise<
+  Array<{ id: string; email: string; full_name: string | null }>
+> {
+  await requireHrAdmin();
+  const supabase = await db();
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, email, full_name")
+    .order("full_name", { ascending: true });
+  return ((data ?? []) as Array<{
+    id: string;
+    email: string;
+    full_name: string | null;
+  }>);
 }
 
 // ---------------------------------------------------------------------------

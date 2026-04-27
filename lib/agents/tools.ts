@@ -1058,6 +1058,113 @@ export const TOOLS: ToolDef[] = [
       return { ok: true };
     },
   },
+  {
+    name: "list_people_by_department",
+    description:
+      "List all people in a specific department, identified by department slug or department id. HR access required. Useful for 'who's on Guest Experience?' style questions.",
+    input_schema: {
+      type: "object",
+      properties: {
+        department_id: { type: "string" },
+        department_slug: { type: "string" },
+        include_inactive: { type: "boolean" },
+      },
+      required: [],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      const wantId = s(input.department_id);
+      const wantSlug = s(input.department_slug);
+      const includeInactive = b(input.include_inactive) ?? false;
+      const departments = await admin.listDepartments(true);
+      let resolvedId: string | null = null;
+      if (wantId) resolvedId = wantId;
+      else if (wantSlug) {
+        const d = departments.find(
+          (x) => x.slug === wantSlug || x.slug === wantSlug.toLowerCase(),
+        );
+        if (!d) {
+          return {
+            ok: false,
+            error: `No department found with slug "${wantSlug}". Available: ${departments.map((d) => d.slug).join(", ")}.`,
+          };
+        }
+        resolvedId = d.id;
+      } else {
+        return { ok: false, error: "Provide department_id or department_slug." };
+      }
+      const employees = await hr.listEmployees();
+      const filtered = employees.filter(
+        (e) =>
+          e.department_id === resolvedId &&
+          (includeInactive || e.status === "active"),
+      );
+      return filtered;
+    },
+  },
+  {
+    name: "set_employee_department",
+    description:
+      "Move an employee to a different department by department_id (or clear it with department_id=null). HR access required.",
+    input_schema: {
+      type: "object",
+      properties: {
+        employee_id: { type: "string" },
+        department_id: { type: ["string", "null"] },
+      },
+      required: ["employee_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      const empId = s(input.employee_id)!;
+      const deptId =
+        input.department_id === null ? null : s(input.department_id) ?? null;
+      let deptName: string | null = null;
+      if (deptId) {
+        const departments = await admin.listDepartments(true);
+        deptName = departments.find((d) => d.id === deptId)?.name ?? null;
+      }
+      await hr.updateEmployee(empId, {
+        department_id: deptId,
+        department: deptName,
+      });
+      return { ok: true };
+    },
+  },
+  {
+    name: "set_employee_title",
+    description:
+      "Update an employee's title (role_title). HR access required. Use this when the user wants to correct or change someone's title.",
+    input_schema: {
+      type: "object",
+      properties: {
+        employee_id: { type: "string" },
+        title: { type: "string" },
+      },
+      required: ["employee_id", "title"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      await hr.updateEmployee(s(input.employee_id)!, {
+        role_title: s(input.title) ?? null,
+      });
+      return { ok: true };
+    },
+  },
+  {
+    name: "list_employee_access",
+    description:
+      "List every user who can currently access this employee's HR file, with the source of their access (super_admin / all-HR grant / department grant / direct employee grant). Caller needs HR access to the target employee.",
+    input_schema: {
+      type: "object",
+      properties: { employee_id: { type: "string" } },
+      required: ["employee_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      return hr.listEmployeeAccess(s(input.employee_id)!);
+    },
+  },
 
   // ---- Reviews ----------------------------------------------------------
   {

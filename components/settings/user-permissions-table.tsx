@@ -371,11 +371,26 @@ function HrGrantEditor({
             {employees.length === 0 ? (
               <option value="">(no employees yet)</option>
             ) : (
-              employees.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.full_name}
-                </option>
-              ))
+              employees
+                .slice()
+                .sort((a, b) => {
+                  const ad = (a.department ?? departments.find((x) => x.id === a.department_id)?.name ?? "").toLowerCase();
+                  const bd = (b.department ?? departments.find((x) => x.id === b.department_id)?.name ?? "").toLowerCase();
+                  if (ad !== bd) return ad.localeCompare(bd);
+                  return a.full_name.localeCompare(b.full_name);
+                })
+                .map((e) => {
+                  const deptName =
+                    departments.find((d) => d.id === e.department_id)?.name ??
+                    e.department ??
+                    null;
+                  return (
+                    <option key={e.id} value={e.id}>
+                      {e.full_name}
+                      {deptName ? ` — ${deptName}` : ""}
+                    </option>
+                  );
+                })
             )}
           </select>
         )}
