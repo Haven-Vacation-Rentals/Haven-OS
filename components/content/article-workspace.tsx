@@ -51,6 +51,7 @@ import { Input } from "@/components/ui/input";
 import {
   applyAgentSuggestion,
   createResearch,
+  optimizeArticleSeo,
   queueWordPressDraft,
   runArticleScorers,
   sendAgentPrompt,
@@ -153,8 +154,35 @@ function WorkspaceHeader({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [optimizing, setOptimizing] = useState(false);
   const [title, setTitle] = useState(article.title);
   const [meta, setMeta] = useState(article.meta_description);
+
+  function optimize() {
+    setOptimizing(true);
+    startTransition(async () => {
+      const r = await optimizeArticleSeo({ article_id: article.id });
+      setOptimizing(false);
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      const before = r.data.before;
+      const after = r.data.after;
+      const seoDelta =
+        before.seo === null ? after.seo : after.seo - before.seo;
+      const geoDelta =
+        before.geo === null ? after.geo : after.geo - before.geo;
+      toast.success(
+        `Optimized · SEO ${after.seo}${
+          before.seo !== null ? ` (${seoDelta >= 0 ? "+" : ""}${seoDelta})` : ""
+        } · GEO ${after.geo}${
+          before.geo !== null ? ` (${geoDelta >= 0 ? "+" : ""}${geoDelta})` : ""
+        }`,
+      );
+      router.refresh();
+    });
+  }
 
   // Re-seed local state when the article changes upstream (e.g. agent
   // applied set_title / set_meta).
@@ -215,6 +243,16 @@ function WorkspaceHeader({
               </option>
             ))}
           </select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={optimize}
+            disabled={pending || optimizing}
+            title="Apply a full SEO/GEO pass: title, meta, structure, voice, CTA, sign-off."
+          >
+            <Wand2 className="h-3.5 w-3.5" />
+            {optimizing ? "Optimizing…" : "Optimize for SEO"}
+          </Button>
           <Button
             variant="primary"
             size="sm"
@@ -829,6 +867,46 @@ function AgentChat({
     setInput("");
 
     try {
+      // "Optimize this draft for SEO" / "run a full SEO pass" — bypass
+      // the suggestion flow and apply the change directly. This is the
+      // path Jack actually wants: ask, get the change applied, see the
+      // new score.
+      if (FULL_SEO_RX.test(trimmed)) {
+        const r = await optimizeArticleSeo({ article_id: article.id });
+        if (!r.ok) {
+          toast.error(r.error);
+          setMessages((m) => m.filter((x) => x.id !== optimisticId));
+          return;
+        }
+        const lines = [
+          `Applied a full SEO pass directly to the draft.`,
+          `SEO ${r.data.before.seo ?? "—"} → ${r.data.after.seo}, GEO ${r.data.before.geo ?? "—"} → ${r.data.after.geo}.`,
+          "",
+          "Changes:",
+          ...r.data.summary.map((s) => `• ${s}`),
+        ];
+        const optimisticAgentId = `opt_agent_${Date.now()}`;
+        setMessages((m) => [
+          ...m,
+          {
+            id: optimisticAgentId,
+            article_id: article.id,
+            role: "agent",
+            content: lines.join("\n"),
+            suggestion: null,
+            applied: true,
+            author_id: null,
+            created_at: new Date().toISOString(),
+            _optimistic: true,
+          },
+        ]);
+        toast.success(
+          `Optimized · SEO ${r.data.after.seo} · GEO ${r.data.after.geo}`,
+        );
+        router.refresh();
+        return;
+      }
+
       const r = await sendAgentPrompt({
         article_id: article.id,
         prompt: trimmed,
@@ -961,15 +1039,18 @@ function AgentChat({
 }
 
 const QUICK_ACTIONS = [
+  "Optimize this draft for SEO",
   "Make the title stronger",
   "Add H2 sections",
   "Rewrite the intro",
   "Add an FAQ",
   "Tighten the CTA",
-  "Improve SEO",
   "More Jack voice",
   "Score this",
 ];
+
+const FULL_SEO_RX =
+  /\b(optimi[sz]e|run\s+(?:a\s+)?(?:full\s+)?seo\s+(?:pass|optimization)|seo\s+pass|geo\s+pass|full\s+seo)\b.*\b(this|the|my|current|draft|article|post|piece|content)\b|\boptimi[sz]e\s+(?:this\s+)?(?:draft|article|post|piece)\b|\bseo\s+optimi[sz]e\b/i;
 
 function ChatPrimer({ onChip }: { onChip: (s: string) => void }) {
   return (

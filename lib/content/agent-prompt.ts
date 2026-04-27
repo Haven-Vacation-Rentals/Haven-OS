@@ -541,3 +541,160 @@ function tightenSentence(text: string): string {
     .replace(/—/g, "-")
     .trim();
 }
+
+// ---------------------------------------------------------------------------
+// Full SEO/GEO optimization pass — opinionated, multi-step. Used by the
+// studio "Optimize this draft" action so a single click applies a real
+// improvement to the article instead of returning advice.
+// ---------------------------------------------------------------------------
+
+export type FullOptimizationResult = {
+  title: string;
+  meta_description: string;
+  body_md: string;
+  summary: string[];
+};
+
+/**
+ * Apply every safe, deterministic SEO/GEO improvement we can without
+ * inventing facts:
+ *   - Tighten title to 50–70 chars + include keyword + location.
+ *   - Build/repair a 150–160 char meta description.
+ *   - Strip em dashes, exclamations, common buzzwords, hedge filler.
+ *   - Replace `leverage`, `utilize`, etc. with plain English.
+ *   - Add H2 structure if the body is a flat run of paragraphs.
+ *   - Ensure target keyword shows up in lede.
+ *   - Ensure soft CTA + Jack sign-off are present.
+ *   - Add an FAQ section if the body is long enough and lacks one.
+ */
+export function applyFullSeoOptimization(input: {
+  article: ContentArticle;
+  topic: ContentTopic;
+}): FullOptimizationResult {
+  const { article, topic } = input;
+  const summary: string[] = [];
+
+  // ---- Title -----------------------------------------------------------
+  const newTitle = strongerTitle(article, topic);
+  if (newTitle !== article.title) {
+    summary.push(
+      `Title rewritten to ${newTitle.length} chars (target 50–70).`,
+    );
+  }
+
+  // ---- Meta description ------------------------------------------------
+  const newMeta = strongMeta(article, topic);
+  if (newMeta !== article.meta_description) {
+    summary.push(
+      `Meta description rewritten to ${newMeta.length} chars (target 150–160).`,
+    );
+  }
+
+  // ---- Body ------------------------------------------------------------
+  let body = article.body_md ?? "";
+
+  // Em dashes / exclamations.
+  if (/—/.test(body)) {
+    body = body.replaceAll("—", "-");
+    summary.push("Replaced em dashes with hyphens.");
+  }
+  if (/!/.test(body)) {
+    body = body.replaceAll("!", ".");
+    summary.push("Toned down exclamation points to periods.");
+  }
+
+  // Buzzword / hedge replacements.
+  const replacements: Array<[RegExp, string, string]> = [
+    [/\bleverage\b/gi, "use", "leverage→use"],
+    [/\butilize\b/gi, "use", "utilize→use"],
+    [/\bsynergy\b/gi, "fit", "synergy→fit"],
+    [/\bgame[- ]?changer\b/gi, "real lever", "game-changer→real lever"],
+    [/\bcutting[- ]edge\b/gi, "current", "cutting-edge→current"],
+    [/\bworld[- ]class\b/gi, "strong", "world-class→strong"],
+    [/\bin order to\b/gi, "to", "in order to→to"],
+    [/\bvery (very )?\b/gi, "", "stripped 'very'"],
+    [/\bjust\b\s+/gi, "", "stripped 'just'"],
+    [/\breally\b\s+/gi, "", "stripped 'really'"],
+    [/\bsimply\b\s+/gi, "", "stripped 'simply'"],
+    [/\bunlock\b/gi, "open up", "unlock→open up"],
+    [/\bsupercharge\b/gi, "speed up", "supercharge→speed up"],
+    [/\brevolutioni[sz]e\b/gi, "change", "revolutionize→change"],
+  ];
+  const swapsApplied: string[] = [];
+  for (const [r, replacement, label] of replacements) {
+    const before = body;
+    body = body.replace(r, replacement);
+    if (body !== before) swapsApplied.push(label);
+  }
+  if (swapsApplied.length > 0) {
+    summary.push(
+      `Replaced buzzwords/hedges: ${swapsApplied.slice(0, 4).join(", ")}${swapsApplied.length > 4 ? "…" : ""}.`,
+    );
+  }
+
+  // Add H2 structure if missing.
+  const before = body;
+  const sectioned = autoSectionHeadings({ ...article, body_md: body });
+  if (sectioned !== before) {
+    body = sectioned;
+    summary.push("Added H2 section headings to break up the draft.");
+  }
+
+  // Ensure keyword in lede.
+  const kw = topic.target_keyword?.trim();
+  if (kw) {
+    const blocks = parsePostBlocks(body);
+    const introIdx = blocks.findIndex((b) => b.type === "p");
+    if (introIdx >= 0) {
+      const intro = blocks[introIdx]! as Extract<PostBlock, { type: "p" }>;
+      if (!intro.text.toLowerCase().includes(kw.toLowerCase())) {
+        intro.text = `${kw} — ${intro.text}`.replaceAll("—", "-");
+        body = serializePostBlocks(blocks);
+        summary.push(`Added target keyword "${kw}" to the lede.`);
+      }
+    }
+  }
+
+  // Soft CTA.
+  const lowerBody = body.toLowerCase();
+  if (
+    !/sales@havenvacationrentals\.com/.test(lowerBody) &&
+    !/(reach out|talk through|walk you through|second set of eyes|happy to)/.test(
+      lowerBody,
+    )
+  ) {
+    body = upsertSoftCta({ ...article, body_md: body });
+    summary.push("Added a soft operator-voice CTA before the sign-off.");
+  }
+
+  // Sign-off.
+  if (!body.includes(SIGN_OFF)) {
+    body = body.trimEnd() + "\n\n" + SIGN_OFF + "\n";
+    summary.push("Added the Jack Zoppa sign-off.");
+  }
+
+  // FAQ section if missing and body is long enough.
+  const wordCount = body.split(/\s+/).filter(Boolean).length;
+  const hasFaq = /(^|\n)#{2,3}\s+(FAQ|Frequently Asked)/i.test(body);
+  if (!hasFaq && wordCount >= 600) {
+    body =
+      body.trimEnd() +
+      "\n\n## FAQ\n\n" +
+      buildFaqSection(topic) +
+      "\n";
+    summary.push("Added an FAQ section to surface common owner questions.");
+  }
+
+  if (summary.length === 0) {
+    summary.push(
+      "The draft already meets the basics — title length, keyword in title and lede, sign-off, and clean voice. Run the scorers to see the remaining warnings.",
+    );
+  }
+
+  return {
+    title: newTitle,
+    meta_description: newMeta,
+    body_md: body,
+    summary,
+  };
+}

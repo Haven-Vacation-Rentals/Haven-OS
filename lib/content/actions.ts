@@ -42,11 +42,14 @@ import {
 } from "./wordpress";
 import {
   detectIntent,
+  deriveTopicSeed,
   generateLocalTopicIdeas,
+  normalizeDraftBody,
   parseTopicDraft,
   type TopicDraft,
   type TopicIdea,
 } from "./topic-intent";
+import { applyFullSeoOptimization } from "./agent-prompt";
 
 async function db() {
   const supabase = await createClient();
@@ -964,8 +967,20 @@ export type StudioChatResult =
       message: string;
     }
   | {
+      kind: "imported";
+      topic: TopicWithArticle;
+      draft: TopicDraft;
+      message: string;
+      word_count: number;
+    }
+  | {
       kind: "ideas";
       ideas: TopicIdea[];
+      message: string;
+    }
+  | {
+      kind: "needs_target";
+      reason: "optimize_seo";
       message: string;
     }
   | {
@@ -1024,6 +1039,196 @@ export async function createTopicFromConversation(input: {
       data: {
         topic: full ?? { ...topic, article: null },
         draft,
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Tool: create_topic_from_pasted_draft
+ *
+ * Jack pastes an existing draft (markdown or plain text). We derive a
+ * topic skeleton from the draft (title, pillar, keyword, etc.), persist
+ * it, and seed the article with the pasted body so the right-hand
+ * canvas opens with rich post content immediately.
+ */
+export async function createTopicFromPastedDraft(input: {
+  space_id: string;
+  body: string;
+  title_hint?: string | null;
+}): Promise<
+  Result<{ topic: TopicWithArticle; draft: TopicDraft; word_count: number }>
+> {
+  try {
+    const userId = await requireAdminOrAbove();
+    const supabase = await db();
+
+    const body = normalizeDraftBody(input.body);
+    if (!body || countWords(body) < 20) {
+      return {
+        ok: false,
+        error: "The pasted draft is too short to import. Paste at least a few sentences.",
+      };
+    }
+
+    const seed = (input.title_hint?.trim() || deriveTopicSeed(body)).trim();
+    const draft = parseTopicDraft(seed);
+
+    // Strip a leading H1 if present — the topic title carries it.
+    let working = body;
+    const h1Match = /^#\s+(.+)\n+/.exec(working);
+    if (h1Match) {
+      working = working.slice(h1Match[0].length).trimStart();
+    }
+    const wc = countWords(working);
+
+    const { data: topicRow, error: topicErr } = await supabase
+      .from("content_topics")
+      .insert({
+        space_id: input.space_id,
+        title: draft.title,
+        pillar: draft.pillar,
+        priority: draft.priority,
+        target_keyword: draft.target_keyword,
+        secondary_keywords: draft.secondary_keywords,
+        angle: draft.angle,
+        hypothesis: draft.hypothesis,
+        stage: "draft",
+        created_by: userId,
+        owner_id: userId,
+      })
+      .select("*")
+      .single();
+    if (topicErr) return { ok: false, error: topicErr.message };
+    const topic = rowToTopic(topicRow);
+
+    const briefMd = buildBriefMarkdown(draft);
+    await supabase.from("content_articles").insert({
+      topic_id: topic.id,
+      title: draft.title,
+      brief_md: briefMd,
+      outline_md: "",
+      body_md: working,
+      word_count: wc,
+      reading_time_min: readingTimeMin(wc),
+    });
+
+    revalidatePath(CONTENT_PATH, "layout");
+    const full = await getTopic(topic.id);
+    return {
+      ok: true,
+      data: {
+        topic: full ?? { ...topic, article: null },
+        draft,
+        word_count: wc,
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Tool: optimize_article_seo
+ *
+ * Apply an opinionated SEO/GEO pass to an existing article (mutates
+ * title, meta, body in-place via updateArticle, and re-runs the
+ * scorers). Returns before/after scores plus a summary of changes.
+ */
+export async function optimizeArticleSeo(input: {
+  article_id: string;
+}): Promise<
+  Result<{
+    article: ContentArticle;
+    seo: ContentSeoCheck;
+    geo: ContentGeoCheck;
+    summary: string[];
+    before: { seo: number | null; geo: number | null };
+    after: { seo: number; geo: number };
+  }>
+> {
+  try {
+    await requireAdminOrAbove();
+    const supabase = await db();
+
+    const article = await getArticle(input.article_id);
+    if (!article) return { ok: false, error: "Article not found" };
+
+    const { data: topicRow } = await supabase
+      .from("content_topics")
+      .select("*")
+      .eq("id", article.topic_id)
+      .maybeSingle();
+    if (!topicRow) return { ok: false, error: "Topic not found" };
+    const topic = rowToTopic(topicRow);
+    const sources = await listResearch(article.topic_id);
+
+    const before = { seo: article.seo_score, geo: article.geo_score };
+
+    const optimized = applyFullSeoOptimization({ article, topic });
+
+    const updateRes = await updateArticle(
+      article.id,
+      {
+        title: optimized.title,
+        meta_description: optimized.meta_description,
+        body_md: optimized.body_md,
+      },
+      { source: "agent", note: "Applied full SEO optimization pass" },
+    );
+    if (!updateRes.ok) return { ok: false, error: updateRes.error };
+
+    const updatedArticle = updateRes.data;
+
+    // Re-run scorers against the freshly optimized article.
+    const seo = runSeoChecks({ article: updatedArticle, topic, sources });
+    const geo = runGeoChecks({ article: updatedArticle, topic, sources });
+
+    const { data: seoRow } = await supabase
+      .from("content_seo_checks")
+      .insert({ article_id: article.id, score: seo.score, checks: seo.checks })
+      .select("*")
+      .single();
+    const { data: geoRow } = await supabase
+      .from("content_geo_checks")
+      .insert({ article_id: article.id, score: geo.score, checks: geo.checks })
+      .select("*")
+      .single();
+
+    await supabase
+      .from("content_articles")
+      .update({ seo_score: seo.score, geo_score: geo.score })
+      .eq("id", article.id);
+
+    // Move topic to "optimize" if it isn't past it yet.
+    if (
+      ["idea", "research", "brief", "outline", "draft"].includes(topic.stage)
+    ) {
+      await supabase
+        .from("content_topics")
+        .update({ stage: "optimize" })
+        .eq("id", topic.id);
+    }
+
+    revalidatePath(CONTENT_PATH, "layout");
+
+    return {
+      ok: true,
+      data: {
+        article: { ...updatedArticle, seo_score: seo.score, geo_score: geo.score },
+        seo: seoRow ? rowToSeoCheck(seoRow) : { id: "_", article_id: article.id, score: seo.score, checks: seo.checks, created_at: new Date().toISOString() },
+        geo: geoRow ? rowToGeoCheck(geoRow) : { id: "_", article_id: article.id, score: geo.score, checks: geo.checks, created_at: new Date().toISOString() },
+        summary: optimized.summary,
+        before,
+        after: { seo: seo.score, geo: geo.score },
       },
     };
   } catch (err) {
@@ -1127,6 +1332,39 @@ export async function runStudioChat(input: {
     await requireAdminOrAbove();
     const intent = detectIntent(input.message);
 
+    if (intent.kind === "paste_draft") {
+      const imported = await createTopicFromPastedDraft({
+        space_id: input.space_id,
+        body: intent.body,
+      });
+      if (!imported.ok) return imported;
+      return {
+        ok: true,
+        data: {
+          kind: "imported",
+          topic: imported.data.topic,
+          draft: imported.data.draft,
+          word_count: imported.data.word_count,
+          message: `Imported your draft as "${imported.data.draft.title}" (${imported.data.word_count} words). It's parsed into the post canvas on the right. Open it to optimize for SEO with one click.`,
+        },
+      };
+    }
+
+    if (intent.kind === "optimize_seo") {
+      // Studio-level chat doesn't have a single article context; the
+      // SEO pass needs to run inside the article workspace. Tell Jack
+      // to open a topic and re-run the action there.
+      return {
+        ok: true,
+        data: {
+          kind: "needs_target",
+          reason: "optimize_seo",
+          message:
+            "Open the topic you want to optimize and I'll run a full SEO pass on it from the article workspace. Or paste your draft here and I'll import it first.",
+        },
+      };
+    }
+
     if (intent.kind === "create_topic") {
       const created = await createTopicFromConversation({
         space_id: input.space_id,
@@ -1162,7 +1400,7 @@ export async function runStudioChat(input: {
       data: {
         kind: "message",
         message:
-          'Tell me what to write about — for example, "write about gap nights in Pigeon Forge" or "I want a post on owner tax prep". You can also tap "Research ideas" and I will pull a fresh list.',
+          'Tell me what to write about, paste a draft, or ask me to research ideas. Examples: "write about gap nights in Pigeon Forge", "research ideas for May", or paste a draft you already have and I\'ll import it.',
       },
     };
   } catch (err) {

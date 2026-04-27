@@ -666,9 +666,9 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         No topics yet
       </h3>
       <p className="max-w-md text-[13px] text-muted-foreground">
-        Tell the topic agent above what to write about, or tap "Research
-        ideas" to pull a fresh seasonal list. The advanced form is here
-        for full-control entry.
+        Tell the topic agent above what to write about, paste an existing
+        draft to import, or tap "Research ideas" to pull a fresh seasonal
+        list. The advanced form is here for full-control entry.
       </p>
       <Button variant="outline" onClick={onCreate}>
         <Plus className="h-4 w-4" />

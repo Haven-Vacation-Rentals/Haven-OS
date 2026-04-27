@@ -22,6 +22,8 @@ import {
 export type TopicIntent =
   | { kind: "create_topic"; raw: string; draft: TopicDraft }
   | { kind: "generate_ideas"; raw: string; count: number }
+  | { kind: "paste_draft"; raw: string; body: string; draft: TopicDraft }
+  | { kind: "optimize_seo"; raw: string }
   | { kind: "unknown"; raw: string };
 
 export type TopicDraft = {
@@ -92,10 +94,13 @@ const STOP_WORDS = new Set(
 );
 
 const LEAD_VERBS =
-  /^(write\s+(?:a\s+|the\s+)?(?:post|article|piece|blog)?\s*(?:on|about)?|i\s+want\s+(?:a\s+|the\s+)?(?:post|article|piece|blog)?\s*(?:on|about)?|let'?s\s+write\s+(?:about)?|add\s+(?:a\s+)?(?:topic|post|article|idea|backlog item)?\s*(?:on|about)?|create\s+(?:a\s+)?(?:topic|post|article|idea)?\s*(?:on|about)?|draft\s+(?:a\s+)?(?:post|article|piece)?\s*(?:on|about)?|new\s+(?:topic|post|article|idea)?\s*(?:on|about)?|topic\s*(?:on|about)?|idea\s*(?:on|about)?|post\s*(?:on|about)?|blog\s*(?:on|about)?)\s*[:\-]?\s*/i;
+  /^(write\s+(?:me\s+)?(?:a\s+|the\s+|some\s+)?(?:post|article|piece|blog|story|thing)?\s*(?:on|about|covering|regarding|for)?|i\s+(?:want|need|would\s+like|wanna|wish|gotta|should)\s+(?:to\s+)?(?:write|publish|cover|do|make|put\s+together|build|draft)?\s*(?:a\s+|the\s+|some\s+)?(?:post|article|piece|blog|story|thing)?\s*(?:on|about|covering|regarding|for)?|let'?s\s+(?:do|write|cover|talk\s+about|tackle)\s+(?:a\s+|the\s+)?(?:post|article|piece|blog)?\s*(?:on|about)?|can\s+(?:you|we)\s+(?:write|cover|do|draft|make)?\s*(?:a\s+|the\s+|some\s+)?(?:post|article|piece|blog)?\s*(?:on|about)?|please\s+(?:write|cover|do|draft|make)?\s*(?:a\s+|the\s+)?(?:post|article|piece|blog)?\s*(?:on|about)?|add\s+(?:a\s+)?(?:topic|post|article|idea|backlog\s+item)?\s*(?:on|about|for|to|covering)?|create\s+(?:a\s+)?(?:topic|post|article|idea)?\s*(?:on|about|for|covering)?|make\s+(?:a\s+|some\s+)?(?:topic|post|article|piece)?\s*(?:on|about|for|covering)?|do\s+(?:a\s+)?(?:topic|post|article|piece)?\s*(?:on|about|for|covering)?|draft\s+(?:a\s+)?(?:post|article|piece)?\s*(?:on|about|for|covering)?|cover\s+(?:a\s+|the\s+)?(?:topic|post|article)?\s*(?:on|about|for)?|new\s+(?:topic|post|article|idea)?\s*(?:on|about|for|covering)?|topic\s*(?:on|about|for|:|-)?|idea\s*(?:on|about|for|:|-)?|post\s*(?:on|about|for|:|-)?|article\s*(?:on|about|for|:|-)?|blog\s*(?:on|about|for|:|-)?)\s*[:\-]?\s*/i;
 
 const RESEARCH_RX =
-  /\b(research|brainstorm|ideate|come up with|suggest|propose|generate|need|give me)\b.*\b(idea|topic|post|article|backlog)s?\b/i;
+  /\b(research|brainstorm|ideate|come up with|suggest|propose|generate|need|give\s*me|show\s*me|recommend|find)\b.*\b(idea|topic|post|article|backlog|suggestion)s?\b/i;
+
+const SEO_OPTIMIZE_RX =
+  /\b(seo|search engine|geo|ai\s+rank(ing)?|optimi[sz]e)\b.*\b(this|the|my|current|article|draft|post|piece)\b|\b(optimi[sz]e|seo[- ]?ize|rank|tighten)\b\s+(?:this|the|my|current)?\s*(?:draft|article|post|piece)/i;
 
 const STRIP_QUOTES = /^["'“‘]+|["'”’]+$/g;
 
@@ -103,7 +108,28 @@ export function detectIntent(raw: string): TopicIntent {
   const text = raw.trim();
   if (!text) return { kind: "unknown", raw };
 
-  if (RESEARCH_RX.test(text) || /^research(\s+ideas?)?$/i.test(text)) {
+  // Pasted long-form draft? If the message is several paragraphs of
+  // prose (or markdown), treat it as a draft to import. This is the
+  // most-common Jack flow: paste a draft, then optimize it.
+  if (looksLikePastedDraft(text)) {
+    const body = normalizeDraftBody(text);
+    return {
+      kind: "paste_draft",
+      raw,
+      body,
+      draft: parseTopicDraft(deriveTopicSeed(body)),
+    };
+  }
+
+  if (SEO_OPTIMIZE_RX.test(text)) {
+    return { kind: "optimize_seo", raw };
+  }
+
+  if (
+    RESEARCH_RX.test(text) ||
+    /^research(\s+ideas?)?$/i.test(text) ||
+    /^(?:ideas?|topic\s+ideas?|fresh\s+ideas?|seasonal\s+ideas?)\b/i.test(text)
+  ) {
     const count = readCount(text);
     return { kind: "generate_ideas", raw, count };
   }
@@ -113,6 +139,50 @@ export function detectIntent(raw: string): TopicIntent {
   }
 
   return { kind: "unknown", raw };
+}
+
+/**
+ * Heuristics for "this is a draft, not a request":
+ *   - 200+ chars, AND either has a markdown heading, multiple
+ *     paragraphs, or is just very long (>= 3 newlines, >= 60 words).
+ *   - Fewer false positives than a strict word count alone.
+ */
+export function looksLikePastedDraft(raw: string): boolean {
+  const text = raw.trim();
+  if (text.length < 200) return false;
+  const newlineCount = (text.match(/\n/g) ?? []).length;
+  const words = text.split(/\s+/).filter(Boolean).length;
+  const hasHeading = /(^|\n)#{1,6}\s+\S/.test(text);
+  const hasParagraphs = /\n\s*\n/.test(text);
+  if (hasHeading && words >= 60) return true;
+  if (hasParagraphs && words >= 80) return true;
+  if (newlineCount >= 3 && words >= 120) return true;
+  if (words >= 200) return true;
+  return false;
+}
+
+/**
+ * Pulls a usable seed sentence from a pasted draft so we can derive
+ * a working title, keyword, pillar, etc. Prefers the first H1; falls
+ * back to the first non-empty line.
+ */
+export function deriveTopicSeed(body: string): string {
+  const lines = body.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const h1 = lines.find((l) => /^#\s+\S/.test(l));
+  if (h1) return h1.replace(/^#\s+/, "");
+  const h2 = lines.find((l) => /^##\s+\S/.test(l));
+  if (h2) return h2.replace(/^##\s+/, "");
+  const first = lines[0] ?? "";
+  // Trim a long lede to a usable seed sentence.
+  return first.split(/[.?!]/)[0]?.slice(0, 200) ?? first.slice(0, 200);
+}
+
+/**
+ * Strip a leading markdown H1 and normalize spacing. Keeps the body
+ * editable as paragraphs / sections.
+ */
+export function normalizeDraftBody(text: string): string {
+  return text.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function readCount(text: string): number {
@@ -126,7 +196,17 @@ function readCount(text: string): number {
 
 function looksLikeTopicCreate(text: string): boolean {
   if (LEAD_VERBS.test(text)) return true;
-  if (/^(?:topic|idea|post|blog)\s*[:\-]/i.test(text)) return true;
+  if (/^(?:topic|idea|post|blog|article)\s*[:\-]/i.test(text)) return true;
+  // "about X", "on X" as a leading phrase — relaxed catch-all when the
+  // message is short enough to be a topic seed (not a paragraph).
+  if (/^(?:about|on|regarding)\s+\S/i.test(text) && text.length <= 240) return true;
+  // Bare topic seed: short message, contains a topic-like noun phrase
+  // alongside a known location or pillar keyword.
+  if (text.length <= 200) {
+    const hasLocation = LOCATIONS.some(({ match }) => match.test(text));
+    const hasPillar = PILLAR_KEYWORDS.some(({ words }) => words.test(text));
+    if (hasLocation && hasPillar) return true;
+  }
   return false;
 }
 
