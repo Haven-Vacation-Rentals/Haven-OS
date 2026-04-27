@@ -1,15 +1,26 @@
-import { Raleway } from "next/font/google";
-
 /**
- * Raleway — Haven's body/UI typeface.
- * Loaded via next/font for zero-CLS font delivery.
+ * Haven body/UI typography.
  *
- * Futura PT is loaded via an Adobe Typekit link tag in app/layout.tsx
- * because Adobe Fonts can't be hosted via next/font.
+ * We previously loaded Raleway via `next/font/google`, but the build-time
+ * fetch to fonts.googleapis.com is unreliable in sandboxed/offline build
+ * environments and would break `next build`. To keep deploys deterministic
+ * and remove the external network dependency, we now resolve the
+ * `--font-raleway` CSS variable to a system/web-safe sans-serif stack.
+ *
+ * The exported object preserves the shape consumed elsewhere
+ * (`raleway.variable` is applied to <html> in app/layout.tsx and
+ * `var(--font-raleway)` is referenced from globals.css and tailwind.config.ts),
+ * so callers do not need to change.
+ *
+ * Futura PT continues to be loaded via the Adobe Typekit <link> in
+ * app/layout.tsx for headings.
  */
-export const raleway = Raleway({
-  subsets: ["latin", "latin-ext"],
-  variable: "--font-raleway",
-  weight: ["300", "400", "500", "600", "700", "800", "900"],
-  display: "swap",
-});
+
+const FONT_RALEWAY_STACK =
+  '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
+
+export const raleway = {
+  variable: "haven-font-raleway",
+  className: "haven-font-raleway",
+  style: { fontFamily: FONT_RALEWAY_STACK },
+} as const;
