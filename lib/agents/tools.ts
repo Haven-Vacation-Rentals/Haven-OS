@@ -242,6 +242,115 @@ export const TOOLS: ToolDef[] = [
       }),
   },
 
+  // ---------------------------------------------------------------------
+  // Work — access controls (per-space, per-list)
+  // ---------------------------------------------------------------------
+  {
+    name: "list_space_members",
+    description:
+      "List the members of a Work space, with their access role (admin / member / viewer). Members + the team-wide privacy flag determine who can see and edit the space.",
+    input_schema: {
+      type: "object",
+      properties: { space_id: { type: "string" } },
+      required: ["space_id"],
+    },
+    execute: async (input) => work.getSpaceMembers(s(input.space_id)!),
+  },
+  {
+    name: "set_space_access",
+    description:
+      "Grant or update a user's role on a Work space. Roles: admin (full control), member (read+write), viewer (read-only). Pass role='remove' to revoke access entirely.",
+    input_schema: {
+      type: "object",
+      properties: {
+        space_id: { type: "string" },
+        profile_id: { type: "string" },
+        role: {
+          type: "string",
+          enum: ["admin", "member", "viewer", "remove"],
+        },
+      },
+      required: ["space_id", "profile_id", "role"],
+    },
+    execute: async (input) => {
+      const spaceId = s(input.space_id)!;
+      const profileId = s(input.profile_id)!;
+      const role = s(input.role)!;
+      if (role === "remove") {
+        await work.removeSpaceMember(spaceId, profileId);
+      } else {
+        await work.addSpaceMember(
+          spaceId,
+          profileId,
+          role as "admin" | "member" | "viewer",
+        );
+      }
+      return { ok: true };
+    },
+  },
+  {
+    name: "set_space_privacy",
+    description:
+      "Switch a space between team-visible (everyone signed-in can read+write) and private (only members listed via set_space_access). Requires admin on the space.",
+    input_schema: {
+      type: "object",
+      properties: {
+        space_id: { type: "string" },
+        privacy: { type: "string", enum: ["team", "private"] },
+      },
+      required: ["space_id", "privacy"],
+    },
+    execute: async (input) => {
+      await work.updateSpacePrivacy(
+        s(input.space_id)!,
+        s(input.privacy) as "team" | "private",
+      );
+      return { ok: true };
+    },
+  },
+  {
+    name: "list_list_members",
+    description:
+      "List the members of a Work list, including each member's access_level (viewer / editor / admin). Without an explicit row, access falls back to the parent space.",
+    input_schema: {
+      type: "object",
+      properties: { list_id: { type: "string" } },
+      required: ["list_id"],
+    },
+    execute: async (input) => work.getListMembers(s(input.list_id)!),
+  },
+  {
+    name: "set_list_access",
+    description:
+      "Grant or update a user's access on a Work list. access_level: viewer (read-only), editor (read+write tasks/statuses/fields), admin (full control). Pass access_level='remove' to delete the explicit grant — access then falls back to the parent space.",
+    input_schema: {
+      type: "object",
+      properties: {
+        list_id: { type: "string" },
+        profile_id: { type: "string" },
+        access_level: {
+          type: "string",
+          enum: ["viewer", "editor", "admin", "remove"],
+        },
+      },
+      required: ["list_id", "profile_id", "access_level"],
+    },
+    execute: async (input) => {
+      const listId = s(input.list_id)!;
+      const profileId = s(input.profile_id)!;
+      const lvl = s(input.access_level)!;
+      if (lvl === "remove") {
+        await work.removeListMember(listId, profileId);
+      } else {
+        const access_level = lvl as "viewer" | "editor" | "admin";
+        // Upsert via addListMember (it idempotently sets the access level).
+        await work.addListMember(listId, profileId, { access_level });
+        await work.updateListMemberAccessLevel(listId, profileId, access_level);
+      }
+      return { ok: true };
+    },
+  },
+
   // =========================================================================
   // WORK — TASKS
   // =========================================================================
@@ -567,6 +676,31 @@ export const TOOLS: ToolDef[] = [
       const propId = s(input.property_id)!;
       const fields = (input.fields ?? {}) as PropertyUpdateInput;
       return props.updateProperty(propId, fields);
+    },
+  },
+  {
+    name: "create_property",
+    description:
+      "Create a new property in the Properties space. `name` is required; pass any other fields from the Property type in `fields`. Hostaway sync still owns rows it imports — use this for app-native additions (test units, pre-onboard placeholders, etc).",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        fields: {
+          type: "object",
+          description:
+            "Optional partial Property. Same keys as update_property.",
+          additionalProperties: true,
+        },
+      },
+      required: ["name"],
+    },
+    execute: async (input) => {
+      const name = s(input.name)!;
+      const fields = (input.fields ?? {}) as PropertyUpdateInput;
+      const result = await props.createProperty({ ...fields, name });
+      if (!result.ok) throw new Error(result.error);
+      return result.data;
     },
   },
   {
@@ -1120,15 +1254,8 @@ export const TOOLS: ToolDef[] = [
       const empId = s(input.employee_id)!;
       const deptId =
         input.department_id === null ? null : s(input.department_id) ?? null;
-      let deptName: string | null = null;
-      if (deptId) {
-        const departments = await admin.listDepartments(true);
-        deptName = departments.find((d) => d.id === deptId)?.name ?? null;
-      }
-      await hr.updateEmployee(empId, {
-        department_id: deptId,
-        department: deptName,
-      });
+      const result = await hr.setEmployeeDepartment(empId, deptId);
+      if (!result.ok) throw new Error(result.error);
       return { ok: true };
     },
   },

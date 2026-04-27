@@ -2,7 +2,18 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { requireSignedIn } from "@/lib/auth/permissions";
 import type { Property, PropertyUpdateInput } from "./types";
+
+export type CreatePropertyInput = Partial<
+  Omit<Property, "id" | "created_at" | "updated_at" | "archived_at">
+> & {
+  name: string;
+};
+
+export type CreatePropertyResult =
+  | { ok: true; data: Property }
+  | { ok: false; error: string };
 
 async function db() {
   const supabase = await createClient();
@@ -88,6 +99,57 @@ export async function updateProperty(
     .eq("id", id);
   if (error) throw error;
   revalidatePath("/properties", "layout");
+}
+
+/**
+ * Create a new property (app-native, not a Hostaway import).
+ *
+ * Returns a tagged result so callers can render validation messages
+ * without throwing. Hostaway sync still owns `external_id` / `hostaway_id`
+ * for imported rows; manually-created rows leave those null unless the
+ * caller fills them in.
+ */
+export async function createProperty(
+  input: CreatePropertyInput,
+): Promise<CreatePropertyResult> {
+  try {
+    await requireSignedIn();
+    const name = input.name?.trim();
+    if (!name) return { ok: false, error: "Name is required" };
+    const supabase = await db();
+
+    // Strip empty strings on optional text fields so we don't overwrite the
+    // column default (null) with "".
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(input)) {
+      if (v === undefined) continue;
+      if (typeof v === "string") {
+        const t = v.trim();
+        clean[k] = t === "" ? null : t;
+      } else {
+        clean[k] = v;
+      }
+    }
+    clean.name = name;
+    if (!clean.status) clean.status = "onboarding";
+    if (clean.priority === undefined) clean.priority = "none";
+    if (clean.sales_status === undefined) clean.sales_status = "none";
+    if (clean.currently_hosting === undefined) clean.currently_hosting = false;
+
+    const { data, error } = await supabase
+      .from("properties")
+      .insert(clean)
+      .select()
+      .single();
+    if (error) return { ok: false, error: error.message };
+    revalidatePath("/properties", "layout");
+    return { ok: true, data: data as Property };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to create property",
+    };
+  }
 }
 
 export async function archiveProperty(id: string): Promise<void> {

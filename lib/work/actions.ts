@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getPermissions } from "@/lib/auth/permissions";
 import type {
   CreateSpaceInput,
   CreateFolderInput,
@@ -17,6 +18,7 @@ import type {
   ListType,
   ListMember,
   ListMemberRole,
+  ListAccessLevel,
   AssigneeRole,
   TaskWatcher,
   Task,
@@ -57,31 +59,221 @@ async function currentUserId(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Access helpers
+// ---------------------------------------------------------------------------
+
+const ACCESS_RANK: Record<string, number> = {
+  admin: 3,
+  editor: 2,
+  member: 2, // space_members 'member' is editor-equivalent
+  viewer: 1,
+};
+
+function rank(level: string | null | undefined): number {
+  return ACCESS_RANK[String(level ?? "").toLowerCase()] ?? 0;
+}
+
+/**
+ * Resolve effective access for the current user on a single space.
+ * `null` means no access. Super admins always get 'admin'.
+ */
+async function getSpaceAccessLevel(
+  spaceId: string,
+): Promise<SpaceMemberRole | null> {
+  const supabase = await db();
+  const perm = await getPermissions();
+  if (!perm.user_id) return null;
+  if (perm.is_super_admin) return "admin";
+
+  const { data: space } = await supabase
+    .from("spaces")
+    .select("privacy")
+    .eq("id", spaceId)
+    .maybeSingle();
+  if (!space) return null;
+
+  const { data: member } = await supabase
+    .from("space_members")
+    .select("role")
+    .eq("space_id", spaceId)
+    .eq("profile_id", perm.user_id)
+    .maybeSingle();
+
+  if (member?.role) return member.role as SpaceMemberRole;
+  // Team-visible spaces grant default 'member' (editor) to everyone.
+  if (space.privacy === "team") return "member";
+  return null;
+}
+
+/**
+ * Resolve effective access for the current user on a single list.
+ * Walks list_members → space_members → list type fallback. Returns
+ * `null` when the caller has no access at all.
+ */
+async function getListAccessLevel(
+  listId: string,
+): Promise<ListAccessLevel | null> {
+  const supabase = await db();
+  const perm = await getPermissions();
+  if (!perm.user_id) return null;
+  if (perm.is_super_admin) return "admin";
+
+  const { data: list } = await supabase
+    .from("lists")
+    .select("space_id, type, personal_owner_id")
+    .eq("id", listId)
+    .maybeSingle();
+  if (!list) return null;
+
+  // Personal "My Tasks" lists are private to their owner.
+  if (list.personal_owner_id) {
+    return list.personal_owner_id === perm.user_id ? "admin" : null;
+  }
+
+  // 1. Explicit list-level grant.
+  const { data: lm } = await supabase
+    .from("list_members")
+    .select("access_level, role")
+    .eq("list_id", listId)
+    .eq("profile_id", perm.user_id)
+    .maybeSingle();
+  if (lm) {
+    const lvl =
+      (lm.access_level as ListAccessLevel | null) ??
+      (lm.role === "owner" ? "admin" : "editor");
+    return lvl;
+  }
+
+  // 2. Inherited from parent space.
+  if (list.space_id) {
+    const spaceLvl = await getSpaceAccessLevel(list.space_id);
+    if (spaceLvl) {
+      // space_members.role 'admin' → list admin, 'member' → editor, 'viewer' → viewer
+      if (spaceLvl === "admin") return "admin";
+      if (spaceLvl === "viewer") return "viewer";
+      // 'member' → editor, but only if list is shared/public.
+      if (list.type === "private") return null;
+      return "editor";
+    }
+  }
+
+  // 3. Public list with no parent space — anyone signed-in can edit.
+  if (!list.space_id && list.type === "public") return "editor";
+
+  return null;
+}
+
+async function hasListAccess(
+  listId: string,
+  min: ListAccessLevel = "viewer",
+): Promise<boolean> {
+  const lvl = await getListAccessLevel(listId);
+  if (!lvl) return false;
+  return rank(lvl) >= rank(min);
+}
+
+async function requireListAccess(
+  listId: string,
+  min: ListAccessLevel = "viewer",
+): Promise<void> {
+  if (!(await hasListAccess(listId, min)))
+    throw new Error("You don't have access to this list");
+}
+
+async function requireSpaceAccess(
+  spaceId: string,
+  min: SpaceMemberRole = "viewer",
+): Promise<void> {
+  const lvl = await getSpaceAccessLevel(spaceId);
+  if (!lvl || rank(lvl) < rank(min))
+    throw new Error("You don't have access to this space");
+}
+
+/**
+ * Returns the set of space ids the current user has access to. `null`
+ * means "no filter / everything" (super admin or anonymous super-broad
+ * read where caller decides). An empty array means no access.
+ */
+async function visibleSpaceIds(): Promise<string[] | null> {
+  const supabase = await db();
+  const perm = await getPermissions();
+  if (!perm.user_id) return [];
+  if (perm.is_super_admin) return null;
+
+  // Team-visible spaces are open to everyone signed-in.
+  const { data: openSpaces } = await supabase
+    .from("spaces")
+    .select("id")
+    .eq("privacy", "team");
+  const open = new Set((openSpaces ?? []).map((s) => s.id as string));
+
+  // Plus any private spaces where the caller is a member.
+  const { data: memberSpaces } = await supabase
+    .from("space_members")
+    .select("space_id")
+    .eq("profile_id", perm.user_id);
+  for (const r of memberSpaces ?? []) open.add(r.space_id as string);
+
+  return Array.from(open);
+}
+
+export type WorkAccessSummary = {
+  is_super_admin: boolean;
+  user_id: string | null;
+};
+
+export async function getWorkAccess(): Promise<WorkAccessSummary> {
+  const perm = await getPermissions();
+  return {
+    is_super_admin: perm.is_super_admin,
+    user_id: perm.user_id,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // SPACES
 // ---------------------------------------------------------------------------
 
 export async function getSpaces(): Promise<Space[]> {
   const supabase = await db();
-  const { data, error } = await supabase
+  const visible = await visibleSpaceIds();
+  let q = supabase
     .from("spaces")
     .select("*")
     .is("archived_at", null)
     .order("order");
+  if (visible !== null) {
+    if (visible.length === 0) return [];
+    q = q.in("id", visible);
+  }
+  const { data, error } = await q;
   if (error) throw error;
   return data ?? [];
 }
 
 export async function getSpaceTree(): Promise<SpaceTree[]> {
   const supabase = await db();
+  const perm = await getPermissions();
+  const userId = perm.user_id;
+  const isSuperAdmin = perm.is_super_admin;
 
-  // Get current user for private list visibility check
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const userId = user?.id ?? null;
+  // Restrict spaces visibility up-front when the caller isn't a super admin.
+  const visible = isSuperAdmin ? null : await visibleSpaceIds();
+
+  let spacesQ = supabase
+    .from("spaces")
+    .select("*")
+    .is("archived_at", null)
+    .order("order");
+  if (visible !== null) {
+    if (visible.length === 0) {
+      return [];
+    }
+    spacesQ = spacesQ.in("id", visible);
+  }
 
   const [spacesRes, foldersRes, listsRes] = await Promise.all([
-    supabase.from("spaces").select("*").is("archived_at", null).order("order"),
+    spacesQ,
     supabase.from("folders").select("*").is("archived_at", null).order("order"),
     supabase.from("lists").select("*").is("archived_at", null).order("order"),
   ]);
@@ -94,24 +286,50 @@ export async function getSpaceTree(): Promise<SpaceTree[]> {
   const folders = foldersRes.data ?? [];
   const rawLists = listsRes.data ?? [];
 
-  // Filter out private lists the caller is not a member of
-  let memberListIds: Set<string> = new Set();
-  if (userId) {
-    const { data: memberRows } = await supabase
-      .from("list_members")
-      .select("list_id")
-      .eq("profile_id", userId);
-    if (memberRows) {
-      memberListIds = new Set(memberRows.map((r) => r.list_id));
-    }
+  // Pre-fetch the caller's list/space grants so the tree filter can run
+  // without N+1 queries.
+  const memberListIds = new Set<string>();
+  const memberSpaceIds = new Set<string>();
+  if (userId && !isSuperAdmin) {
+    const [{ data: lmRows }, { data: smRows }] = await Promise.all([
+      supabase.from("list_members").select("list_id").eq("profile_id", userId),
+      supabase
+        .from("space_members")
+        .select("space_id")
+        .eq("profile_id", userId),
+    ]);
+    for (const r of lmRows ?? []) memberListIds.add(r.list_id as string);
+    for (const r of smRows ?? []) memberSpaceIds.add(r.space_id as string);
   }
+  const teamSpaceIds = new Set(
+    spaces.filter((s) => s.privacy === "team").map((s) => s.id),
+  );
 
   const lists = rawLists.filter((l) => {
+    if (isSuperAdmin) return true;
+    if (!userId) return false;
     const listType = (l as Record<string, unknown>).type as string | undefined;
-    if (listType === "private") {
-      return userId ? memberListIds.has(l.id) : false;
+    const spaceId = l.space_id as string | null;
+
+    // Personal list — only the owner sees it.
+    if ((l as Record<string, unknown>).personal_owner_id) {
+      return (l as Record<string, unknown>).personal_owner_id === userId;
     }
-    // shared and public are visible to all authenticated users
+
+    // Explicit list grant always wins.
+    if (memberListIds.has(l.id)) return true;
+
+    // Private list with no explicit grant → hidden.
+    if (listType === "private") return false;
+
+    // Otherwise the list is shared/public — caller still needs access to
+    // the parent space (if any).
+    if (spaceId) {
+      if (memberSpaceIds.has(spaceId)) return true;
+      if (teamSpaceIds.has(spaceId)) return true;
+      return false;
+    }
+    // No parent space — shared/public list is broadcast.
     return true;
   });
 
@@ -160,6 +378,7 @@ export async function updateSpace(
   id: string,
   input: Partial<Pick<Space, "name" | "description" | "color" | "icon">>,
 ): Promise<void> {
+  await requireSpaceAccess(id, "admin");
   const supabase = await db();
   const { error } = await supabase.from("spaces").update(input).eq("id", id);
   if (error) throw error;
@@ -168,6 +387,7 @@ export async function updateSpace(
 }
 
 export async function deleteSpace(id: string): Promise<void> {
+  await requireSpaceAccess(id, "admin");
   const supabase = await db();
   const { error } = await supabase.from("spaces").delete().eq("id", id);
   if (error) throw error;
@@ -231,6 +451,7 @@ export async function deleteFolder(id: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function getList(id: string): Promise<List | null> {
+  if (!(await hasListAccess(id, "viewer"))) return null;
   const supabase = await db();
   const { data, error } = await supabase
     .from("lists")
@@ -242,6 +463,7 @@ export async function getList(id: string): Promise<List | null> {
 }
 
 export async function createList(input: CreateListInput): Promise<List> {
+  if (input.space_id) await requireSpaceAccess(input.space_id, "member");
   const supabase = await db();
   const userId = await currentUserId();
 
@@ -276,6 +498,7 @@ export async function updateList(
   id: string,
   input: Partial<Pick<List, "name" | "description" | "type">>,
 ): Promise<void> {
+  await requireListAccess(id, "admin");
   const supabase = await db();
   const { error } = await supabase.from("lists").update(input).eq("id", id);
   if (error) throw error;
@@ -284,6 +507,7 @@ export async function updateList(
 }
 
 export async function deleteList(id: string): Promise<void> {
+  await requireListAccess(id, "admin");
   const supabase = await db();
   const { error } = await supabase.from("lists").delete().eq("id", id);
   if (error) throw error;
@@ -346,6 +570,7 @@ export async function getOrCreatePersonalList(): Promise<List> {
 // ---------------------------------------------------------------------------
 
 export async function getStatuses(listId: string): Promise<Status[]> {
+  if (!(await hasListAccess(listId, "viewer"))) return [];
   const supabase = await db();
   const { data, error } = await supabase
     .from("statuses")
@@ -363,6 +588,7 @@ export async function getStatuses(listId: string): Promise<Status[]> {
 export async function getCustomFieldDefs(
   listId: string,
 ): Promise<CustomFieldDef[]> {
+  if (!(await hasListAccess(listId, "viewer"))) return [];
   const supabase = await db();
   const { data, error } = await supabase
     .from("custom_field_defs")
@@ -401,6 +627,7 @@ export async function getTasks(
     includeArchived = false,
   }: { includeArchived?: boolean } = {},
 ): Promise<TaskWithRelations[]> {
+  if (!(await hasListAccess(listId, "viewer"))) return [];
   const supabase = await db();
 
   let query = supabase
@@ -466,6 +693,7 @@ export async function getTask(id: string): Promise<Task | null> {
 }
 
 export async function createTask(input: CreateTaskInput): Promise<Task> {
+  await requireListAccess(input.list_id, "editor");
   const supabase = await db();
   const userId = await currentUserId();
 
@@ -514,6 +742,16 @@ export async function updateTask(
   input: UpdateTaskInput,
 ): Promise<void> {
   const supabase = await db();
+
+  // Look up the host list and require editor access.
+  {
+    const { data: t } = await supabase
+      .from("tasks")
+      .select("list_id")
+      .eq("id", id)
+      .maybeSingle();
+    if (t?.list_id) await requireListAccess(t.list_id, "editor");
+  }
 
   // If marking done, set completed_at
   let justCompleted = false;
@@ -630,6 +868,12 @@ async function rolloverRecurringTask(taskId: string): Promise<void> {
 
 export async function deleteTask(id: string): Promise<void> {
   const supabase = await db();
+  const { data: t } = await supabase
+    .from("tasks")
+    .select("list_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (t?.list_id) await requireListAccess(t.list_id, "editor");
   const { error } = await supabase.from("tasks").delete().eq("id", id);
   if (error) throw error;
   revalidatePath("/work", "layout");
@@ -657,6 +901,7 @@ export type TaskWithSubtasks = TaskWithRelations & {
 export async function getTasksForListView(
   listId: string,
 ): Promise<TaskWithSubtasks[]> {
+  if (!(await hasListAccess(listId, "viewer"))) return [];
   const supabase = await db();
 
   // Fetch ALL tasks (including subtasks) in one query
@@ -1012,6 +1257,7 @@ export async function getMembers(): Promise<
 // ---------------------------------------------------------------------------
 
 export async function getSpaceMembers(spaceId: string): Promise<SpaceMember[]> {
+  await requireSpaceAccess(spaceId, "viewer");
   const supabase = await db();
   const { data, error } = await supabase
     .from("space_members")
@@ -1027,6 +1273,7 @@ export async function addSpaceMember(
   profileId: string,
   role: SpaceMemberRole = "member",
 ): Promise<void> {
+  await requireSpaceAccess(spaceId, "admin");
   const supabase = await db();
   const { error } = await supabase
     .from("space_members")
@@ -1040,6 +1287,7 @@ export async function removeSpaceMember(
   spaceId: string,
   profileId: string,
 ): Promise<void> {
+  await requireSpaceAccess(spaceId, "admin");
   const supabase = await db();
   const { error } = await supabase
     .from("space_members")
@@ -1055,6 +1303,7 @@ export async function updateSpacePrivacy(
   spaceId: string,
   privacy: SpacePrivacy,
 ): Promise<void> {
+  await requireSpaceAccess(spaceId, "admin");
   const supabase = await db();
   const { error } = await supabase
     .from("spaces")
@@ -1070,6 +1319,7 @@ export async function updateSpaceMemberRole(
   profileId: string,
   role: SpaceMemberRole,
 ): Promise<void> {
+  await requireSpaceAccess(spaceId, "admin");
   const supabase = await db();
   const { error } = await supabase
     .from("space_members")
@@ -1086,6 +1336,7 @@ export async function updateSpaceMemberRole(
 // ---------------------------------------------------------------------------
 
 export async function getListMembers(listId: string): Promise<ListMember[]> {
+  if (!(await hasListAccess(listId, "viewer"))) return [];
   const supabase = await db();
   const { data, error } = await supabase
     .from("list_members")
@@ -1099,14 +1350,23 @@ export async function getListMembers(listId: string): Promise<ListMember[]> {
 export async function addListMember(
   listId: string,
   profileId: string,
-  options: { role?: ListMemberRole; color?: string } = {},
+  options: {
+    role?: ListMemberRole;
+    color?: string;
+    access_level?: ListAccessLevel;
+  } = {},
 ): Promise<void> {
+  await requireListAccess(listId, "admin");
   const supabase = await db();
   const userId = await currentUserId();
+  const role = options.role ?? "member";
+  const access_level =
+    options.access_level ?? (role === "owner" ? "admin" : "editor");
   const { error } = await supabase.from("list_members").upsert({
     list_id: listId,
     profile_id: profileId,
-    role: options.role ?? "member",
+    role,
+    access_level,
     color: options.color ?? "#6366f1",
     added_by: userId,
   });
@@ -1119,6 +1379,7 @@ export async function removeListMember(
   listId: string,
   profileId: string,
 ): Promise<void> {
+  await requireListAccess(listId, "admin");
   const supabase = await db();
   const { error } = await supabase
     .from("list_members")
@@ -1135,6 +1396,7 @@ export async function updateListMemberColor(
   profileId: string,
   color: string,
 ): Promise<void> {
+  await requireListAccess(listId, "editor");
   const supabase = await db();
   const { error } = await supabase
     .from("list_members")
@@ -1146,10 +1408,32 @@ export async function updateListMemberColor(
   revalidatePath("/my-tasks");
 }
 
+/**
+ * Update a list member's access level (viewer / editor / admin). Requires
+ * admin on the target list.
+ */
+export async function updateListMemberAccessLevel(
+  listId: string,
+  profileId: string,
+  access_level: ListAccessLevel,
+): Promise<void> {
+  await requireListAccess(listId, "admin");
+  const supabase = await db();
+  const { error } = await supabase
+    .from("list_members")
+    .update({ access_level })
+    .eq("list_id", listId)
+    .eq("profile_id", profileId);
+  if (error) throw error;
+  revalidatePath("/work", "layout");
+  revalidatePath("/my-tasks");
+}
+
 export async function updateListType(
   listId: string,
   type: ListType,
 ): Promise<void> {
+  await requireListAccess(listId, "admin");
   const supabase = await db();
   const { error } = await supabase
     .from("lists")
@@ -1158,6 +1442,22 @@ export async function updateListType(
   if (error) throw error;
   revalidatePath("/work", "layout");
   revalidatePath("/my-tasks");
+}
+
+/**
+ * Read effective access level for the current user on a list. Used by
+ * client UI that wants to gate destructive actions.
+ */
+export async function getMyListAccessLevel(
+  listId: string,
+): Promise<ListAccessLevel | null> {
+  return getListAccessLevel(listId);
+}
+
+export async function getMySpaceAccessLevel(
+  spaceId: string,
+): Promise<SpaceMemberRole | null> {
+  return getSpaceAccessLevel(spaceId);
 }
 
 // ---------------------------------------------------------------------------
@@ -1240,22 +1540,33 @@ export async function getGlobalTasks(
   filters: GlobalTaskFilters = {},
 ): Promise<GlobalTask[]> {
   const supabase = await db();
+  const perm = await getPermissions();
+  const userId = perm.user_id;
+  const isSuperAdmin = perm.is_super_admin;
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const userId = user?.id ?? null;
-
-  // Resolve which list_ids the caller can see (respect private visibility)
-  let memberListIds: Set<string> = new Set();
-  if (userId) {
-    const { data: memberRows } = await supabase
-      .from("list_members")
-      .select("list_id")
-      .eq("profile_id", userId);
-    if (memberRows) {
-      memberListIds = new Set(memberRows.map((r) => r.list_id));
-    }
+  // Resolve which list_ids and space_ids the caller can access. Super
+  // admins skip both checks.
+  const memberListIds = new Set<string>();
+  const memberSpaceIds = new Set<string>();
+  if (userId && !isSuperAdmin) {
+    const [{ data: lmRows }, { data: smRows }] = await Promise.all([
+      supabase.from("list_members").select("list_id").eq("profile_id", userId),
+      supabase
+        .from("space_members")
+        .select("space_id")
+        .eq("profile_id", userId),
+    ]);
+    for (const r of lmRows ?? []) memberListIds.add(r.list_id as string);
+    for (const r of smRows ?? []) memberSpaceIds.add(r.space_id as string);
+  }
+  // Team-visible spaces are open to everyone signed-in.
+  const teamSpaceIds = new Set<string>();
+  if (userId && !isSuperAdmin) {
+    const { data: open } = await supabase
+      .from("spaces")
+      .select("id")
+      .eq("privacy", "team");
+    for (const r of open ?? []) teamSpaceIds.add(r.id as string);
   }
 
   let query = supabase
@@ -1343,14 +1654,28 @@ export async function getGlobalTasks(
       .filter(Boolean),
   })) as GlobalTask[];
 
-  // Filter by visibility: hide private lists the caller isn't a member of
-  const visible = enriched.filter((t) => {
-    const listType = t.list?.type;
-    if (listType === "private") {
-      return userId ? memberListIds.has(t.list.id) : false;
-    }
-    return true;
-  });
+  // Filter by visibility:
+  //   - Super admins see everything.
+  //   - Anyone with a list_members row sees that list.
+  //   - Private lists with no grant are hidden.
+  //   - For shared/public lists, the caller must also have access to the
+  //     parent space (team-visible or member).
+  const visible = isSuperAdmin
+    ? enriched
+    : enriched.filter((t) => {
+        if (!userId) return false;
+        const listType = t.list?.type;
+        const listId = t.list?.id;
+        const spaceId = t.list?.space_id;
+        if (listId && memberListIds.has(listId)) return true;
+        if (listType === "private") return false;
+        if (spaceId) {
+          if (memberSpaceIds.has(spaceId)) return true;
+          if (teamSpaceIds.has(spaceId)) return true;
+          return false;
+        }
+        return true;
+      });
 
   // Date filters (applied in JS after DB query)
   if (!filters.due || filters.due === "all") {

@@ -81,6 +81,7 @@ function revalidateHr() {
   revalidatePath("/hr/hiring");
   revalidatePath("/hr/policies");
   revalidatePath("/hr/procedures");
+  revalidatePath("/hr/people");
 }
 
 function slugify(s: string): string {
@@ -214,6 +215,48 @@ export async function deleteEmployee(id: string): Promise<void> {
   const supabase = await db();
   await supabase.from("hr_employees").delete().eq("id", id);
   revalidateHr();
+}
+
+/**
+ * Move an employee to a different department (or clear the assignment with
+ * `null`). Resolves the department name for the legacy `department` text
+ * column so filters and seeded data stay in sync.
+ *
+ * Used by both the People directory drag-and-drop UI and the
+ * `set_employee_department` agent tool.
+ */
+export async function setEmployeeDepartment(
+  employeeId: string,
+  departmentId: string | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await requireEmployeeAccess(employeeId);
+    const supabase = await db();
+    let deptName: string | null = null;
+    if (departmentId) {
+      const { data: dept } = await supabase
+        .from("departments")
+        .select("name")
+        .eq("id", departmentId)
+        .maybeSingle();
+      if (!dept) return { ok: false, error: "Department not found" };
+      deptName = (dept.name as string) ?? null;
+    }
+    const { error } = await supabase
+      .from("hr_employees")
+      .update({ department_id: departmentId, department: deptName })
+      .eq("id", employeeId);
+    if (error) return { ok: false, error: error.message };
+    revalidateHr();
+    revalidatePath("/hr/people");
+    revalidatePath(`/hr/people/${employeeId}`);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to move employee",
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------

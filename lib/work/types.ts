@@ -10,6 +10,7 @@ export type TaskStatusCategory = "todo" | "in_progress" | "done" | "closed";
 
 export type ListType = "private" | "shared" | "public";
 export type ListMemberRole = "owner" | "member";
+export type ListAccessLevel = "viewer" | "editor" | "admin";
 export type AssigneeRole = "primary" | "secondary";
 
 export type TaskPriority = "urgent" | "high" | "normal" | "low" | "none";
@@ -112,6 +113,14 @@ export interface ListMember {
   list_id: string;
   profile_id: string;
   role: ListMemberRole;
+  /**
+   * Granular access level on this list. Independent of `role`, which is
+   * retained for the legacy assignee-color feature.
+   *   viewer  → read-only
+   *   editor  → read + write tasks/statuses/fields
+   *   admin   → full control incl. members + delete
+   */
+  access_level: ListAccessLevel;
   color: string;
   added_by: string | null;
   added_at: string;

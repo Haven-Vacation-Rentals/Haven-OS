@@ -9,13 +9,16 @@ import {
   LayoutGrid,
   List as ListIcon,
   MapPin,
+  Plus,
   Search,
   Sparkles,
   Users,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PropertyEditor } from "./property-editor";
 import { StatusBadge, TierBadge } from "./property-badges";
 import { PropertyTable } from "./property-table";
 import type {
@@ -45,6 +48,7 @@ export function PropertiesView({
   const [region, setRegion] = useState<string>("all");
   const [manager, setManager] = useState<string>("all");
   const [airbnb, setAirbnb] = useState<string>("all");
+  const [createOpen, setCreateOpen] = useState(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -131,6 +135,10 @@ export function PropertiesView({
               label="Grid"
             />
           </div>
+          <Button variant="primary" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Add property
+          </Button>
         </div>
 
         {/* Filters */}
@@ -218,12 +226,14 @@ export function PropertiesView({
 
       {/* Results */}
       {filtered.length === 0 ? (
-        <EmptyState />
+        <EmptyState onAdd={() => setCreateOpen(true)} />
       ) : view === "grid" ? (
         <PropertyGrid properties={filtered} />
       ) : (
         <PropertyTable properties={filtered} facets={facets} />
       )}
+
+      <PropertyEditor open={createOpen} onOpenChange={setCreateOpen} />
     </div>
   );
 }
@@ -334,14 +344,17 @@ function FilterSelect({
 // Empty state
 // ---------------------------------------------------------------------------
 
-function EmptyState() {
+function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-card border border-dashed border-border bg-surface-alt/30 py-16 text-center">
       <Home className="h-10 w-10 text-muted-foreground/50" />
       <div className="font-heading text-base font-bold">No properties match</div>
       <div className="max-w-xs text-[13px] text-muted-foreground">
-        Try clearing some filters or broadening your search.
+        Try clearing some filters or broadening your search — or add a new property.
       </div>
+      <Button variant="primary" onClick={onAdd}>
+        <Plus className="h-4 w-4" /> Add property
+      </Button>
     </div>
   );
 }
