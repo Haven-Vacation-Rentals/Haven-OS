@@ -38,7 +38,7 @@ export default async function EmployeeDetailPage({
   return (
     <div className="flex flex-col gap-4">
       <Link
-        href="/hr"
+        href="/hr/people"
         className="inline-flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
