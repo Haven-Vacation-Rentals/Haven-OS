@@ -45,6 +45,7 @@ import type {
   OnboardingTaskStatus,
   OnboardingDepartment,
 } from "@/lib/onboarding/types";
+import { canonicalUrl } from "@/lib/canonical-url";
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -1792,9 +1793,7 @@ export const TOOLS: ToolDef[] = [
       await requireHr(ctx);
       const survey = await surveys.getSurvey(s(input.survey_id)!);
       if (!survey) throw new Error("Survey not found");
-      const base =
-        process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "") || "";
-      const url = base ? `${base}/survey/${survey.slug}` : `/survey/${survey.slug}`;
+      const url = canonicalUrl(`/survey/${survey.slug}`);
       return { url, slug: survey.slug, status: survey.status };
     },
   },

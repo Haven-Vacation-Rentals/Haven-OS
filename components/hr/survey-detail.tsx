@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { canonicalUrl } from "@/lib/canonical-url";
 import {
   setSurveyStatus,
   deleteSurvey,
@@ -68,10 +69,7 @@ export function SurveyDetail({ survey, questions, responses }: Props) {
   const status = (survey.status as SurveyStatus) ?? "draft";
   const tone = STATUS_TONE[status] ?? "neutral";
 
-  const publicUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/survey/${survey.slug}`
-      : `/survey/${survey.slug}`;
+  const publicUrl = canonicalUrl(`/survey/${survey.slug}`);
 
   const setStatus = (next: SurveyStatus) => {
     startTransition(async () => {

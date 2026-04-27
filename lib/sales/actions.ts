@@ -20,6 +20,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getAdminClient } from "@/lib/supabase/admin";
 import { requireAdminOrAbove } from "@/lib/auth/permissions";
 import { extractListing, type ExtractedListing } from "@/lib/sales/listing-extractor";
+import { canonicalUrl } from "@/lib/canonical-url";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -443,10 +444,5 @@ export async function deletePitchOrThrow(id: string): Promise<{ id: string }> {
 // ---------------------------------------------------------------------------
 
 export async function getPitchPublicUrl(slug: string): Promise<string> {
-  const base =
-    process.env.NEXT_PUBLIC_PITCH_BASE_URL?.trim().replace(/\/$/, "") ||
-    process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "") ||
-    "";
-  if (base) return `${base}/pitch/${slug}`;
-  return `/pitch/${slug}`;
+  return canonicalUrl(`/pitch/${slug}`);
 }

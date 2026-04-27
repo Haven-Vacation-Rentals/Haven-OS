@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { canonicalUrl } from "@/lib/canonical-url";
 import {
   createPitch,
   extractListingDetails,
@@ -181,7 +182,7 @@ export function CreatePitchDialog({
         setError(r.error);
         return;
       }
-      const url = `${window.location.origin}/pitch/${r.data.slug}`;
+      const url = canonicalUrl(`/pitch/${r.data.slug}`);
       setCreatedUrl(url);
       toast.success("Pitch created");
       onCreated?.();

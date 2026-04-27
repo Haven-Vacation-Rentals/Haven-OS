@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { canonicalUrl } from "@/lib/canonical-url";
 import {
   archivePitch,
   restorePitch,
@@ -153,10 +154,10 @@ function PitchRow({
   const [copied, setCopied] = useState(false);
   const [photosOpen, setPhotosOpen] = useState(false);
 
-  const publicUrl = useMemo(() => {
-    if (typeof window === "undefined") return `/pitch/${pitch.slug}`;
-    return `${window.location.origin}/pitch/${pitch.slug}`;
-  }, [pitch.slug]);
+  const publicUrl = useMemo(
+    () => canonicalUrl(`/pitch/${pitch.slug}`),
+    [pitch.slug],
+  );
 
   const expiresAt = new Date(pitch.expires_at);
   const isExpired = expiresAt.getTime() < Date.now();

@@ -9,6 +9,7 @@ import { RoleEditor } from "./role-editor";
 import { CandidateKanban } from "./candidate-kanban";
 import { CandidateEditor } from "./candidate-editor";
 import { deleteRole } from "@/lib/hr/actions";
+import { canonicalUrl } from "@/lib/canonical-url";
 import {
   EMPLOYMENT_TYPE_LABELS,
   ROLE_STATUS_LABELS,
@@ -38,9 +39,7 @@ export function RoleDetail({ role, candidates }: Props) {
 
   const status = role.status as RoleStatus;
   const tone = STATUS_TONE[status] ?? "neutral";
-  const publicUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/careers/${role.slug}`
-    : `/careers/${role.slug}`;
+  const publicUrl = canonicalUrl(`/careers/${role.slug}`);
 
   const remove = () => {
     if (!confirm(`Delete role "${role.title}"? This removes all candidates and cannot be undone.`)) return;
