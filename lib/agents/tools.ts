@@ -18,6 +18,11 @@ import * as work from "@/lib/work/actions";
 import * as props from "@/lib/properties/actions";
 import * as scorecard from "@/lib/scorecard/actions";
 import * as hr from "@/lib/hr/actions";
+import * as surveys from "@/lib/hr/surveys";
+import type {
+  QuestionType,
+  SurveyStatus,
+} from "@/lib/hr/surveys-types";
 import * as onb from "@/lib/onboarding/actions";
 import * as hostaway from "@/lib/hostaway/actions";
 import * as admin from "@/lib/admin/actions";
@@ -1293,6 +1298,356 @@ export const TOOLS: ToolDef[] = [
   },
 
   // =========================================================================
+  // HR — SURVEYS
+  // =========================================================================
+  {
+    name: "list_hr_surveys",
+    description:
+      "List all HR surveys with status, response count, last response timestamp, and question count. HR access required.",
+    input_schema: { type: "object", properties: {}, required: [] },
+    execute: async (_, ctx) => {
+      await requireHr(ctx);
+      return surveys.listSurveys();
+    },
+  },
+  {
+    name: "get_hr_survey",
+    description:
+      "Get a single HR survey shell (title, description, status, slug, audience, identity-collection settings). Use get_hr_survey_questions or get_hr_survey_summary for fuller views.",
+    input_schema: {
+      type: "object",
+      properties: { survey_id: { type: "string" } },
+      required: ["survey_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      return surveys.getSurvey(s(input.survey_id)!);
+    },
+  },
+  {
+    name: "get_hr_survey_questions",
+    description:
+      "Return the ordered list of questions for a survey (id, question_type, prompt, help_text, required, config).",
+    input_schema: {
+      type: "object",
+      properties: { survey_id: { type: "string" } },
+      required: ["survey_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      return surveys.getSurveyQuestions(s(input.survey_id)!);
+    },
+  },
+  {
+    name: "create_hr_survey",
+    description:
+      "Create a new HR survey. status defaults to 'draft' — set status='active' to publish the public landing page immediately. Pass an optional `questions` array to add questions in one shot. Question types: short_text | long_text | single_choice | multi_choice | rating | yes_no. For single_choice/multi_choice supply config.options. For rating supply config.scale_min, scale_max, and optionally scale_label_low / scale_label_high. After creation, share the public URL — it's `<site>/survey/<slug>` (slug is on the returned survey).",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        description: { type: "string" },
+        instructions: { type: "string" },
+        status: { type: "string", enum: ["draft", "active", "closed"] },
+        audience: { type: "string" },
+        anonymous_allowed: { type: "boolean" },
+        collect_name: { type: "boolean" },
+        collect_email: { type: "boolean" },
+        collect_department: { type: "boolean" },
+        closes_at: { type: "string", description: "ISO timestamp" },
+        questions: {
+          type: "array",
+          description:
+            "Optional questions to seed the survey with. Each question: { question_type, prompt, help_text?, required?, config? }.",
+          items: {
+            type: "object",
+            properties: {
+              question_type: {
+                type: "string",
+                enum: [
+                  "short_text",
+                  "long_text",
+                  "single_choice",
+                  "multi_choice",
+                  "rating",
+                  "yes_no",
+                ],
+              },
+              prompt: { type: "string" },
+              help_text: { type: "string" },
+              required: { type: "boolean" },
+              config: {
+                type: "object",
+                additionalProperties: true,
+                description:
+                  "Per-type config. choice types: { options: string[] }. rating: { scale_min, scale_max, scale_label_low?, scale_label_high? }.",
+              },
+            },
+            required: ["question_type", "prompt"],
+          },
+        },
+      },
+      required: ["title"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rawQs = arr<any>(input.questions) ?? [];
+      const questions = rawQs.map((q) => ({
+        question_type: s(q.question_type) as QuestionType,
+        prompt: s(q.prompt) ?? "",
+        help_text: s(q.help_text),
+        required: b(q.required),
+        config: (q.config ?? {}) as Record<string, unknown>,
+      }));
+      return surveys.createSurvey({
+        title: s(input.title)!,
+        description: s(input.description),
+        instructions: s(input.instructions),
+        status: s(input.status) as SurveyStatus | undefined,
+        audience: s(input.audience),
+        anonymous_allowed: b(input.anonymous_allowed),
+        collect_name: b(input.collect_name),
+        collect_email: b(input.collect_email),
+        collect_department: b(input.collect_department),
+        closes_at: sOrNull(input.closes_at) ?? undefined,
+        questions,
+      });
+    },
+  },
+  {
+    name: "update_hr_survey",
+    description:
+      "Update fields on an existing HR survey (title, description, instructions, audience, identity flags, status, closes_at). Pass only fields to change.",
+    input_schema: {
+      type: "object",
+      properties: {
+        survey_id: { type: "string" },
+        title: { type: "string" },
+        description: { type: "string" },
+        instructions: { type: "string" },
+        status: { type: "string", enum: ["draft", "active", "closed"] },
+        audience: { type: "string" },
+        anonymous_allowed: { type: "boolean" },
+        collect_name: { type: "boolean" },
+        collect_email: { type: "boolean" },
+        collect_department: { type: "boolean" },
+        closes_at: { type: "string", description: "ISO timestamp or null to clear" },
+      },
+      required: ["survey_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      const patch: Parameters<typeof surveys.updateSurvey>[1] = {};
+      if (s(input.title) !== undefined) patch.title = s(input.title);
+      if (s(input.description) !== undefined) patch.description = s(input.description);
+      if (s(input.instructions) !== undefined) patch.instructions = s(input.instructions);
+      if (s(input.status) !== undefined) patch.status = s(input.status) as SurveyStatus;
+      if (s(input.audience) !== undefined) patch.audience = s(input.audience) ?? null;
+      if (b(input.anonymous_allowed) !== undefined) patch.anonymous_allowed = b(input.anonymous_allowed);
+      if (b(input.collect_name) !== undefined) patch.collect_name = b(input.collect_name);
+      if (b(input.collect_email) !== undefined) patch.collect_email = b(input.collect_email);
+      if (b(input.collect_department) !== undefined) patch.collect_department = b(input.collect_department);
+      if (sOrNull(input.closes_at) !== undefined) patch.closes_at = sOrNull(input.closes_at);
+      await surveys.updateSurvey(s(input.survey_id)!, patch);
+      return { ok: true };
+    },
+  },
+  {
+    name: "set_hr_survey_status",
+    description:
+      "Change a survey's status: 'active' opens the public landing page; 'closed' stops accepting responses; 'draft' hides it.",
+    input_schema: {
+      type: "object",
+      properties: {
+        survey_id: { type: "string" },
+        status: { type: "string", enum: ["draft", "active", "closed"] },
+      },
+      required: ["survey_id", "status"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      await surveys.setSurveyStatus(
+        s(input.survey_id)!,
+        s(input.status) as SurveyStatus,
+      );
+      return { ok: true };
+    },
+  },
+  {
+    name: "delete_hr_survey",
+    description:
+      "Permanently delete a survey along with its questions and responses. IRREVERSIBLE — confirm with the user first.",
+    input_schema: {
+      type: "object",
+      properties: { survey_id: { type: "string" } },
+      required: ["survey_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      await surveys.deleteSurvey(s(input.survey_id)!);
+      return { ok: true };
+    },
+  },
+  {
+    name: "add_hr_survey_question",
+    description:
+      "Add a question to an existing survey. question_type: short_text | long_text | single_choice | multi_choice | rating | yes_no. For choice types pass config.options (string[]). For rating pass config.scale_min and scale_max (optionally scale_label_low/scale_label_high).",
+    input_schema: {
+      type: "object",
+      properties: {
+        survey_id: { type: "string" },
+        question_type: {
+          type: "string",
+          enum: [
+            "short_text",
+            "long_text",
+            "single_choice",
+            "multi_choice",
+            "rating",
+            "yes_no",
+          ],
+        },
+        prompt: { type: "string" },
+        help_text: { type: "string" },
+        required: { type: "boolean" },
+        position: { type: "number", description: "0-indexed; appended to end if omitted." },
+        config: {
+          type: "object",
+          additionalProperties: true,
+          description:
+            "Per-type config. choice types: { options: string[] }. rating: { scale_min, scale_max, scale_label_low?, scale_label_high? }.",
+        },
+      },
+      required: ["survey_id", "question_type", "prompt"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      return surveys.addQuestion({
+        survey_id: s(input.survey_id)!,
+        question_type: s(input.question_type) as QuestionType,
+        prompt: s(input.prompt)!,
+        help_text: s(input.help_text),
+        required: b(input.required),
+        config: (input.config ?? {}) as Record<string, unknown>,
+        position: n(input.position),
+      });
+    },
+  },
+  {
+    name: "update_hr_survey_question",
+    description:
+      "Update a single question on a survey (prompt, help_text, required, position, config, or question_type).",
+    input_schema: {
+      type: "object",
+      properties: {
+        question_id: { type: "string" },
+        survey_id: { type: "string" },
+        prompt: { type: "string" },
+        help_text: { type: "string" },
+        required: { type: "boolean" },
+        position: { type: "number" },
+        question_type: {
+          type: "string",
+          enum: [
+            "short_text",
+            "long_text",
+            "single_choice",
+            "multi_choice",
+            "rating",
+            "yes_no",
+          ],
+        },
+        config: { type: "object", additionalProperties: true },
+      },
+      required: ["question_id", "survey_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      const patch: Parameters<typeof surveys.updateQuestion>[1] = {};
+      if (s(input.prompt) !== undefined) patch.prompt = s(input.prompt);
+      if (s(input.help_text) !== undefined) patch.help_text = s(input.help_text);
+      if (b(input.required) !== undefined) patch.required = b(input.required);
+      if (n(input.position) !== undefined) patch.position = n(input.position);
+      if (s(input.question_type) !== undefined)
+        patch.question_type = s(input.question_type) as QuestionType;
+      if (input.config !== undefined)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        patch.config = input.config as any;
+      await surveys.updateQuestion(
+        s(input.question_id)!,
+        patch,
+        s(input.survey_id)!,
+      );
+      return { ok: true };
+    },
+  },
+  {
+    name: "delete_hr_survey_question",
+    description: "Remove a single question from a survey.",
+    input_schema: {
+      type: "object",
+      properties: {
+        question_id: { type: "string" },
+        survey_id: { type: "string" },
+      },
+      required: ["question_id", "survey_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      await surveys.deleteQuestion(s(input.question_id)!, s(input.survey_id)!);
+      return { ok: true };
+    },
+  },
+  {
+    name: "list_hr_survey_responses",
+    description:
+      "List every response submitted for a survey, with all answers attached. Use get_hr_survey_summary for aggregate views (avg ratings, choice counts) instead of crunching this list yourself.",
+    input_schema: {
+      type: "object",
+      properties: { survey_id: { type: "string" } },
+      required: ["survey_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      return surveys.listResponses(s(input.survey_id)!);
+    },
+  },
+  {
+    name: "get_hr_survey_summary",
+    description:
+      "Return survey metadata, the question list, response_count, last_response_at, and per-question aggregates: rating questions get an average + n; yes/no get yes/no counts; choice questions get value→count rollups; text questions get a small sample of answers. This is the right tool for 'how is the survey going?' or 'what's the average rating?' style asks.",
+    input_schema: {
+      type: "object",
+      properties: { survey_id: { type: "string" } },
+      required: ["survey_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      return surveys.getSurveySummary(s(input.survey_id)!);
+    },
+  },
+  {
+    name: "get_hr_survey_share_link",
+    description:
+      "Return the public landing-page URL for a survey (`<site>/survey/<slug>`). Surface this to the user so they can share it with the team. The link only renders the form when the survey is status='active'.",
+    input_schema: {
+      type: "object",
+      properties: { survey_id: { type: "string" } },
+      required: ["survey_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      const survey = await surveys.getSurvey(s(input.survey_id)!);
+      if (!survey) throw new Error("Survey not found");
+      const base =
+        process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "") || "";
+      const url = base ? `${base}/survey/${survey.slug}` : `/survey/${survey.slug}`;
+      return { url, slug: survey.slug, status: survey.status };
+    },
+  },
+
+  // =========================================================================
   // ADMIN — users, roles, departments, HR grants (super admin only)
   // =========================================================================
   {
@@ -1701,7 +2056,8 @@ You have tools that give you live read + write access across the entire Haven OS
 - **Properties (PDM)** — the property master database. You can list, read, update any field (status, tier, account manager, access codes, etc.), and archive properties.
 - **Scorecard** — the Northstar weekly KPI tracker. You can read current + historical months, update cell values/targets/status (green/yellow/red), seed new months, and archive closed months.
 - **Onboarding** — property onboarding projects with templated tasks + checklists. Full control: create or delete projects; update every project field (status, owner info, target/actual open dates, slack channel, folder URL, notes); add / update / delete / restatus tasks; edit any task field (title, description, department, due date, assignee, key-date flag); add / toggle / delete checklist items. Use \`list_onboarding_projects_with_stats\` for rollup views (progress, blockers, next key date, overdue) and \`get_onboarding_tree\` when you need specific task_ids to update.
-- **HR** (permission-gated) — employees, performance reviews, issues/write-ups, roles, candidates, policy/procedure docs. Each call is row-level filtered by the caller's HR access grants.
+- **HR** (permission-gated) — employees, performance reviews, issues/write-ups, roles, candidates, policy/procedure docs, and team surveys. Each call is row-level filtered by the caller's HR access grants.
+- **HR Surveys** — author flexible per-survey forms (short_text, long_text, single_choice, multi_choice, rating, yes_no), activate them to expose a public landing page at \`<site>/survey/<slug>\`, and read aggregated results (avg rating, choice counts, yes/no, text samples). Workflow: call \`create_hr_survey\` with a \`questions\` array (defaults to draft). To go live, set status='active' on creation or via \`set_hr_survey_status\`. Surface the share link via \`get_hr_survey_share_link\`. Use \`get_hr_survey_summary\` for "how's it going?" questions. Use \`add_hr_survey_question\` / \`update_hr_survey_question\` to iterate after creation.
 - **Admin** (super-admin only) — list users; create users (default invite-by-email, optionally direct-create with password); change roles (user / admin / super_admin); delete users; grant or revoke HR access; manage departments. When the user asks to "add" or "invite" someone, default to invite mode (email-based) unless they say otherwise.
 - **Sales / Property Pitches** (admin or super_admin) — generate a personalized one-pager that gets sent to a prospective property owner, hosted at \`/pitch/<slug>\`. Workflow: when the user gives you a Zillow / Airbnb / VRBO / Booking link, call \`extract_listing_details\` first to auto-fill address, beds/baths/sleeps, and a hero photo. Then call \`create_sales_pitch\` with the owner's name and a projection range (annual gross revenue, low + high in USD). The pitch expires 30 days after creation; you can extend it via \`update_sales_pitch\` with a new \`expires_at\`. Use \`archive_sales_pitch\` to retire a pitch (the public URL flips to a friendly contact page); only use \`delete_sales_pitch\` when the user explicitly says delete. After creating, surface the public URL — it's \`<site>/pitch/<slug>\`.
 - **System** — test Hostaway connection, list team members.

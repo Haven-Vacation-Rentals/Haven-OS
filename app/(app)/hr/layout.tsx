@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth/user";
 import { canAccessHrModule } from "@/lib/auth/permissions";
-import { Users, Briefcase, FileText, ClipboardList, Lock } from "lucide-react";
+import { Users, Briefcase, FileText, ClipboardList, Lock, MessageSquare } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +33,7 @@ export default async function HrLayout({ children }: { children: React.ReactNode
       <nav className="flex flex-wrap gap-1 rounded-lg border border-border bg-surface-alt/50 p-1">
         <HrTab href="/hr" label="People" icon={Users} />
         <HrTab href="/hr/hiring" label="Hiring" icon={Briefcase} />
+        <HrTab href="/hr/surveys" label="Surveys" icon={MessageSquare} />
         <HrTab href="/hr/policies" label="Policies" icon={FileText} />
         <HrTab href="/hr/procedures" label="Procedures" icon={ClipboardList} />
       </nav>
