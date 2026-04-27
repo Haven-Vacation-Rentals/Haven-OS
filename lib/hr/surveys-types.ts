@@ -65,6 +65,7 @@ export type DbHrSurveyQuestion = {
   help_text: string;
   required: boolean;
   config: QuestionConfig;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 };

@@ -20,7 +20,7 @@ export default async function SurveyDetailPage({
   if (!survey) notFound();
 
   const [questions, responses] = await Promise.all([
-    getSurveyQuestions(id),
+    getSurveyQuestions(id, { includeArchived: true }),
     listResponses(id),
   ]);
 

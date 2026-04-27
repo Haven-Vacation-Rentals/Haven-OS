@@ -8,24 +8,40 @@ import {
   Trash2,
   PlayCircle,
   PauseCircle,
-  ArrowDown,
-  ArrowUp,
   ChevronDown,
   ChevronRight,
+  Plus,
+  Pencil,
+  Archive,
+  ArchiveRestore,
+  AlertTriangle,
+  Save,
 } from "lucide-react";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   setSurveyStatus,
   deleteSurvey,
+  updateSurvey,
+  addQuestion,
+  updateQuestion,
+  deleteQuestion,
+  archiveQuestion,
+  unarchiveQuestion,
+  reorderQuestions,
 } from "@/lib/hr/surveys";
 import {
+  QUESTION_TYPES,
   QUESTION_TYPE_LABELS,
+  SURVEY_STATUSES,
   SURVEY_STATUS_LABELS,
   type DbHrSurvey,
   type DbHrSurveyAnswer,
   type DbHrSurveyQuestion,
+  type QuestionConfig,
   type QuestionType,
   type SurveyResponseWithAnswers,
   type SurveyStatus,
@@ -47,6 +63,7 @@ export function SurveyDetail({ survey, questions, responses }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [copied, setCopied] = useState(false);
+  const [tab, setTab] = useState<"overview" | "edit">("overview");
 
   const status = (survey.status as SurveyStatus) ?? "draft";
   const tone = STATUS_TONE[status] ?? "neutral";
@@ -93,6 +110,20 @@ export function SurveyDetail({ survey, questions, responses }: Props) {
       // ignore
     }
   };
+
+  const liveQuestions = useMemo(
+    () => questions.filter((q) => !q.archived_at),
+    [questions],
+  );
+
+  const answerCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of responses)
+      for (const a of r.answers) {
+        m.set(a.question_id, (m.get(a.question_id) ?? 0) + 1);
+      }
+    return m;
+  }, [responses]);
 
   const answersByQ = useMemo(() => {
     const map = new Map<string, DbHrSurveyAnswer[]>();
@@ -143,6 +174,14 @@ export function SurveyDetail({ survey, questions, responses }: Props) {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant={tab === "edit" ? "primary" : "outline"}
+            size="sm"
+            onClick={() => setTab(tab === "edit" ? "overview" : "edit")}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            {tab === "edit" ? "Done editing" : "Edit survey"}
+          </Button>
           {status !== "active" && (
             <Button variant="primary" size="sm" onClick={() => setStatus("active")} disabled={pending}>
               <PlayCircle className="h-3.5 w-3.5" />
@@ -166,20 +205,66 @@ export function SurveyDetail({ survey, questions, responses }: Props) {
         </div>
       </div>
 
-      {/* Questions list (read-only summary view) */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as "overview" | "edit")}>
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="edit">
+            <Pencil className="h-3 w-3" />
+            Edit
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview">
+          <OverviewPanel
+            liveQuestions={liveQuestions}
+            archivedQuestions={questions.filter((q) => q.archived_at)}
+            answersByQ={answersByQ}
+            responses={responses}
+            allQuestions={questions}
+          />
+        </TabsContent>
+
+        <TabsContent value="edit">
+          <EditPanel
+            survey={survey}
+            questions={questions}
+            answerCounts={answerCounts}
+            isLive={status === "active"}
+          />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function OverviewPanel({
+  liveQuestions,
+  archivedQuestions,
+  answersByQ,
+  responses,
+  allQuestions,
+}: {
+  liveQuestions: DbHrSurveyQuestion[];
+  archivedQuestions: DbHrSurveyQuestion[];
+  answersByQ: Map<string, DbHrSurveyAnswer[]>;
+  responses: SurveyResponseWithAnswers[];
+  allQuestions: DbHrSurveyQuestion[];
+}) {
+  return (
+    <div className="flex flex-col gap-5">
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h3 className="font-heading text-[15px] font-bold">
-            Questions ({questions.length})
+            Questions ({liveQuestions.length})
           </h3>
         </div>
-        {questions.length === 0 ? (
+        {liveQuestions.length === 0 ? (
           <div className="rounded-card border border-dashed border-border bg-surface-alt/30 p-6 text-center text-[13px] text-muted-foreground">
-            No questions yet.
+            No questions yet. Switch to the Edit tab to add some.
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {questions.map((q, i) => (
+            {liveQuestions.map((q, i) => (
               <QuestionSummary
                 key={q.id}
                 index={i}
@@ -191,7 +276,25 @@ export function SurveyDetail({ survey, questions, responses }: Props) {
         )}
       </section>
 
-      {/* Responses */}
+      {archivedQuestions.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <h3 className="font-heading text-[13px] font-semibold text-muted-foreground">
+            Archived questions ({archivedQuestions.length})
+          </h3>
+          <div className="flex flex-col gap-2 opacity-70">
+            {archivedQuestions.map((q, i) => (
+              <QuestionSummary
+                key={q.id}
+                index={liveQuestions.length + i}
+                question={q}
+                answers={answersByQ.get(q.id) ?? []}
+                archived
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="flex flex-col gap-3">
         <h3 className="font-heading text-[15px] font-bold">
           Responses ({responses.length})
@@ -201,10 +304,920 @@ export function SurveyDetail({ survey, questions, responses }: Props) {
             No responses yet. Share the link above to start collecting feedback.
           </div>
         ) : (
-          <ResponsesTable responses={responses} questions={questions} />
+          <ResponsesTable responses={responses} questions={allQuestions} />
         )}
       </section>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Edit panel: settings + questions (works on live surveys too)
+// ---------------------------------------------------------------------------
+
+type DraftQuestion = DbHrSurveyQuestion & { _isNew?: boolean; _key: string };
+
+function EditPanel({
+  survey,
+  questions,
+  answerCounts,
+  isLive,
+}: {
+  survey: DbHrSurvey;
+  questions: DbHrSurveyQuestion[];
+  answerCounts: Map<string, number>;
+  isLive: boolean;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  // Settings state
+  const [title, setTitle] = useState(survey.title);
+  const [description, setDescription] = useState(survey.description ?? "");
+  const [instructions, setInstructions] = useState(survey.instructions ?? "");
+  const [status, setStatus] = useState<SurveyStatus>(
+    (survey.status as SurveyStatus) ?? "draft",
+  );
+  const [audience, setAudience] = useState(survey.audience ?? "");
+  const [anonymousAllowed, setAnonymousAllowed] = useState(
+    survey.anonymous_allowed,
+  );
+  const [collectName, setCollectName] = useState(survey.collect_name);
+  const [collectEmail, setCollectEmail] = useState(survey.collect_email);
+  const [collectDepartment, setCollectDepartment] = useState(
+    survey.collect_department,
+  );
+  const [closesAt, setClosesAt] = useState<string>(
+    survey.closes_at ? survey.closes_at.slice(0, 16) : "",
+  );
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsOk, setSettingsOk] = useState(false);
+
+  const saveSettings = () => {
+    setSettingsError(null);
+    setSettingsOk(false);
+    if (!title.trim()) {
+      setSettingsError("Title is required");
+      return;
+    }
+    setSavingSettings(true);
+    startTransition(async () => {
+      try {
+        await updateSurvey(survey.id, {
+          title: title.trim(),
+          description,
+          instructions,
+          status,
+          audience: audience.trim() || null,
+          anonymous_allowed: anonymousAllowed,
+          collect_name: collectName,
+          collect_email: collectEmail,
+          collect_department: collectDepartment,
+          closes_at: closesAt ? new Date(closesAt).toISOString() : null,
+        });
+        setSettingsOk(true);
+        router.refresh();
+      } catch (e) {
+        setSettingsError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setSavingSettings(false);
+      }
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-5">
+      {isLive && (
+        <div className="flex items-start gap-2 rounded-card border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-700 dark:text-amber-300">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <div>
+            This survey is <strong>live</strong>. You can still edit it. Existing
+            responses are preserved — questions with answers are archived rather
+            than deleted, and we block edits that would change the meaning of
+            stored answers.
+          </div>
+        </div>
+      )}
+
+      {/* Settings card */}
+      <div className="haven-card flex flex-col gap-3 p-5">
+        <div className="flex items-center justify-between">
+          <h3 className="font-heading text-[15px] font-bold">Survey settings</h3>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={saveSettings}
+            disabled={pending || savingSettings}
+          >
+            <Save className="h-3.5 w-3.5" />
+            {savingSettings ? "Saving…" : "Save settings"}
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <Field label="Title" required>
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Survey title"
+              />
+            </Field>
+          </div>
+          <Field label="Status">
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value as SurveyStatus)}
+              className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm focus:outline-none focus:shadow-ring"
+            >
+              {SURVEY_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {SURVEY_STATUS_LABELS[s]}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Audience">
+            <Input
+              value={audience}
+              onChange={(e) => setAudience(e.target.value)}
+              placeholder="e.g. Whole team"
+            />
+          </Field>
+          <div className="sm:col-span-2">
+            <Field label="Description">
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={2}
+                placeholder="Short summary shown to respondents."
+                className="w-full rounded-md border border-border bg-surface p-3 text-[13px] leading-relaxed focus:outline-none focus:shadow-ring"
+              />
+            </Field>
+          </div>
+          <div className="sm:col-span-2">
+            <Field label="Instructions">
+              <textarea
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                rows={3}
+                placeholder="How should respondents answer?"
+                className="w-full rounded-md border border-border bg-surface p-3 text-[13px] leading-relaxed focus:outline-none focus:shadow-ring"
+              />
+            </Field>
+          </div>
+          <Field label="Closes at (optional)">
+            <Input
+              type="datetime-local"
+              value={closesAt}
+              onChange={(e) => setClosesAt(e.target.value)}
+            />
+          </Field>
+          <div className="sm:col-span-2">
+            <div className="flex flex-col gap-1.5 rounded-md border border-border bg-surface-alt/40 p-3 text-[12px]">
+              <div className="font-semibold text-foreground">Respondent identity</div>
+              <Toggle
+                label="Allow anonymous responses"
+                checked={anonymousAllowed}
+                onChange={setAnonymousAllowed}
+              />
+              <Toggle
+                label="Collect name"
+                checked={collectName}
+                onChange={setCollectName}
+              />
+              <Toggle
+                label="Collect email"
+                checked={collectEmail}
+                onChange={setCollectEmail}
+              />
+              <Toggle
+                label="Collect department"
+                checked={collectDepartment}
+                onChange={setCollectDepartment}
+              />
+            </div>
+          </div>
+        </div>
+
+        {settingsError && (
+          <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12px] text-red-600 dark:text-red-400">
+            {settingsError}
+          </div>
+        )}
+        {settingsOk && !settingsError && (
+          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[12px] text-emerald-700 dark:text-emerald-400">
+            Settings saved.
+          </div>
+        )}
+      </div>
+
+      {/* Questions editor */}
+      <QuestionsEditor
+        surveyId={survey.id}
+        questions={questions}
+        answerCounts={answerCounts}
+      />
+    </div>
+  );
+}
+
+function QuestionsEditor({
+  surveyId,
+  questions,
+  answerCounts,
+}: {
+  surveyId: string;
+  questions: DbHrSurveyQuestion[];
+  answerCounts: Map<string, number>;
+}) {
+  const router = useRouter();
+  const [, startTransition] = useTransition();
+
+  const live = questions.filter((q) => !q.archived_at);
+  const archived = questions.filter((q) => q.archived_at);
+
+  const [adding, setAdding] = useState<DraftQuestion | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const startNew = () => {
+    setEditingId(null);
+    setAdding({
+      _isNew: true,
+      _key: Math.random().toString(36).slice(2),
+      id: "",
+      survey_id: surveyId,
+      position: live.length,
+      question_type: "short_text",
+      prompt: "",
+      help_text: "",
+      required: false,
+      config: {},
+      archived_at: null,
+      created_at: "",
+      updated_at: "",
+    });
+  };
+
+  const move = (id: string, dir: -1 | 1) => {
+    const ids = live.map((q) => q.id);
+    const idx = ids.indexOf(id);
+    const target = idx + dir;
+    if (idx < 0 || target < 0 || target >= ids.length) return;
+    [ids[idx], ids[target]] = [ids[target], ids[idx]];
+    startTransition(async () => {
+      try {
+        await reorderQuestions(surveyId, ids);
+        router.refresh();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : String(e));
+      }
+    });
+  };
+
+  const onArchive = (id: string) => {
+    startTransition(async () => {
+      try {
+        await archiveQuestion(id, surveyId);
+        router.refresh();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : String(e));
+      }
+    });
+  };
+
+  const onUnarchive = (id: string) => {
+    startTransition(async () => {
+      try {
+        await unarchiveQuestion(id, surveyId);
+        router.refresh();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : String(e));
+      }
+    });
+  };
+
+  const onDelete = (id: string, hasAnswers: boolean) => {
+    const msg = hasAnswers
+      ? "This question has responses. It will be archived (hidden from the public form) so historical answers stay intact. Continue?"
+      : "Delete this question?";
+    if (!confirm(msg)) return;
+    startTransition(async () => {
+      try {
+        await deleteQuestion(id, surveyId);
+        router.refresh();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : String(e));
+      }
+    });
+  };
+
+  return (
+    <div className="haven-card flex flex-col gap-3 p-5">
+      <div className="flex items-center justify-between">
+        <h3 className="font-heading text-[15px] font-bold">
+          Questions ({live.length})
+        </h3>
+        <Button variant="primary" size="sm" onClick={startNew}>
+          <Plus className="h-3.5 w-3.5" />
+          Add question
+        </Button>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {live.length === 0 && !adding && (
+          <div className="rounded-card border border-dashed border-border bg-surface-alt/30 p-6 text-center text-[13px] text-muted-foreground">
+            No questions yet — click <strong>Add question</strong> to begin.
+          </div>
+        )}
+        {live.map((q, i) => (
+          <QuestionEditCard
+            key={q.id}
+            index={i}
+            question={q}
+            answerCount={answerCounts.get(q.id) ?? 0}
+            isEditing={editingId === q.id}
+            onEdit={() => {
+              setAdding(null);
+              setEditingId(q.id);
+            }}
+            onCancel={() => setEditingId(null)}
+            onSaved={() => {
+              setEditingId(null);
+              router.refresh();
+            }}
+            onMoveUp={() => move(q.id, -1)}
+            onMoveDown={() => move(q.id, 1)}
+            onArchive={() => onArchive(q.id)}
+            onDelete={() => onDelete(q.id, (answerCounts.get(q.id) ?? 0) > 0)}
+            isFirst={i === 0}
+            isLast={i === live.length - 1}
+          />
+        ))}
+        {adding && (
+          <NewQuestionCard
+            surveyId={surveyId}
+            draft={adding}
+            onCancel={() => setAdding(null)}
+            onSaved={() => {
+              setAdding(null);
+              router.refresh();
+            }}
+          />
+        )}
+      </div>
+
+      {archived.length > 0 && (
+        <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
+          <div className="text-[12px] font-semibold text-muted-foreground">
+            Archived questions ({archived.length})
+          </div>
+          {archived.map((q) => (
+            <div
+              key={q.id}
+              className="flex items-center justify-between gap-2 rounded-md border border-border/60 bg-surface-alt/40 p-3 text-[12px]"
+            >
+              <div className="min-w-0">
+                <div className="truncate font-medium">{q.prompt}</div>
+                <div className="text-[11px] text-muted-foreground">
+                  {QUESTION_TYPE_LABELS[q.question_type as QuestionType] ??
+                    q.question_type}{" "}
+                  · {answerCounts.get(q.id) ?? 0} historical answers
+                </div>
+              </div>
+              <div className="flex gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onUnarchive(q.id)}
+                >
+                  <ArchiveRestore className="h-3.5 w-3.5" />
+                  Restore
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NewQuestionCard({
+  surveyId,
+  draft,
+  onCancel,
+  onSaved,
+}: {
+  surveyId: string;
+  draft: DraftQuestion;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [type, setType] = useState<QuestionType>(draft.question_type as QuestionType);
+  const [prompt, setPrompt] = useState(draft.prompt);
+  const [helpText, setHelpText] = useState(draft.help_text);
+  const [required, setRequired] = useState(draft.required);
+  const [config, setConfig] = useState<QuestionConfig>(
+    defaultConfig(draft.question_type as QuestionType, draft.config),
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const save = () => {
+    setError(null);
+    if (!prompt.trim()) {
+      setError("Prompt is required");
+      return;
+    }
+    startTransition(async () => {
+      try {
+        await addQuestion({
+          survey_id: surveyId,
+          question_type: type,
+          prompt: prompt.trim(),
+          help_text: helpText.trim(),
+          required,
+          config: cleanConfig(type, config),
+        });
+        onSaved();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    });
+  };
+
+  return (
+    <QuestionFormShell
+      title="New question"
+      type={type}
+      onTypeChange={(t) => {
+        setType(t);
+        setConfig(defaultConfig(t, config));
+      }}
+      prompt={prompt}
+      setPrompt={setPrompt}
+      helpText={helpText}
+      setHelpText={setHelpText}
+      required={required}
+      setRequired={setRequired}
+      config={config}
+      setConfig={setConfig}
+      pending={pending}
+      error={error}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onCancel} disabled={pending}>
+            Cancel
+          </Button>
+          <Button variant="primary" size="sm" onClick={save} disabled={pending}>
+            {pending ? "Saving…" : "Add question"}
+          </Button>
+        </div>
+      }
+    />
+  );
+}
+
+function QuestionEditCard({
+  index,
+  question,
+  answerCount,
+  isEditing,
+  onEdit,
+  onCancel,
+  onSaved,
+  onMoveUp,
+  onMoveDown,
+  onArchive,
+  onDelete,
+  isFirst,
+  isLast,
+}: {
+  index: number;
+  question: DbHrSurveyQuestion;
+  answerCount: number;
+  isEditing: boolean;
+  onEdit: () => void;
+  onCancel: () => void;
+  onSaved: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
+  isFirst: boolean;
+  isLast: boolean;
+}) {
+  const [type, setType] = useState<QuestionType>(question.question_type as QuestionType);
+  const [prompt, setPrompt] = useState(question.prompt);
+  const [helpText, setHelpText] = useState(question.help_text);
+  const [required, setRequired] = useState(question.required);
+  const [config, setConfig] = useState<QuestionConfig>(question.config);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const hasAnswers = answerCount > 0;
+  const typeChanged = type !== question.question_type;
+
+  const save = () => {
+    setError(null);
+    if (!prompt.trim()) {
+      setError("Prompt is required");
+      return;
+    }
+    startTransition(async () => {
+      try {
+        await updateQuestion(
+          question.id,
+          {
+            question_type: type,
+            prompt: prompt.trim(),
+            help_text: helpText.trim(),
+            required,
+            config: cleanConfig(type, config),
+          },
+          question.survey_id,
+        );
+        onSaved();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    });
+  };
+
+  if (!isEditing) {
+    return (
+      <div className="rounded-card border border-border bg-surface p-3">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 text-[11px] font-semibold text-muted-foreground">
+            Q{index + 1}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="font-heading text-[14px] font-bold">
+              {question.prompt}
+              {question.required && <span className="text-rose-500"> *</span>}
+            </div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              {QUESTION_TYPE_LABELS[question.question_type as QuestionType] ??
+                question.question_type}
+              {question.help_text ? ` · ${question.help_text}` : ""}
+              {hasAnswers ? ` · ${answerCount} answer${answerCount === 1 ? "" : "s"}` : ""}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={onMoveUp}
+              disabled={isFirst}
+              className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-30"
+              aria-label="Move up"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              onClick={onMoveDown}
+              disabled={isLast}
+              className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-30"
+              aria-label="Move down"
+            >
+              ↓
+            </button>
+            <Button variant="ghost" size="sm" onClick={onEdit}>
+              <Pencil className="h-3 w-3" />
+              Edit
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onArchive}>
+              <Archive className="h-3.5 w-3.5" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onDelete}>
+              <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <QuestionFormShell
+      title={`Edit Q${index + 1}`}
+      type={type}
+      onTypeChange={(t) => {
+        setType(t);
+        setConfig(defaultConfig(t, config));
+      }}
+      prompt={prompt}
+      setPrompt={setPrompt}
+      helpText={helpText}
+      setHelpText={setHelpText}
+      required={required}
+      setRequired={setRequired}
+      config={config}
+      setConfig={setConfig}
+      pending={pending}
+      error={error}
+      banner={
+        hasAnswers ? (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <div>
+              This question has <strong>{answerCount}</strong> existing answer
+              {answerCount === 1 ? "" : "s"}.
+              {typeChanged
+                ? " Changing the type isn't allowed because it would invalidate stored answers — archive this question and add a replacement instead."
+                : " Editing prompt/help/required is safe; removing existing options is blocked."}
+            </div>
+          </div>
+        ) : null
+      }
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onCancel} disabled={pending}>
+            Cancel
+          </Button>
+          <Button variant="primary" size="sm" onClick={save} disabled={pending}>
+            <Save className="h-3.5 w-3.5" />
+            {pending ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      }
+    />
+  );
+}
+
+function QuestionFormShell({
+  title,
+  type,
+  onTypeChange,
+  prompt,
+  setPrompt,
+  helpText,
+  setHelpText,
+  required,
+  setRequired,
+  config,
+  setConfig,
+  pending,
+  error,
+  banner,
+  footer,
+}: {
+  title: string;
+  type: QuestionType;
+  onTypeChange: (t: QuestionType) => void;
+  prompt: string;
+  setPrompt: (s: string) => void;
+  helpText: string;
+  setHelpText: (s: string) => void;
+  required: boolean;
+  setRequired: (b: boolean) => void;
+  config: QuestionConfig;
+  setConfig: (c: QuestionConfig) => void;
+  pending: boolean;
+  error: string | null;
+  banner?: React.ReactNode;
+  footer: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-card border border-accent/40 bg-surface p-3 ring-1 ring-accent/20">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-[12px] font-semibold text-muted-foreground">{title}</div>
+        <select
+          value={type}
+          onChange={(e) => onTypeChange(e.target.value as QuestionType)}
+          className="h-8 rounded-md border border-border bg-surface px-2 text-[12px] focus:outline-none focus:shadow-ring"
+          disabled={pending}
+        >
+          {QUESTION_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {QUESTION_TYPE_LABELS[t]}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {banner}
+
+      <div className="mt-2 flex flex-col gap-2">
+        <Input
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="Question prompt"
+          disabled={pending}
+        />
+        <Input
+          value={helpText}
+          onChange={(e) => setHelpText(e.target.value)}
+          placeholder="Help text (optional)"
+          disabled={pending}
+        />
+
+        {(type === "single_choice" || type === "multi_choice") && (
+          <div className="flex flex-col gap-1.5">
+            <div className="text-[11px] font-medium text-muted-foreground">Options</div>
+            {(config.options ?? []).map((opt, oi) => (
+              <div key={oi} className="flex items-center gap-2">
+                <Input
+                  value={opt}
+                  onChange={(e) => {
+                    const next = [...(config.options ?? [])];
+                    next[oi] = e.target.value;
+                    setConfig({ ...config, options: next });
+                  }}
+                  placeholder={`Option ${oi + 1}`}
+                  disabled={pending}
+                />
+                <button
+                  type="button"
+                  className="text-rose-500 hover:text-rose-600"
+                  onClick={() => {
+                    const next = (config.options ?? []).filter(
+                      (_, idx) => idx !== oi,
+                    );
+                    setConfig({ ...config, options: next });
+                  }}
+                  aria-label="Remove option"
+                  disabled={pending}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setConfig({
+                  ...config,
+                  options: [...(config.options ?? []), ""],
+                })
+              }
+              disabled={pending}
+            >
+              <Plus className="h-3 w-3" />
+              Add option
+            </Button>
+          </div>
+        )}
+
+        {type === "rating" && (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <SmallField label="Min">
+              <Input
+                type="number"
+                value={config.scale_min ?? 1}
+                onChange={(e) =>
+                  setConfig({ ...config, scale_min: Number(e.target.value) || 1 })
+                }
+                disabled={pending}
+              />
+            </SmallField>
+            <SmallField label="Max">
+              <Input
+                type="number"
+                value={config.scale_max ?? 5}
+                onChange={(e) =>
+                  setConfig({ ...config, scale_max: Number(e.target.value) || 5 })
+                }
+                disabled={pending}
+              />
+            </SmallField>
+            <SmallField label="Low label">
+              <Input
+                value={config.scale_label_low ?? ""}
+                onChange={(e) =>
+                  setConfig({ ...config, scale_label_low: e.target.value })
+                }
+                placeholder="Strongly disagree"
+                disabled={pending}
+              />
+            </SmallField>
+            <SmallField label="High label">
+              <Input
+                value={config.scale_label_high ?? ""}
+                onChange={(e) =>
+                  setConfig({ ...config, scale_label_high: e.target.value })
+                }
+                placeholder="Strongly agree"
+                disabled={pending}
+              />
+            </SmallField>
+          </div>
+        )}
+
+        <label className="inline-flex items-center gap-2 text-[12px] text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={required}
+            onChange={(e) => setRequired(e.target.checked)}
+            disabled={pending}
+          />
+          Required
+        </label>
+      </div>
+
+      {error && (
+        <div className="mt-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12px] text-red-600 dark:text-red-400">
+          {error}
+        </div>
+      )}
+
+      <div className="mt-3">{footer}</div>
+    </div>
+  );
+}
+
+function defaultConfig(type: QuestionType, prev: QuestionConfig): QuestionConfig {
+  if (type === "rating") {
+    return {
+      scale_min: prev.scale_min ?? 1,
+      scale_max: prev.scale_max ?? 5,
+      scale_label_low: prev.scale_label_low,
+      scale_label_high: prev.scale_label_high,
+    };
+  }
+  if (type === "single_choice" || type === "multi_choice") {
+    return {
+      options: prev.options && prev.options.length ? prev.options : ["", ""],
+    };
+  }
+  return {};
+}
+
+function cleanConfig(type: QuestionType, cfg: QuestionConfig): QuestionConfig {
+  if (type === "single_choice" || type === "multi_choice") {
+    const opts = (cfg.options ?? []).map((o) => o.trim()).filter(Boolean);
+    return { options: opts };
+  }
+  if (type === "rating") {
+    return {
+      scale_min: cfg.scale_min ?? 1,
+      scale_max: cfg.scale_max ?? 5,
+      scale_label_low: cfg.scale_label_low,
+      scale_label_high: cfg.scale_label_high,
+    };
+  }
+  return {};
+}
+
+function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-[12px] font-medium text-muted-foreground">
+        {label}
+        {required && <span className="text-rose-500"> *</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function SmallField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function Toggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="inline-flex items-center gap-2">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span>{label}</span>
+    </label>
   );
 }
 
@@ -212,10 +1225,12 @@ function QuestionSummary({
   index,
   question,
   answers,
+  archived,
 }: {
   index: number;
   question: DbHrSurveyQuestion;
   answers: DbHrSurveyAnswer[];
+  archived?: boolean;
 }) {
   const t = question.question_type as QuestionType;
 
@@ -301,7 +1316,6 @@ function QuestionSummary({
         </div>
       );
   } else {
-    // text
     const samples = answers
       .map((a) => a.value_text)
       .filter((s): s is string => !!s && s.trim().length > 0)
@@ -338,6 +1352,12 @@ function QuestionSummary({
           <div className="font-heading text-[14px] font-bold">
             {question.prompt}
             {question.required && <span className="text-rose-500"> *</span>}
+            {archived && (
+              <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <Archive className="h-2.5 w-2.5" />
+                Archived
+              </span>
+            )}
           </div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">
             {QUESTION_TYPE_LABELS[t] ?? t}
@@ -409,15 +1429,21 @@ function ResponsesTable({
                   <tr className="border-b border-border/50 bg-surface-alt/20">
                     <td colSpan={6} className="px-4 py-3">
                       <div className="flex flex-col gap-2">
-                        {questions.map((q, i) => {
-                          const ans = r.answers.find((a) => a.question_id === q.id);
+                        {r.answers.map((a, i) => {
+                          const q = qById.get(a.question_id);
                           return (
-                            <div key={q.id} className="flex flex-col">
+                            <div key={a.id} className="flex flex-col">
                               <div className="text-[11px] font-medium text-muted-foreground">
-                                Q{i + 1}. {q.prompt}
+                                Q{i + 1}.{" "}
+                                {q ? q.prompt : "(question removed)"}
+                                {q?.archived_at && (
+                                  <span className="ml-1 text-[10px] italic">
+                                    (archived)
+                                  </span>
+                                )}
                               </div>
                               <div className="text-[13px]">
-                                {renderAnswer(qById.get(q.id) ?? q, ans)}
+                                {q ? renderAnswer(q, a) : renderAnswerRaw(a)}
                               </div>
                             </div>
                           );
@@ -448,7 +1474,12 @@ function renderAnswer(
   return a.value_text ?? "—";
 }
 
-// silence unused imports for icons we may add later
-void format;
-void ArrowDown;
-void ArrowUp;
+function renderAnswerRaw(a: DbHrSurveyAnswer): string {
+  if (a.value_text) return a.value_text;
+  if (a.value_choice) return a.value_choice;
+  if (a.value_choices && a.value_choices.length > 0)
+    return a.value_choices.join(", ");
+  if (a.value_number !== null && a.value_number !== undefined)
+    return String(a.value_number);
+  return "—";
+}

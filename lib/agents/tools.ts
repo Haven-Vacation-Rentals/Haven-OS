@@ -1327,15 +1327,20 @@ export const TOOLS: ToolDef[] = [
   {
     name: "get_hr_survey_questions",
     description:
-      "Return the ordered list of questions for a survey (id, question_type, prompt, help_text, required, config).",
+      "Return the ordered list of questions for a survey (id, question_type, prompt, help_text, required, config, archived_at). By default only live (non-archived) questions are returned. Pass include_archived=true to also see archived questions (kept around so historical responses keep their question context).",
     input_schema: {
       type: "object",
-      properties: { survey_id: { type: "string" } },
+      properties: {
+        survey_id: { type: "string" },
+        include_archived: { type: "boolean" },
+      },
       required: ["survey_id"],
     },
     execute: async (input, ctx) => {
       await requireHr(ctx);
-      return surveys.getSurveyQuestions(s(input.survey_id)!);
+      return surveys.getSurveyQuestions(s(input.survey_id)!, {
+        includeArchived: b(input.include_archived) ?? false,
+      });
     },
   },
   {
@@ -1418,7 +1423,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "update_hr_survey",
     description:
-      "Update fields on an existing HR survey (title, description, instructions, audience, identity flags, status, closes_at). Pass only fields to change.",
+      "Update fields on an existing HR survey (title, description, instructions, audience, identity flags, status, closes_at). Safe to call on live/active surveys — existing responses are preserved. Pass only fields to change.",
     input_schema: {
       type: "object",
       properties: {
@@ -1492,7 +1497,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "add_hr_survey_question",
     description:
-      "Add a question to an existing survey. question_type: short_text | long_text | single_choice | multi_choice | rating | yes_no. For choice types pass config.options (string[]). For rating pass config.scale_min and scale_max (optionally scale_label_low/scale_label_high).",
+      "Add a question to an existing survey. Safe to call on live/active surveys — the new question shows up on the public form immediately and existing responses are unaffected. question_type: short_text | long_text | single_choice | multi_choice | rating | yes_no. For choice types pass config.options (string[]). For rating pass config.scale_min and scale_max (optionally scale_label_low/scale_label_high).",
     input_schema: {
       type: "object",
       properties: {
@@ -1537,7 +1542,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "update_hr_survey_question",
     description:
-      "Update a single question on a survey (prompt, help_text, required, position, config, or question_type).",
+      "Update a single question on a survey (prompt, help_text, required, position, config, or question_type). Safe to call on live/active surveys for prompt/help/required/position. If the question already has responses, changing question_type is rejected and removing existing options is rejected — to replace a question that already has answers, use archive_hr_survey_question and add a new one instead.",
     input_schema: {
       type: "object",
       properties: {
@@ -1584,7 +1589,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "delete_hr_survey_question",
-    description: "Remove a single question from a survey.",
+    description:
+      "Remove a single question from a survey. If the question already has responses, this auto-soft-archives it (hidden from the public form, but historical answers stay tied to it). If it has no responses, the question is hard-deleted. Safe to call on live/active surveys.",
     input_schema: {
       type: "object",
       properties: {
@@ -1596,6 +1602,45 @@ export const TOOLS: ToolDef[] = [
     execute: async (input, ctx) => {
       await requireHr(ctx);
       await surveys.deleteQuestion(s(input.question_id)!, s(input.survey_id)!);
+      return { ok: true };
+    },
+  },
+  {
+    name: "archive_hr_survey_question",
+    description:
+      "Soft-archive a survey question. The public form stops showing it but historical answers remain tied to it for results/exports. Use this (instead of delete or type-change) when you need to retire a question on a live survey.",
+    input_schema: {
+      type: "object",
+      properties: {
+        question_id: { type: "string" },
+        survey_id: { type: "string" },
+      },
+      required: ["question_id", "survey_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      await surveys.archiveQuestion(s(input.question_id)!, s(input.survey_id)!);
+      return { ok: true };
+    },
+  },
+  {
+    name: "unarchive_hr_survey_question",
+    description:
+      "Restore a previously archived survey question so it shows up on the public form again.",
+    input_schema: {
+      type: "object",
+      properties: {
+        question_id: { type: "string" },
+        survey_id: { type: "string" },
+      },
+      required: ["question_id", "survey_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      await surveys.unarchiveQuestion(
+        s(input.question_id)!,
+        s(input.survey_id)!,
+      );
       return { ok: true };
     },
   },
@@ -2057,7 +2102,7 @@ You have tools that give you live read + write access across the entire Haven OS
 - **Scorecard** — the Northstar weekly KPI tracker. You can read current + historical months, update cell values/targets/status (green/yellow/red), seed new months, and archive closed months.
 - **Onboarding** — property onboarding projects with templated tasks + checklists. Full control: create or delete projects; update every project field (status, owner info, target/actual open dates, slack channel, folder URL, notes); add / update / delete / restatus tasks; edit any task field (title, description, department, due date, assignee, key-date flag); add / toggle / delete checklist items. Use \`list_onboarding_projects_with_stats\` for rollup views (progress, blockers, next key date, overdue) and \`get_onboarding_tree\` when you need specific task_ids to update.
 - **HR** (permission-gated) — employees, performance reviews, issues/write-ups, roles, candidates, policy/procedure docs, and team surveys. Each call is row-level filtered by the caller's HR access grants.
-- **HR Surveys** — author flexible per-survey forms (short_text, long_text, single_choice, multi_choice, rating, yes_no), activate them to expose a public landing page at \`<site>/survey/<slug>\`, and read aggregated results (avg rating, choice counts, yes/no, text samples). Workflow: call \`create_hr_survey\` with a \`questions\` array (defaults to draft). To go live, set status='active' on creation or via \`set_hr_survey_status\`. Surface the share link via \`get_hr_survey_share_link\`. Use \`get_hr_survey_summary\` for "how's it going?" questions. Use \`add_hr_survey_question\` / \`update_hr_survey_question\` to iterate after creation.
+- **HR Surveys** — author flexible per-survey forms (short_text, long_text, single_choice, multi_choice, rating, yes_no), activate them to expose a public landing page at \`<site>/survey/<slug>\`, and read aggregated results (avg rating, choice counts, yes/no, text samples). Workflow: call \`create_hr_survey\` with a \`questions\` array (defaults to draft). To go live, set status='active' on creation or via \`set_hr_survey_status\`. Surface the share link via \`get_hr_survey_share_link\`. Use \`get_hr_survey_summary\` for "how's it going?" questions. Use \`add_hr_survey_question\` / \`update_hr_survey_question\` to iterate after creation — these are safe on live surveys. To retire a question on a live survey use \`archive_hr_survey_question\` (the public form hides it but historical answers stay intact); \`delete_hr_survey_question\` does this automatically when responses already exist.
 - **Admin** (super-admin only) — list users; create users (default invite-by-email, optionally direct-create with password); change roles (user / admin / super_admin); delete users; grant or revoke HR access; manage departments. When the user asks to "add" or "invite" someone, default to invite mode (email-based) unless they say otherwise.
 - **Sales / Property Pitches** (admin or super_admin) — generate a personalized one-pager that gets sent to a prospective property owner, hosted at \`/pitch/<slug>\`. Workflow: when the user gives you a Zillow / Airbnb / VRBO / Booking link, call \`extract_listing_details\` first to auto-fill address, beds/baths/sleeps, and a hero photo. Then call \`create_sales_pitch\` with the owner's name and a projection range (annual gross revenue, low + high in USD). The pitch expires 30 days after creation; you can extend it via \`update_sales_pitch\` with a new \`expires_at\`. Use \`archive_sales_pitch\` to retire a pitch (the public URL flips to a friendly contact page); only use \`delete_sales_pitch\` when the user explicitly says delete. After creating, surface the public URL — it's \`<site>/pitch/<slug>\`.
 - **System** — test Hostaway connection, list team members.

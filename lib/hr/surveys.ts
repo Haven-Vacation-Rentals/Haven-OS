@@ -127,14 +127,19 @@ export async function getSurvey(id: string): Promise<DbHrSurvey | null> {
 
 export async function getSurveyQuestions(
   surveyId: string,
+  options?: { includeArchived?: boolean },
 ): Promise<DbHrSurveyQuestion[]> {
   await requireHrAccess();
   const supabase = await db();
-  const { data } = await supabase
+  let query = supabase
     .from("hr_survey_questions")
     .select("*")
     .eq("survey_id", surveyId)
     .order("position", { ascending: true });
+  if (!options?.includeArchived) {
+    query = query.is("archived_at", null);
+  }
+  const { data } = await query;
   return ((data ?? []) as DbHrSurveyQuestion[]).map(normaliseQuestion);
 }
 
@@ -142,7 +147,17 @@ function normaliseQuestion(q: DbHrSurveyQuestion): DbHrSurveyQuestion {
   return {
     ...q,
     config: (q.config ?? {}) as QuestionConfig,
+    archived_at: q.archived_at ?? null,
   };
+}
+
+async function questionAnswerCount(questionId: string): Promise<number> {
+  const supabase = await db();
+  const { count } = await supabase
+    .from("hr_survey_answers")
+    .select("id", { head: true, count: "exact" })
+    .eq("question_id", questionId);
+  return count ?? 0;
 }
 
 export type CreateSurveyInput = {
@@ -315,14 +330,107 @@ export async function updateQuestion(
 ): Promise<void> {
   await requireHrAccess();
   const supabase = await db();
+
+  // If responses already exist for this question, refuse the kinds of edits
+  // that would silently corrupt historical answers (changing the answer
+  // shape). Prompt / help / required / position / option additions are still
+  // safe and allowed.
+  const isTypeChange = input.question_type !== undefined;
+  const isConfigChange = input.config !== undefined;
+  if (isTypeChange || isConfigChange) {
+    const answers = await questionAnswerCount(id);
+    if (answers > 0) {
+      const { data: current } = await supabase
+        .from("hr_survey_questions")
+        .select("question_type, config")
+        .eq("id", id)
+        .maybeSingle();
+      const cur = (current ?? {}) as {
+        question_type?: string;
+        config?: QuestionConfig;
+      };
+      if (
+        isTypeChange &&
+        input.question_type &&
+        input.question_type !== cur.question_type
+      ) {
+        throw new Error(
+          "This question already has responses. Changing its type would invalidate stored answers — archive it and add a replacement question instead.",
+        );
+      }
+      if (isConfigChange && input.config) {
+        const cleaned = pruneConfig(cur.question_type ?? "", input.config);
+        const before = pruneConfig(cur.question_type ?? "", cur.config ?? {});
+        if (configRemovesChoices(before, cleaned)) {
+          throw new Error(
+            "Cannot remove choices that already have responses. You can rename or add choices, or archive this question and add a new one.",
+          );
+        }
+      }
+    }
+  }
+
   await supabase.from("hr_survey_questions").update(input).eq("id", id);
   revalidateSurveys(surveyId);
+}
+
+function pruneConfig(_type: string, cfg: QuestionConfig): QuestionConfig {
+  return {
+    ...cfg,
+    options: cfg.options ? cfg.options.map((o) => o.trim()).filter(Boolean) : undefined,
+  };
+}
+
+function configRemovesChoices(
+  before: QuestionConfig,
+  after: QuestionConfig,
+): boolean {
+  const beforeOpts = before.options ?? [];
+  const afterOpts = new Set(after.options ?? []);
+  for (const o of beforeOpts) if (!afterOpts.has(o)) return true;
+  return false;
 }
 
 export async function deleteQuestion(id: string, surveyId: string): Promise<void> {
   await requireHrAccess();
   const supabase = await db();
-  await supabase.from("hr_survey_questions").delete().eq("id", id);
+  // If this question has any answers, soft-archive instead of hard-deleting,
+  // so historical responses keep their question context.
+  const answers = await questionAnswerCount(id);
+  if (answers > 0) {
+    await supabase
+      .from("hr_survey_questions")
+      .update({ archived_at: new Date().toISOString() })
+      .eq("id", id);
+  } else {
+    await supabase.from("hr_survey_questions").delete().eq("id", id);
+  }
+  revalidateSurveys(surveyId);
+}
+
+export async function archiveQuestion(
+  id: string,
+  surveyId: string,
+): Promise<void> {
+  await requireHrAccess();
+  const supabase = await db();
+  await supabase
+    .from("hr_survey_questions")
+    .update({ archived_at: new Date().toISOString() })
+    .eq("id", id);
+  revalidateSurveys(surveyId);
+}
+
+export async function unarchiveQuestion(
+  id: string,
+  surveyId: string,
+): Promise<void> {
+  await requireHrAccess();
+  const supabase = await db();
+  await supabase
+    .from("hr_survey_questions")
+    .update({ archived_at: null })
+    .eq("id", id);
   revalidateSurveys(surveyId);
 }
 
@@ -414,7 +522,7 @@ export async function getSurveySummary(surveyId: string): Promise<{
   const supabase = await db();
   const survey = await getSurvey(surveyId);
   if (!survey) throw new Error("Survey not found");
-  const questions = await getSurveyQuestions(surveyId);
+  const questions = await getSurveyQuestions(surveyId, { includeArchived: true });
   const responses = await listResponses(surveyId);
 
   const all_answers: DbHrSurveyAnswer[] = responses.flatMap((r) => r.answers);
@@ -507,6 +615,7 @@ export async function getPublicSurveyBySlug(
     .from("hr_survey_questions")
     .select("*")
     .eq("survey_id", s.id)
+    .is("archived_at", null)
     .order("position", { ascending: true });
   const questions = ((qs ?? []) as DbHrSurveyQuestion[]).map(normaliseQuestion);
   return { survey: s, questions };
