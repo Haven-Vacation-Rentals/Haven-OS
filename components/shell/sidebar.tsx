@@ -16,6 +16,7 @@ import {
   Bot,
   Megaphone,
   PenSquare,
+  PackageSearch,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -49,6 +50,7 @@ function buildSections(flags: {
     { label: "Project Management", href: "/work", icon: FolderKanban },
     { label: "Properties", href: "/properties", icon: Home },
     { label: "Onboarding", href: "/onboarding", icon: ClipboardList },
+    { label: "Lost Items", href: "/operations/lost-items", icon: PackageSearch },
   ];
 
   const adminItems: NavItem[] = [];

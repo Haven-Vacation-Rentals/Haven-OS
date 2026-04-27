@@ -46,6 +46,7 @@ Without a Supabase project the app still boots; the login page just shows a setu
 | `HAVEN_WP_URL` | WordPress site for the Content Studio draft queue (defaults to `https://havenvacationrentals.com`). |
 | `HAVEN_WP_USER` | WordPress user with draft permissions. |
 | `HAVEN_WP_APP_PASSWORD` | WordPress application password. Drafts only — never publishes directly. |
+| `HAVEN_LOST_ITEMS_API_KEY` | Shared secret for the external **Lost Items** API (`/api/lost-items`). Required when external partners (cleaning vendors, third-party trackers) need to create or update cases. Header: `x-haven-api-key: <key>`. See [`docs/LOST_ITEMS_API.md`](docs/LOST_ITEMS_API.md). |
 
 ---
 

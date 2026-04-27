@@ -16,6 +16,7 @@
 
 import * as work from "@/lib/work/actions";
 import * as props from "@/lib/properties/actions";
+import * as lostItems from "@/lib/lost-items/actions";
 import * as scorecard from "@/lib/scorecard/actions";
 import * as hr from "@/lib/hr/actions";
 import * as surveys from "@/lib/hr/surveys";
@@ -40,6 +41,10 @@ import type {
   ListType,
 } from "@/lib/work/types";
 import type { PropertyUpdateInput } from "@/lib/properties/types";
+import type {
+  LostItemPriority,
+  LostItemStatus,
+} from "@/lib/lost-items/types";
 import type {
   OnboardingProjectStatus,
   OnboardingTaskStatus,
@@ -2283,6 +2288,289 @@ export const TOOLS: ToolDef[] = [
   },
 
   // =========================================================================
+  // OPERATIONS — LOST / LEFT-BEHIND ITEMS
+  // =========================================================================
+  {
+    name: "list_lost_items",
+    description:
+      "List Operations lost-item cases (items guests left at properties). Filter by status, priority, property, assignee, or 'overdue' (open cases past their follow-up date). Defaults to open cases only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: [
+            "all",
+            "open",
+            "intake",
+            "pending_pickup",
+            "picked_up",
+            "in_transit",
+            "delivered",
+            "completed",
+            "cancelled",
+          ],
+        },
+        priority: {
+          type: "string",
+          enum: ["all", "urgent", "high", "normal", "low"],
+        },
+        property_id: { type: "string" },
+        assigned_to: {
+          type: "string",
+          description: "profile_id, 'unassigned', or 'all'",
+        },
+        overdue: { type: "boolean" },
+        search: { type: "string" },
+        limit: { type: "number" },
+      },
+      required: [],
+    },
+    execute: async (input) => {
+      const limit = Math.min(n(input.limit) ?? 50, 200);
+      const cases = await lostItems.listCases({
+        status: (s(input.status) as
+          | LostItemStatus
+          | "all"
+          | "open"
+          | undefined) ?? "open",
+        priority: s(input.priority) as LostItemPriority | "all" | undefined,
+        property_id: s(input.property_id) as string | "all" | undefined,
+        assigned_to: s(input.assigned_to) as
+          | string
+          | "all"
+          | "unassigned"
+          | undefined,
+        overdue: b(input.overdue),
+        search: s(input.search),
+      });
+      return cases.slice(0, limit).map((c) => ({
+        id: c.id,
+        case_number: c.case_number,
+        status: c.status,
+        priority: c.priority,
+        item_description: c.item_description,
+        property: c.property?.name ?? c.property_name ?? null,
+        guest_name: c.guest_name,
+        assigned_to: c.assignee
+          ? c.assignee.full_name ?? c.assignee.email
+          : null,
+        follow_up_date: c.follow_up_date,
+        source: c.source,
+        external_source: c.external_source,
+        external_id: c.external_id,
+        created_at: c.created_at,
+      }));
+    },
+  },
+  {
+    name: "get_lost_item",
+    description:
+      "Full detail for a single lost-item case by id or case_number (LI-001023). Includes guest info, property, logistics, source/external IDs, and the activity timeline.",
+    input_schema: {
+      type: "object",
+      properties: { case_id: { type: "string" } },
+      required: ["case_id"],
+    },
+    execute: async (input) => {
+      const idOrNumber = s(input.case_id)!;
+      const isUuid = /^[0-9a-f-]{36}$/i.test(idOrNumber);
+      const item = isUuid
+        ? await lostItems.getCase(idOrNumber)
+        : await lostItems.getCaseByNumber(idOrNumber);
+      if (!item) return { error: "Case not found" };
+      const events = await lostItems.listEvents(item.id);
+      return { case: item, events };
+    },
+  },
+  {
+    name: "create_lost_item",
+    description:
+      "Open a new lost-item case. Required: item_description. Set property_id (preferred) or property_name. Always include guest_name + a way to reach them (email/phone) and the reservation reference if known. priority defaults to 'normal'; status defaults to 'intake'. Use this when a guest tells the team they left something behind.",
+    input_schema: {
+      type: "object",
+      properties: {
+        item_description: { type: "string" },
+        item_category: { type: "string" },
+        found_location: { type: "string" },
+        property_id: { type: "string" },
+        property_name: { type: "string" },
+        guest_name: { type: "string" },
+        guest_email: { type: "string" },
+        guest_phone: { type: "string" },
+        reservation_ref: { type: "string" },
+        priority: {
+          type: "string",
+          enum: ["urgent", "high", "normal", "low"],
+        },
+        status: {
+          type: "string",
+          enum: [
+            "intake",
+            "pending_pickup",
+            "picked_up",
+            "in_transit",
+            "delivered",
+            "completed",
+            "cancelled",
+          ],
+        },
+        cleaning_vendor: { type: "string" },
+        follow_up_date: { type: "string", description: "YYYY-MM-DD" },
+        assigned_to: { type: "string", description: "profile_id" },
+        notes: { type: "string" },
+      },
+      required: ["item_description"],
+    },
+    execute: async (input) => {
+      const result = await lostItems.createCase({
+        item_description: s(input.item_description)!,
+        item_category: sOrNull(input.item_category) ?? null,
+        found_location: sOrNull(input.found_location) ?? null,
+        property_id: sOrNull(input.property_id) ?? null,
+        property_name: sOrNull(input.property_name) ?? null,
+        guest_name: sOrNull(input.guest_name) ?? null,
+        guest_email: sOrNull(input.guest_email) ?? null,
+        guest_phone: sOrNull(input.guest_phone) ?? null,
+        reservation_ref: sOrNull(input.reservation_ref) ?? null,
+        priority: s(input.priority) as LostItemPriority | undefined,
+        status: s(input.status) as LostItemStatus | undefined,
+        cleaning_vendor: sOrNull(input.cleaning_vendor) ?? null,
+        follow_up_date: sOrNull(input.follow_up_date) ?? null,
+        assigned_to: sOrNull(input.assigned_to) ?? null,
+        notes: sOrNull(input.notes) ?? null,
+        source: "internal_form",
+      });
+      if (!result.ok) throw new Error(result.error);
+      return result.data;
+    },
+  },
+  {
+    name: "update_lost_item",
+    description:
+      "Update fields on an existing lost-item case. Pass only the fields to change. Status transitions auto-stamp the matching milestone timestamp (picked_up → pickup_completed_at, in_transit → shipped_at, delivered → delivered_at, completed → completed_at). Use this to record cleaning-vendor pickup, shipping carrier/tracking, return method, follow-up date, etc.",
+    input_schema: {
+      type: "object",
+      properties: {
+        case_id: { type: "string" },
+        fields: {
+          type: "object",
+          additionalProperties: true,
+          description:
+            "Partial. Common keys: status, priority, assigned_to, item_description, item_category, found_location, property_id, guest_name, guest_email, guest_phone, reservation_ref, cleaning_vendor, return_method (shipped|guest_pickup|in_person|other), shipping_carrier, shipping_tracking, follow_up_date (YYYY-MM-DD), notes, external_url.",
+        },
+      },
+      required: ["case_id", "fields"],
+    },
+    execute: async (input) => {
+      const fields = (input.fields ?? {}) as Parameters<
+        typeof lostItems.updateCase
+      >[1];
+      const res = await lostItems.updateCase(s(input.case_id)!, fields);
+      if (!res.ok) throw new Error(res.error);
+      return res.data;
+    },
+  },
+  {
+    name: "set_lost_item_status",
+    description:
+      "Move a lost-item case to a new pipeline status. Pipeline: intake → pending_pickup → picked_up → in_transit → delivered → completed. Use 'cancelled' for guest-never-claimed / duplicate cases.",
+    input_schema: {
+      type: "object",
+      properties: {
+        case_id: { type: "string" },
+        status: {
+          type: "string",
+          enum: [
+            "intake",
+            "pending_pickup",
+            "picked_up",
+            "in_transit",
+            "delivered",
+            "completed",
+            "cancelled",
+          ],
+        },
+      },
+      required: ["case_id", "status"],
+    },
+    execute: async (input) => {
+      const res = await lostItems.setStatus(
+        s(input.case_id)!,
+        s(input.status) as LostItemStatus,
+      );
+      if (!res.ok) throw new Error(res.error);
+      return { ok: true };
+    },
+  },
+  {
+    name: "complete_lost_item",
+    description:
+      "Mark a lost-item case as completed (item is back with the guest / case closed). Stamps completed_at automatically.",
+    input_schema: {
+      type: "object",
+      properties: { case_id: { type: "string" } },
+      required: ["case_id"],
+    },
+    execute: async (input) => {
+      const res = await lostItems.completeCase(s(input.case_id)!);
+      if (!res.ok) throw new Error(res.error);
+      return { ok: true };
+    },
+  },
+  {
+    name: "assign_lost_item",
+    description:
+      "Assign an owner to a lost-item case. Pass profile_id, or null to unassign.",
+    input_schema: {
+      type: "object",
+      properties: {
+        case_id: { type: "string" },
+        profile_id: { type: ["string", "null"] },
+      },
+      required: ["case_id"],
+    },
+    execute: async (input) => {
+      const res = await lostItems.setAssignee(
+        s(input.case_id)!,
+        input.profile_id === null
+          ? null
+          : sOrNull(input.profile_id) ?? null,
+      );
+      if (!res.ok) throw new Error(res.error);
+      return { ok: true };
+    },
+  },
+  {
+    name: "add_lost_item_note",
+    description:
+      "Add a comment / note to the activity feed on a lost-item case.",
+    input_schema: {
+      type: "object",
+      properties: {
+        case_id: { type: "string" },
+        body: { type: "string" },
+      },
+      required: ["case_id", "body"],
+    },
+    execute: async (input) => {
+      const res = await lostItems.addComment(
+        s(input.case_id)!,
+        s(input.body)!,
+      );
+      if (!res.ok) throw new Error(res.error);
+      return { ok: true };
+    },
+  },
+  {
+    name: "get_lost_item_stats",
+    description:
+      "Return rollup counts for lost-item cases (open / overdue / completed / total / by_status). Useful for 'how many cases are open?' style asks.",
+    input_schema: { type: "object", properties: {}, required: [] },
+    execute: async () => lostItems.getCaseStats(),
+  },
+
+  // =========================================================================
   // SYSTEM
   // =========================================================================
   {
@@ -2333,6 +2621,7 @@ You have tools that give you live read + write access across the entire Haven OS
 - **Tasks / Work module** — spaces, folders, lists, tasks, comments, assignees. Full CRUD. Default view for "what am I working on" is \`get_my_tasks\`.
 - **Properties (PDM)** — the property master database. You can list, read, update any field (status, tier, account manager, access codes, etc.), and archive properties.
 - **Scorecard** — the Northstar weekly KPI tracker. You can read current + historical months, update cell values/targets/status (green/yellow/red), seed new months, and archive closed months.
+- **Lost Items (Operations)** — left-behind item cases. Use \`list_lost_items\`, \`get_lost_item\`, \`create_lost_item\` (when a guest reports something they left), \`update_lost_item\` (logistics/shipping), \`set_lost_item_status\` to move through the pipeline (intake → pending_pickup → picked_up → in_transit → delivered → completed), \`assign_lost_item\`, \`add_lost_item_note\`, \`complete_lost_item\`, \`get_lost_item_stats\`. The pipeline tracks the cleaning company picking up the item and returning it to the guest.
 - **Onboarding** — property onboarding projects with templated tasks + checklists. Full control: create or delete projects; update every project field (status, owner info, target/actual open dates, slack channel, folder URL, notes); add / update / delete / restatus tasks; edit any task field (title, description, department, due date, assignee, key-date flag); add / toggle / delete checklist items. Use \`list_onboarding_projects_with_stats\` for rollup views (progress, blockers, next key date, overdue) and \`get_onboarding_tree\` when you need specific task_ids to update.
 - **HR** (permission-gated) — employees, performance reviews, issues/write-ups, roles, candidates, policy/procedure docs, and team surveys. Each call is row-level filtered by the caller's HR access grants.
 - **HR Surveys** — author flexible per-survey forms (short_text, long_text, single_choice, multi_choice, rating, yes_no), activate them to expose a public landing page at \`<site>/survey/<slug>\`, and read aggregated results (avg rating, choice counts, yes/no, text samples). Workflow: call \`create_hr_survey\` with a \`questions\` array (defaults to draft). To go live, set status='active' on creation or via \`set_hr_survey_status\`. Surface the share link via \`get_hr_survey_share_link\`. Use \`get_hr_survey_summary\` for "how's it going?" questions. Use \`add_hr_survey_question\` / \`update_hr_survey_question\` to iterate after creation — these are safe on live surveys. To retire a question on a live survey use \`archive_hr_survey_question\` (the public form hides it but historical answers stay intact); \`delete_hr_survey_question\` does this automatically when responses already exist.
