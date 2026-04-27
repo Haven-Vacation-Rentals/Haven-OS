@@ -1,6 +1,31 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+/**
+ * Haven OS — Article workspace.
+ *
+ * Two-pane layout:
+ *   - Left: agent chat. Sticky, full-height, contains the conversation,
+ *           quick actions, and per-suggestion apply buttons.
+ *   - Right: the post itself. Default tab is "Post" — a rich,
+ *           semantic editor (real H1/H2, paragraphs, lists, callouts)
+ *           that looks like the published post Jack is drafting toward.
+ *
+ * The other right-pane tabs (Brief, Outline, SEO & GEO, Sources,
+ * Publish) reuse the same shell — the chat stays put, the right pane
+ * switches. Tab choice is independent of the chat's scroll/focus.
+ *
+ * Agent edits land in the post pane optimistically (the chat re-seeds
+ * messages from the server response, and applyAgentSuggestion triggers
+ * a router.refresh that re-flows the new article down to the canvas).
+ */
+
+import {
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+  type ComponentType,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   Bot,
@@ -45,8 +70,9 @@ import {
   type ContentTopicStage,
   type TopicWithArticle,
 } from "@/lib/content/types";
+import { PostCanvas } from "@/components/content/post-canvas";
 
-type Tab = "draft" | "brief" | "outline" | "scorecards" | "sources" | "publish";
+type Tab = "post" | "brief" | "outline" | "scorecards" | "sources" | "publish";
 
 export function ArticleWorkspace({
   topic,
@@ -67,21 +93,23 @@ export function ArticleWorkspace({
   jobs: ContentPublishJob[];
   wpConfigured: boolean;
 }) {
-  const [tab, setTab] = useState<Tab>("draft");
+  const [tab, setTab] = useState<Tab>("post");
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
-      <AgentChat
-        article={article}
-        initialMessages={messages}
-        seoScore={article.seo_score}
-        geoScore={article.geo_score}
-      />
+    <div className="grid min-h-[calc(100vh-9rem)] grid-cols-1 gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
+      <div className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-6rem)]">
+        <AgentChat
+          article={article}
+          initialMessages={messages}
+          seoScore={article.seo_score}
+          geoScore={article.geo_score}
+        />
+      </div>
       <div className="flex min-w-0 flex-col gap-4">
         <WorkspaceHeader topic={topic} article={article} />
         <Tabs tab={tab} setTab={setTab} />
-        {tab === "draft" ? (
-          <DraftEditor article={article} />
+        {tab === "post" ? (
+          <PostCanvas article={article} />
         ) : tab === "brief" ? (
           <PlainEditor
             article={article}
@@ -127,6 +155,12 @@ function WorkspaceHeader({
   const [pending, startTransition] = useTransition();
   const [title, setTitle] = useState(article.title);
   const [meta, setMeta] = useState(article.meta_description);
+
+  // Re-seed local state when the article changes upstream (e.g. agent
+  // applied set_title / set_meta).
+  useEffect(() => setTitle(article.title), [article.title]);
+  useEffect(() => setMeta(article.meta_description), [article.meta_description]);
+
   const titleLen = title.length;
   const metaLen = meta.length;
   const titleOk = titleLen >= 50 && titleLen <= 70;
@@ -162,7 +196,7 @@ function WorkspaceHeader({
   const dirty = title !== article.title || meta !== article.meta_description;
 
   return (
-    <div className="rounded-card border border-border bg-surface p-4">
+    <div className="rounded-card border border-border bg-surface p-5">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {topic.target_keyword
@@ -197,7 +231,7 @@ function WorkspaceHeader({
         type="text"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        className="w-full bg-transparent font-heading text-display-4 font-bold text-foreground outline-none placeholder:text-muted-foreground"
+        className="w-full bg-transparent font-heading text-display-2 font-bold leading-tight text-foreground outline-none placeholder:text-muted-foreground"
         placeholder="Article title"
       />
       <div className="mt-1 flex items-center gap-2 text-[11px]">
@@ -215,7 +249,7 @@ function WorkspaceHeader({
         value={meta}
         onChange={(e) => setMeta(e.target.value)}
         rows={2}
-        className="mt-3 w-full resize-none rounded-md border border-border bg-surface-alt/30 p-2 text-[13px] text-foreground outline-none focus:border-haven-coral/40"
+        className="mt-3 w-full resize-none rounded-md border border-border bg-surface-alt/30 p-2 text-[13px] leading-5 text-foreground outline-none focus:border-haven-coral/40"
         placeholder="Meta description (150–160 chars)"
       />
       <div className="mt-1 flex items-center gap-2 text-[11px]">
@@ -246,9 +280,9 @@ function Tabs({
   const items: {
     id: Tab;
     label: string;
-    icon: React.ComponentType<{ className?: string }>;
+    icon: ComponentType<{ className?: string }>;
   }[] = [
-    { id: "draft", label: "Draft", icon: FileText },
+    { id: "post", label: "Post", icon: FileText },
     { id: "brief", label: "Brief", icon: BookOpen },
     { id: "outline", label: "Outline", icon: ListChecks },
     { id: "scorecards", label: "SEO & GEO", icon: Sparkles },
@@ -266,10 +300,10 @@ function Tabs({
             type="button"
             onClick={() => setTab(it.id)}
             className={cn(
-              "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] font-semibold",
+              "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] font-semibold transition",
               active
                 ? "bg-accent-soft text-haven-coral-700"
-                : "text-muted-foreground hover:text-foreground",
+                : "text-muted-foreground hover:bg-surface-alt/60 hover:text-foreground",
             )}
           >
             <Icon className="h-3.5 w-3.5" />
@@ -282,60 +316,9 @@ function Tabs({
 }
 
 // ---------------------------------------------------------------------------
-// Draft editor
+// Plain editors (Brief / Outline) — kept simple textareas, these are
+// internal scratch documents, not the published post.
 // ---------------------------------------------------------------------------
-
-function DraftEditor({ article }: { article: ContentArticle }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [body, setBody] = useState(article.body_md);
-  const dirty = body !== article.body_md;
-
-  // Re-sync when the underlying article changes (e.g. after agent suggestion applied)
-  useEffect(() => {
-    setBody(article.body_md);
-  }, [article.body_md]);
-
-  function save() {
-    startTransition(async () => {
-      const r = await updateArticle(article.id, { body_md: body });
-      if (!r.ok) {
-        toast.error(r.error);
-        return;
-      }
-      toast.success("Draft saved");
-      router.refresh();
-    });
-  }
-
-  const wc = countWords(body);
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-        <span>
-          {wc} words · {Math.max(1, Math.round(wc / 220))} min read
-        </span>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={save}
-          disabled={pending || !dirty}
-        >
-          <Save className="h-3.5 w-3.5" />
-          Save draft
-        </Button>
-      </div>
-      <textarea
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        className="min-h-[640px] w-full rounded-card border border-border bg-surface p-5 font-mono text-[13px] leading-6 text-foreground outline-none focus:border-haven-coral/40"
-        placeholder="# Section heading\n\nFirst-person Jack Zoppa, operator credibility, no em dashes, no exclamations."
-        spellCheck
-      />
-    </div>
-  );
-}
 
 function PlainEditor({
   article,
@@ -790,6 +773,8 @@ function StatusBadge({ status }: { status: ContentPublishJob["status"] }) {
 // Agent chat
 // ---------------------------------------------------------------------------
 
+type LocalMessage = ContentAgentMessage & { _optimistic?: boolean };
+
 function AgentChat({
   article,
   initialMessages,
@@ -802,11 +787,15 @@ function AgentChat({
   geoScore: number | null;
 }) {
   const router = useRouter();
-  const [messages, setMessages] = useState<ContentAgentMessage[]>(initialMessages);
+  const [messages, setMessages] = useState<LocalMessage[]>(initialMessages);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [applying, setApplying] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
+  // When the server-rendered messages change (e.g. router.refresh()),
+  // reseed the local list. We trust the server as the source of truth
+  // and keep optimistic messages only briefly.
   useEffect(() => {
     setMessages(initialMessages);
   }, [initialMessages]);
@@ -814,22 +803,49 @@ function AgentChat({
   useEffect(() => {
     const el = scrollerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+  }, [messages, sending]);
 
   async function send(prompt: string) {
-    if (!prompt.trim()) return;
+    const trimmed = prompt.trim();
+    if (!trimmed || sending) return;
     setSending(true);
+
+    // Optimistic user bubble — appears immediately.
+    const optimisticId = `opt_${Date.now()}`;
+    setMessages((m) => [
+      ...m,
+      {
+        id: optimisticId,
+        article_id: article.id,
+        role: "user",
+        content: trimmed,
+        suggestion: null,
+        applied: false,
+        author_id: null,
+        created_at: new Date().toISOString(),
+        _optimistic: true,
+      },
+    ]);
+    setInput("");
+
     try {
       const r = await sendAgentPrompt({
         article_id: article.id,
-        prompt: prompt.trim(),
+        prompt: trimmed,
       });
       if (!r.ok) {
         toast.error(r.error);
+        // Drop optimistic on failure.
+        setMessages((m) => m.filter((x) => x.id !== optimisticId));
         return;
       }
-      setMessages((m) => [...m, r.data.user_message, r.data.agent_message]);
-      setInput("");
+      // Replace optimistic with the real pair from the server, preserving
+      // earlier history. Order: existing (minus optimistic), user, agent.
+      setMessages((m) => [
+        ...m.filter((x) => x.id !== optimisticId),
+        r.data.user_message,
+        r.data.agent_message,
+      ]);
       router.refresh();
     } finally {
       setSending(false);
@@ -837,17 +853,27 @@ function AgentChat({
   }
 
   async function apply(messageId: string) {
-    const r = await applyAgentSuggestion(messageId);
-    if (!r.ok) {
-      toast.error(r.error);
-      return;
+    setApplying(messageId);
+    try {
+      const r = await applyAgentSuggestion(messageId);
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      // Mark this message as applied locally so the chip flips to
+      // "Applied" before the next refresh lands.
+      setMessages((m) =>
+        m.map((x) => (x.id === messageId ? { ...x, applied: true } : x)),
+      );
+      toast.success("Applied to draft");
+      router.refresh();
+    } finally {
+      setApplying(null);
     }
-    toast.success("Applied to article");
-    router.refresh();
   }
 
   return (
-    <div className="flex h-[860px] flex-col rounded-card border border-border bg-surface">
+    <div className="flex h-full max-h-[calc(100vh-6rem)] flex-col rounded-card border border-border bg-surface">
       <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-accent-soft text-haven-coral">
@@ -858,7 +884,7 @@ function AgentChat({
               Content agent
             </div>
             <div className="text-[10.5px] text-muted-foreground">
-              Local fallback active
+              Edits this article on the right
             </div>
           </div>
         </div>
@@ -870,20 +896,16 @@ function AgentChat({
 
       <div ref={scrollerRef} className="flex-1 overflow-y-auto px-3 py-3">
         {messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center">
-            <Sparkles className="h-5 w-5 text-haven-coral" />
-            <div className="text-[12.5px] font-semibold text-foreground">
-              Ask the agent for an edit
-            </div>
-            <div className="max-w-[260px] text-[11px] text-muted-foreground">
-              Try: "set the title to ...", "add a section about pricing
-              cadence", "score this", "add the Jack sign-off".
-            </div>
-          </div>
+          <ChatPrimer onChip={(s) => void send(s)} />
         ) : (
           <div className="flex flex-col gap-3">
             {messages.map((m) => (
-              <ChatBubble key={m.id} message={m} onApply={apply} />
+              <ChatBubble
+                key={m.id}
+                message={m}
+                onApply={apply}
+                applying={applying === m.id}
+              />
             ))}
             {sending ? (
               <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
@@ -896,8 +918,8 @@ function AgentChat({
       </div>
 
       <div className="border-t border-border p-2">
-        <div className="flex items-center gap-2">
-          <input
+        <div className="flex items-end gap-2">
+          <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -906,8 +928,9 @@ function AgentChat({
                 void send(input);
               }
             }}
-            placeholder="Tell the agent what to change…"
-            className="flex-1 rounded-md border border-border bg-surface-alt/30 px-2.5 py-2 text-[13px] outline-none focus:border-haven-coral/40"
+            rows={2}
+            placeholder="Tell the agent what to change in the post…"
+            className="flex-1 resize-none rounded-md border border-border bg-surface-alt/30 px-2.5 py-2 text-[13px] outline-none focus:border-haven-coral/40"
             disabled={sending}
           />
           <Button
@@ -920,18 +943,58 @@ function AgentChat({
           </Button>
         </div>
         <div className="mt-2 flex flex-wrap gap-1">
-          {["Score this", "Add Jack sign-off", "Remove em dashes"].map((s) => (
+          {QUICK_ACTIONS.map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => void send(s)}
               disabled={sending}
-              className="rounded-full border border-border bg-surface-alt/30 px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground hover:bg-surface-alt"
+              className="rounded-full border border-border bg-surface-alt/30 px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground hover:bg-surface-alt hover:text-foreground"
             >
               {s}
             </button>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+const QUICK_ACTIONS = [
+  "Make the title stronger",
+  "Add H2 sections",
+  "Rewrite the intro",
+  "Add an FAQ",
+  "Tighten the CTA",
+  "Improve SEO",
+  "More Jack voice",
+  "Score this",
+];
+
+function ChatPrimer({ onChip }: { onChip: (s: string) => void }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-3 text-center">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent-soft text-haven-coral">
+        <Sparkles className="h-5 w-5" />
+      </div>
+      <div className="text-[13px] font-bold text-foreground">
+        Edit the post on the right
+      </div>
+      <div className="max-w-[260px] text-[11.5px] text-muted-foreground">
+        Ask in plain English. I'll draft a change and you can apply it
+        with one click. The post on the right updates immediately.
+      </div>
+      <div className="mt-1 flex flex-wrap justify-center gap-1.5">
+        {QUICK_ACTIONS.slice(0, 4).map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => onChip(s)}
+            className="rounded-full border border-haven-coral/40 bg-accent-soft/40 px-2.5 py-1 text-[11px] font-semibold text-haven-coral-700 hover:bg-accent-soft/60"
+          >
+            {s}
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -960,11 +1023,16 @@ function ScoreTab({ label, score }: { label: string; score: number | null }) {
 function ChatBubble({
   message,
   onApply,
+  applying,
 }: {
-  message: ContentAgentMessage;
+  message: LocalMessage;
   onApply: (id: string) => void;
+  applying: boolean;
 }) {
   const isUser = message.role === "user";
+  const suggestionLabel = message.suggestion
+    ? suggestionKindLabel(message.suggestion.kind)
+    : null;
   return (
     <div className={cn("flex gap-2", isUser ? "justify-end" : "justify-start")}>
       <div
@@ -973,22 +1041,29 @@ function ChatBubble({
           isUser
             ? "bg-accent-soft text-foreground"
             : "border border-border bg-surface-alt/40 text-foreground",
+          message._optimistic ? "opacity-70" : "",
         )}
       >
-        <div>{message.content}</div>
+        <div className="whitespace-pre-wrap">{message.content}</div>
         {!isUser && message.suggestion ? (
-          <div className="mt-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {suggestionLabel ? (
+              <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {suggestionLabel}
+              </span>
+            ) : null}
             {message.applied ? (
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
-                <CheckCircle2 className="h-3 w-3" /> Applied
+                <CheckCircle2 className="h-3 w-3" /> Applied to draft
               </span>
             ) : message.suggestion.kind === "note" ? null : (
               <button
                 type="button"
                 onClick={() => onApply(message.id)}
-                className="rounded-md bg-haven-coral px-2 py-1 text-[11px] font-bold text-white hover:brightness-95"
+                disabled={applying}
+                className="rounded-md bg-haven-coral px-2 py-1 text-[11px] font-bold text-white hover:brightness-95 disabled:opacity-60"
               >
-                Apply suggestion
+                {applying ? "Applying…" : "Apply to draft"}
               </button>
             )}
           </div>
@@ -998,14 +1073,19 @@ function ChatBubble({
   );
 }
 
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-function countWords(s: string): number {
-  if (!s) return 0;
-  return s
-    .replace(/[#>*_`~\-]/g, " ")
-    .split(/\s+/)
-    .filter(Boolean).length;
+function suggestionKindLabel(kind: string): string {
+  switch (kind) {
+    case "set_title":
+      return "Title";
+    case "set_meta":
+      return "Meta";
+    case "replace_body":
+      return "Body";
+    case "append_section":
+      return "New section";
+    case "rewrite_paragraph":
+      return "Paragraph";
+    default:
+      return "Edit";
+  }
 }
