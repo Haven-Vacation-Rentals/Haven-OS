@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,7 @@ export function SurveyForm({ survey, questions }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [pending, startTransition] = useTransition();
+  const submittingRef = useRef(false);
 
   const handleAnswer = (qid: string, patch: AnswerState) => {
     setAnswers((prev) => ({ ...prev, [qid]: { ...prev[qid], ...patch } }));
@@ -40,6 +41,7 @@ export function SurveyForm({ survey, questions }: Props) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current || submitted) return;
     setError(null);
 
     if (!isAnonymous && survey.collect_email) {
@@ -71,31 +73,52 @@ export function SurveyForm({ survey, questions }: Props) {
     const payload: PublicAnswerInput[] = questions.map((q) => {
       const a = answers[q.id] ?? {};
       const t = q.question_type as QuestionType;
+      const text =
+        (t === "short_text" || t === "long_text") && typeof a.text === "string"
+          ? a.text.trim() || null
+          : null;
       return {
         question_id: q.id,
-        value_text: t === "short_text" || t === "long_text" ? a.text ?? null : null,
+        value_text: text,
         value_choice:
           t === "single_choice" || t === "yes_no" ? a.choice ?? null : null,
-        value_choices: t === "multi_choice" ? a.choices ?? null : null,
-        value_number: t === "rating" ? a.number ?? null : null,
+        value_choices:
+          t === "multi_choice" && Array.isArray(a.choices) ? a.choices : null,
+        value_number:
+          t === "rating" && typeof a.number === "number" ? a.number : null,
       };
     });
 
+    submittingRef.current = true;
     startTransition(async () => {
       try {
-        await submitSurveyResponse({
+        const result = await submitSurveyResponse({
           survey_id: survey.id,
           slug: survey.slug,
           respondent_name: isAnonymous ? undefined : name,
           respondent_email: isAnonymous ? undefined : email,
           respondent_department: isAnonymous ? undefined : department,
           is_anonymous: isAnonymous,
-          user_agent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
+          user_agent:
+            typeof navigator !== "undefined" ? navigator.userAgent : undefined,
           answers: payload,
         });
-        setSubmitted(true);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        if (result?.ok) {
+          setSubmitted(true);
+        } else {
+          setError(
+            (result && "error" in result && result.error) ||
+              "Something went wrong submitting your response. Please try again.",
+          );
+        }
+      } catch {
+        // Server actions in production strip error details and surface as
+        // an opaque digest error. Show a friendly message instead.
+        setError(
+          "Something went wrong submitting your response. Please try again.",
+        );
+      } finally {
+        submittingRef.current = false;
       }
     });
   };
@@ -194,7 +217,7 @@ export function SurveyForm({ survey, questions }: Props) {
           type="submit"
           variant="cta"
           size="lg"
-          disabled={pending}
+          disabled={pending || submitted}
           className="w-full sm:w-auto"
         >
           {pending ? "Submitting…" : "Submit response"}

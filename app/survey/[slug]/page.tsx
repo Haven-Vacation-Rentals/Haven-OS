@@ -10,13 +10,18 @@ export async function generateMetadata({
 }: {
   params: Promise<{ slug: string }>;
 }) {
-  const { slug } = await params;
-  const view = await getPublicSurveyBySlug(slug);
-  if (!view) return { title: "Survey — Haven Vacation Rentals" };
-  return {
-    title: `${view.survey.title} — Haven Survey`,
-    description: view.survey.description || `Share your feedback with Haven.`,
-  };
+  try {
+    const { slug } = await params;
+    const view = await getPublicSurveyBySlug(slug);
+    if (!view) return { title: "Survey — Haven Vacation Rentals" };
+    return {
+      title: `${view.survey.title} — Haven Survey`,
+      description:
+        view.survey.description || `Share your feedback with Haven.`,
+    };
+  } catch {
+    return { title: "Survey — Haven Vacation Rentals" };
+  }
 }
 
 export default async function SurveyLandingPage({

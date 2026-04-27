@@ -602,24 +602,36 @@ export type PublicSurveyView = {
 export async function getPublicSurveyBySlug(
   slug: string,
 ): Promise<PublicSurveyView | null> {
-  const supabase = await db();
-  const { data: survey } = await supabase
-    .from("hr_surveys")
-    .select("*")
-    .eq("slug", slug)
-    .maybeSingle();
-  if (!survey) return null;
-  const s = survey as DbHrSurvey;
-  if (s.status !== "active") return { survey: s, questions: [] };
-  const { data: qs } = await supabase
-    .from("hr_survey_questions")
-    .select("*")
-    .eq("survey_id", s.id)
-    .is("archived_at", null)
-    .order("position", { ascending: true });
-  const questions = ((qs ?? []) as DbHrSurveyQuestion[]).map(normaliseQuestion);
-  return { survey: s, questions };
+  // Public Server Component fetch — never throw, so the page always renders
+  // an "Unavailable" state instead of the production digest error.
+  try {
+    if (!slug || typeof slug !== "string") return null;
+    const supabase = await createClient();
+    if (!supabase) return null;
+    const { data: survey } = await supabase
+      .from("hr_surveys")
+      .select("*")
+      .eq("slug", slug)
+      .maybeSingle();
+    if (!survey) return null;
+    const s = survey as DbHrSurvey;
+    if (s.status !== "active") return { survey: s, questions: [] };
+    const { data: qs } = await supabase
+      .from("hr_survey_questions")
+      .select("*")
+      .eq("survey_id", s.id)
+      .is("archived_at", null)
+      .order("position", { ascending: true });
+    const questions = ((qs ?? []) as DbHrSurveyQuestion[]).map(normaliseQuestion);
+    return { survey: s, questions };
+  } catch {
+    return null;
+  }
 }
+
+export type SubmitSurveyResult =
+  | { ok: true }
+  | { ok: false; error: string };
 
 export async function submitSurveyResponse(input: {
   survey_id: string;
@@ -630,53 +642,118 @@ export async function submitSurveyResponse(input: {
   is_anonymous?: boolean;
   user_agent?: string;
   answers: PublicAnswerInput[];
-}): Promise<{ ok: true }> {
-  const supabase = await db();
+}): Promise<SubmitSurveyResult> {
+  // This is the public, anonymous submission path. It must NEVER throw
+  // back to the client — a throw turns into an opaque "Server Components
+  // render" error in production builds. Return a tagged result instead so
+  // the form can show a friendly inline message.
+  try {
+    if (!input?.survey_id || typeof input.survey_id !== "string") {
+      return { ok: false, error: "Missing survey id." };
+    }
+    if (!Array.isArray(input.answers)) {
+      return { ok: false, error: "Invalid answers payload." };
+    }
 
-  // Defence in depth — re-verify the survey is active.
-  const { data: survey } = await supabase
-    .from("hr_surveys")
-    .select("id, status, anonymous_allowed")
-    .eq("id", input.survey_id)
-    .maybeSingle();
-  if (!survey || (survey as { status: string }).status !== "active") {
-    throw new Error("This survey is no longer accepting responses.");
+    const supabase = await createClient();
+    if (!supabase) {
+      return {
+        ok: false,
+        error: "Survey service is temporarily unavailable. Please try again.",
+      };
+    }
+
+    // Defence in depth — re-verify the survey is active.
+    const { data: survey, error: surveyErr } = await supabase
+      .from("hr_surveys")
+      .select("id, status, anonymous_allowed")
+      .eq("id", input.survey_id)
+      .maybeSingle();
+    if (surveyErr) {
+      return { ok: false, error: "Could not verify the survey. Please try again." };
+    }
+    if (!survey || (survey as { status: string }).status !== "active") {
+      return {
+        ok: false,
+        error: "This survey is no longer accepting responses.",
+      };
+    }
+
+    const allowAnon = (survey as { anonymous_allowed: boolean }).anonymous_allowed;
+    const isAnon = !!input.is_anonymous;
+    if (isAnon && !allowAnon) {
+      return {
+        ok: false,
+        error: "Anonymous responses are not allowed for this survey.",
+      };
+    }
+
+    const { data: resp, error } = await supabase
+      .from("hr_survey_responses")
+      .insert({
+        survey_id: input.survey_id,
+        respondent_name: isAnon ? null : input.respondent_name?.trim() || null,
+        respondent_email: isAnon ? null : input.respondent_email?.trim() || null,
+        respondent_department: isAnon
+          ? null
+          : input.respondent_department?.trim() || null,
+        is_anonymous: isAnon,
+        user_agent: input.user_agent ?? null,
+      })
+      .select("id")
+      .single();
+    if (error || !resp) {
+      return {
+        ok: false,
+        error: "We couldn't save your response. Please try again.",
+      };
+    }
+
+    if (input.answers.length > 0) {
+      const rows = input.answers
+        .filter((a) => a && typeof a.question_id === "string" && a.question_id)
+        .map((a) => ({
+          response_id: (resp as { id: string }).id,
+          question_id: a.question_id,
+          value_text:
+            typeof a.value_text === "string" ? a.value_text : null,
+          value_choice:
+            typeof a.value_choice === "string" ? a.value_choice : null,
+          value_choices: Array.isArray(a.value_choices)
+            ? a.value_choices.filter((v) => typeof v === "string")
+            : null,
+          value_number:
+            typeof a.value_number === "number" && Number.isFinite(a.value_number)
+              ? a.value_number
+              : null,
+        }));
+      if (rows.length > 0) {
+        const { error: aErr } = await supabase
+          .from("hr_survey_answers")
+          .insert(rows);
+        if (aErr) {
+          return {
+            ok: false,
+            error: "We couldn't save your answers. Please try again.",
+          };
+        }
+      }
+    }
+
+    // Best-effort revalidation — never let a revalidate failure break the
+    // submission acknowledgement to the user.
+    try {
+      revalidatePath(`/hr/surveys/${input.survey_id}`);
+      revalidatePath(`/survey/${input.slug}`);
+    } catch {
+      // ignore
+    }
+
+    return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      error: "Something went wrong submitting your response. Please try again.",
+    };
   }
-
-  const allowAnon = (survey as { anonymous_allowed: boolean }).anonymous_allowed;
-  const isAnon = !!input.is_anonymous;
-  if (isAnon && !allowAnon) {
-    throw new Error("Anonymous responses are not allowed for this survey.");
-  }
-
-  const { data: resp, error } = await supabase
-    .from("hr_survey_responses")
-    .insert({
-      survey_id: input.survey_id,
-      respondent_name: isAnon ? null : input.respondent_name?.trim() || null,
-      respondent_email: isAnon ? null : input.respondent_email?.trim() || null,
-      respondent_department: isAnon ? null : input.respondent_department?.trim() || null,
-      is_anonymous: isAnon,
-      user_agent: input.user_agent ?? null,
-    })
-    .select()
-    .single();
-  if (error) throw error;
-
-  if (input.answers.length > 0) {
-    const rows = input.answers.map((a) => ({
-      response_id: (resp as { id: string }).id,
-      question_id: a.question_id,
-      value_text: a.value_text ?? null,
-      value_choice: a.value_choice ?? null,
-      value_choices: a.value_choices ?? null,
-      value_number: a.value_number ?? null,
-    }));
-    const { error: aErr } = await supabase.from("hr_survey_answers").insert(rows);
-    if (aErr) throw aErr;
-  }
-
-  revalidatePath(`/hr/surveys/${input.survey_id}`);
-  revalidatePath(`/survey/${input.slug}`);
-  return { ok: true };
 }
