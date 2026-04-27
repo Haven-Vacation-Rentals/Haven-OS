@@ -65,7 +65,9 @@ export default async function LoginPage({
                     ? "Sign-in didn't complete. Please try again."
                     : error === "not_configured"
                       ? "Supabase is not configured yet."
-                      : decodeURIComponent(error)}
+                      : error === "auth_session_expired"
+                        ? "Your sign-in session expired. We've cleared it — please try again."
+                        : decodeURIComponent(error)}
                 </span>
               </div>
             ) : null}
