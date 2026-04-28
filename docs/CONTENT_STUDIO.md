@@ -185,24 +185,35 @@ explicitly invoked by an admin from the Publish tab — fires it.
   link to the WP draft when available.
 
 Stage selector in the workspace header advances the topic through the
-lifecycle: idea → research → brief → outline → draft → optimize →
-review → wordpress_draft → published → monitor.
+lifecycle: Idea → In Progress → Draft → Complete.
 
 ---
 
 ## Workflow
 
 ```
-idea  →  research  →  brief  →  outline  →  draft
-                                              ↓
-monitor  ←  published  ←  wordpress_draft  ←  review  ←  optimize
+Idea  →  In Progress  →  Draft  →  Complete
 ```
+
+- **Idea** — backlog. Default for new topics.
+- **In Progress** — actively being researched, briefed, outlined, or
+  optimized. Running an SEO pass on an Idea-stage topic auto-advances
+  it here.
+- **Draft** — a full article body is on the post canvas. Pasted-draft
+  imports land here.
+- **Complete** — shipped. The WordPress publish action auto-advances
+  to Complete on success.
 
 Each stage advances by either:
 
-1. Jack picking the new stage from the workspace header dropdown, or
-2. The publish action firing successfully (auto-advances to
-   `wordpress_draft`).
+1. Jack picking the new stage from the workspace header dropdown,
+2. Dragging the card across the pipeline columns, or
+3. An action firing (SEO optimize → In Progress; WordPress draft
+   created → Complete).
+
+Topics can also be deleted from the pipeline directly via the trash
+icon on each card (with a confirm dialog), or archived via
+`archiveTopic` for reversible removal.
 
 ---
 

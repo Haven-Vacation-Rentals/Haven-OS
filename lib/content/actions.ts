@@ -14,6 +14,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdminOrAbove } from "@/lib/auth/permissions";
 import {
+  mapLegacyStage,
   type ContentArticle,
   type ContentArticleVersion,
   type ContentAgentMessage,
@@ -76,7 +77,7 @@ function rowToTopic(r: Record<string, unknown>): ContentTopic {
     title: r.title as string,
     working_title: (r.working_title as string | null) ?? null,
     pillar: r.pillar as ContentPillar,
-    stage: r.stage as ContentTopicStage,
+    stage: mapLegacyStage(r.stage as string | null),
     priority: r.priority as ContentPriority,
     target_keyword: (r.target_keyword as string | null) ?? null,
     secondary_keywords: (r.secondary_keywords as string[] | null) ?? [],
@@ -368,6 +369,31 @@ export async function setTopicStage(
   stage: ContentTopicStage,
 ): Promise<Result<ContentTopic>> {
   return updateTopic(topicId, { stage });
+}
+
+/**
+ * Hard-delete a topic and everything attached to it (article, versions,
+ * research, scorecards, agent messages, publish jobs all cascade via
+ * the FK on content_articles -> topic_id and the topic-scoped FKs).
+ *
+ * Surfaced from the pipeline as a confirmed action — Jack asked for an
+ * easier way to drop ideas out of the backlog. `archiveTopic` remains
+ * available for reversible removal.
+ */
+export async function deleteTopic(topicId: string): Promise<Result<true>> {
+  try {
+    await requireAdminOrAbove();
+    const supabase = await db();
+    const { error } = await supabase
+      .from("content_topics")
+      .delete()
+      .eq("id", topicId);
+    if (error) return { ok: false, error: error.message };
+    revalidatePath(CONTENT_PATH, "layout");
+    return { ok: true, data: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -904,7 +930,7 @@ export async function queueWordPressDraft(
       // Move the topic forward.
       await supabase
         .from("content_topics")
-        .update({ stage: "wordpress_draft" })
+        .update({ stage: "complete" })
         .eq("id", article.topic_id);
     } else {
       const status: ContentPublishStatus =
@@ -1208,13 +1234,12 @@ export async function optimizeArticleSeo(input: {
       .update({ seo_score: seo.score, geo_score: geo.score })
       .eq("id", article.id);
 
-    // Move topic to "optimize" if it isn't past it yet.
-    if (
-      ["idea", "research", "brief", "outline", "draft"].includes(topic.stage)
-    ) {
+    // Move topic to "in_progress" if it's still in the early stages —
+    // running an SEO pass means real work has started.
+    if (topic.stage === "idea") {
       await supabase
         .from("content_topics")
-        .update({ stage: "optimize" })
+        .update({ stage: "in_progress" })
         .eq("id", topic.id);
     }
 

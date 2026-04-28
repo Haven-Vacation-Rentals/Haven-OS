@@ -16,16 +16,53 @@ export type ContentPillar =
 
 export type ContentTopicStage =
   | "idea"
+  | "in_progress"
+  | "draft"
+  | "complete"
+  | "archived";
+
+/**
+ * Legacy stages from the original Content Studio pipeline. Old rows or
+ * old API payloads may still arrive carrying these values; map them to
+ * the simplified four-stage pipeline before they hit the UI.
+ */
+export type LegacyContentTopicStage =
   | "research"
   | "brief"
   | "outline"
-  | "draft"
   | "optimize"
   | "review"
   | "wordpress_draft"
   | "published"
-  | "monitor"
-  | "archived";
+  | "monitor";
+
+const LEGACY_STAGE_MAP: Record<LegacyContentTopicStage, ContentTopicStage> = {
+  research: "in_progress",
+  brief: "in_progress",
+  outline: "in_progress",
+  optimize: "in_progress",
+  review: "complete",
+  wordpress_draft: "complete",
+  published: "complete",
+  monitor: "complete",
+};
+
+export function mapLegacyStage(value: string | null | undefined): ContentTopicStage {
+  if (!value) return "idea";
+  if (value in LEGACY_STAGE_MAP) {
+    return LEGACY_STAGE_MAP[value as LegacyContentTopicStage];
+  }
+  if (
+    value === "idea" ||
+    value === "in_progress" ||
+    value === "draft" ||
+    value === "complete" ||
+    value === "archived"
+  ) {
+    return value;
+  }
+  return "idea";
+}
 
 export type ContentPriority = "low" | "medium" | "high" | "urgent";
 
@@ -50,29 +87,17 @@ export const PILLAR_LABELS: Record<ContentPillar, string> = {
 
 export const STAGE_LABELS: Record<ContentTopicStage, string> = {
   idea: "Idea",
-  research: "Research",
-  brief: "Brief",
-  outline: "Outline",
+  in_progress: "In Progress",
   draft: "Draft",
-  optimize: "Optimize",
-  review: "Jack review",
-  wordpress_draft: "WP draft",
-  published: "Published",
-  monitor: "Monitor",
+  complete: "Complete",
   archived: "Archived",
 };
 
 export const STAGE_ORDER: ContentTopicStage[] = [
   "idea",
-  "research",
-  "brief",
-  "outline",
+  "in_progress",
   "draft",
-  "optimize",
-  "review",
-  "wordpress_draft",
-  "published",
-  "monitor",
+  "complete",
 ];
 
 export const PRIORITY_LABELS: Record<ContentPriority, string> = {

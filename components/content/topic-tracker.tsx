@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -9,6 +9,7 @@ import {
   KanbanSquare,
   ListIcon,
   ArrowRight,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -25,6 +26,14 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
   PILLAR_LABELS,
@@ -36,7 +45,7 @@ import {
   type ContentTopicStage,
   type TopicWithArticle,
 } from "@/lib/content/types";
-import { setTopicStage } from "@/lib/content/actions";
+import { deleteTopic, setTopicStage } from "@/lib/content/actions";
 import { CreateTopicDialog } from "@/components/content/create-topic-dialog";
 import { StudioChat } from "@/components/content/studio-chat";
 
@@ -51,24 +60,12 @@ const PRIORITY_TONE: Record<ContentPriority, string> = {
 
 const STAGE_TONE: Record<ContentTopicStage, string> = {
   idea: "bg-sky-50 text-sky-800 border-sky-200 dark:bg-sky-900/30 dark:text-sky-200",
-  research:
-    "bg-violet-50 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-200",
-  brief:
-    "bg-indigo-50 text-indigo-800 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-200",
-  outline:
+  in_progress:
     "bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-200",
   draft:
     "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200",
-  optimize:
-    "bg-orange-50 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-200",
-  review:
-    "bg-haven-coral/10 text-haven-coral-700 border-haven-coral/30",
-  wordpress_draft:
-    "bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-200",
-  published:
+  complete:
     "bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-100",
-  monitor:
-    "bg-teal-50 text-teal-800 border-teal-200 dark:bg-teal-900/30 dark:text-teal-200",
   archived:
     "bg-surface-alt text-muted-foreground border-border opacity-70",
 };
@@ -80,9 +77,14 @@ export function TopicTracker({
   space: ContentSpace;
   topics: TopicWithArticle[];
 }) {
+  const router = useRouter();
   const [view, setView] = useState<View>("pipeline");
   const [createOpen, setCreateOpen] = useState(false);
   const [pillarFilter, setPillarFilter] = useState<ContentPillar | "all">("all");
+  const [pendingDelete, setPendingDelete] = useState<TopicWithArticle | null>(
+    null,
+  );
+  const [, startTransition] = useTransition();
 
   // Local board state so DnD updates feel instant. Resyncs whenever the
   // server-rendered topics change (after revalidation).
@@ -103,6 +105,30 @@ export function TopicTracker({
     setBoard((curr) =>
       curr.map((t) => (t.id === topicId ? { ...t, stage: nextStage } : t)),
     );
+  };
+
+  const requestDelete = (topic: TopicWithArticle) => {
+    setPendingDelete(topic);
+  };
+
+  const confirmDelete = () => {
+    const target = pendingDelete;
+    if (!target) return;
+    setPendingDelete(null);
+    // Optimistic remove.
+    setBoard((curr) => curr.filter((t) => t.id !== target.id));
+    startTransition(async () => {
+      const r = await deleteTopic(target.id);
+      if (!r.ok) {
+        // Roll back by re-injecting at the end; the next router.refresh
+        // will re-establish the canonical order.
+        setBoard((curr) => [...curr, target]);
+        toast.error(r.error || "Failed to delete topic");
+        return;
+      }
+      toast.success(`Deleted "${target.title}"`);
+      router.refresh();
+    });
   };
 
   return (
@@ -126,9 +152,13 @@ export function TopicTracker({
       {filtered.length === 0 ? (
         <EmptyState onCreate={() => setCreateOpen(true)} />
       ) : view === "pipeline" ? (
-        <PipelineView topics={filtered} onMove={moveTopic} />
+        <PipelineView
+          topics={filtered}
+          onMove={moveTopic}
+          onDelete={requestDelete}
+        />
       ) : view === "list" ? (
-        <ListView topics={filtered} />
+        <ListView topics={filtered} onDelete={requestDelete} />
       ) : (
         <CalendarView topics={filtered} />
       )}
@@ -137,6 +167,12 @@ export function TopicTracker({
         open={createOpen}
         onOpenChange={setCreateOpen}
         spaceId={space.id}
+      />
+
+      <DeleteTopicDialog
+        topic={pendingDelete}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={confirmDelete}
       />
     </div>
   );
@@ -210,12 +246,14 @@ function PillarFilter({
 function PipelineView({
   topics,
   onMove,
+  onDelete,
 }: {
   topics: TopicWithArticle[];
   onMove: (topicId: string, stage: ContentTopicStage) => void;
+  onDelete: (topic: TopicWithArticle) => void;
 }) {
   const router = useRouter();
-  const stages = STAGE_ORDER.filter((s) => s !== "monitor");
+  const stages = STAGE_ORDER;
   const grouped = new Map<ContentTopicStage, TopicWithArticle[]>();
   for (const s of stages) grouped.set(s, []);
   for (const t of topics) {
@@ -296,13 +334,16 @@ function PipelineView({
                 stage={stage}
                 items={items}
                 activeId={activeId}
+                onDelete={onDelete}
               />
             );
           })}
         </div>
       </div>
       <DragOverlay dropAnimation={null}>
-        {activeTopic ? <TopicCard topic={activeTopic} isOverlay /> : null}
+        {activeTopic ? (
+          <TopicCard topic={activeTopic} isOverlay onDelete={null} />
+        ) : null}
       </DragOverlay>
     </DndContext>
   );
@@ -312,10 +353,12 @@ function PipelineColumn({
   stage,
   items,
   activeId,
+  onDelete,
 }: {
   stage: ContentTopicStage;
   items: TopicWithArticle[];
   activeId: string | null;
+  onDelete: (topic: TopicWithArticle) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: stage,
@@ -351,6 +394,7 @@ function PipelineColumn({
             topic={t}
             stage={stage}
             isOverlayActive={activeId === t.id}
+            onDelete={onDelete}
           />
         ))}
         {items.length === 0 ? (
@@ -374,10 +418,12 @@ function DraggableTopicCard({
   topic,
   stage,
   isOverlayActive,
+  onDelete,
 }: {
   topic: TopicWithArticle;
   stage: ContentTopicStage;
   isOverlayActive: boolean;
+  onDelete: (topic: TopicWithArticle) => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: topic.id,
@@ -391,7 +437,7 @@ function DraggableTopicCard({
       style={{ opacity: isDragging || isOverlayActive ? 0.4 : 1 }}
       className="touch-none cursor-grab rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-haven-coral/40 active:cursor-grabbing"
     >
-      <TopicCard topic={topic} />
+      <TopicCard topic={topic} onDelete={onDelete} />
     </div>
   );
 }
@@ -399,59 +445,89 @@ function DraggableTopicCard({
 function TopicCard({
   topic,
   isOverlay,
+  onDelete,
 }: {
   topic: TopicWithArticle;
   isOverlay?: boolean;
+  onDelete: ((topic: TopicWithArticle) => void) | null;
 }) {
   // The whole card drags via PointerSensor with a 6px activation
   // distance, so a click still navigates. We use Link for native
-  // accessibility (Enter, middle-click open in new tab, etc.).
+  // accessibility (Enter, middle-click open in new tab, etc.). The
+  // delete button is a sibling button absolutely positioned on top of
+  // the link, so it can stop propagation cleanly.
   return (
-    <Link
-      href={`/content/${topic.id}` as never}
-      draggable={false}
-      onDragStart={(e) => e.preventDefault()}
+    <div
       className={cn(
-        "group flex flex-col gap-1.5 rounded-md border border-border bg-surface p-3 shadow-card transition hover:border-haven-coral/40 hover:shadow-card-hover",
-        isOverlay && "rotate-1 border-haven-coral/40 shadow-card-hover",
+        "group relative rounded-md",
+        isOverlay && "rotate-1",
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <span className="line-clamp-2 text-[13px] font-semibold text-foreground">
-          {topic.title}
-        </span>
-        <span
-          className={cn(
-            "shrink-0 rounded-full border px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wider",
-            PRIORITY_TONE[topic.priority],
-          )}
+      <Link
+        href={`/content/${topic.id}` as never}
+        draggable={false}
+        onDragStart={(e) => e.preventDefault()}
+        className={cn(
+          "flex flex-col gap-1.5 rounded-md border border-border bg-surface p-3 pr-8 shadow-card transition hover:border-haven-coral/40 hover:shadow-card-hover",
+          isOverlay && "border-haven-coral/40 shadow-card-hover",
+        )}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <span className="line-clamp-2 text-[13px] font-semibold text-foreground">
+            {topic.title}
+          </span>
+          <span
+            className={cn(
+              "shrink-0 rounded-full border px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wider",
+              PRIORITY_TONE[topic.priority],
+            )}
+          >
+            {topic.priority}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span>{PILLAR_LABELS[topic.pillar]}</span>
+          {topic.target_keyword ? (
+            <>
+              <span>·</span>
+              <span className="truncate">{topic.target_keyword}</span>
+            </>
+          ) : null}
+        </div>
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="text-muted-foreground">
+            {topic.publish_target
+              ? `Publish ${formatDate(topic.publish_target)}`
+              : topic.due_date
+                ? `Due ${formatDate(topic.due_date)}`
+                : "—"}
+          </span>
+          <ScoreBadges
+            seo={topic.article?.seo_score ?? null}
+            geo={topic.article?.geo_score ?? null}
+          />
+        </div>
+      </Link>
+      {onDelete ? (
+        <button
+          type="button"
+          aria-label={`Delete topic "${topic.title}"`}
+          title="Delete topic"
+          // Stop the drag/link propagation so this button is its own
+          // hit target.
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onDelete(topic);
+          }}
+          className="absolute right-1.5 top-1.5 hidden rounded p-1 text-muted-foreground transition-colors hover:bg-haven-coral/10 hover:text-haven-coral focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-haven-coral/40 group-hover:block"
         >
-          {topic.priority}
-        </span>
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-        <span>{PILLAR_LABELS[topic.pillar]}</span>
-        {topic.target_keyword ? (
-          <>
-            <span>·</span>
-            <span className="truncate">{topic.target_keyword}</span>
-          </>
-        ) : null}
-      </div>
-      <div className="flex items-center justify-between text-[11px]">
-        <span className="text-muted-foreground">
-          {topic.publish_target
-            ? `Publish ${formatDate(topic.publish_target)}`
-            : topic.due_date
-              ? `Due ${formatDate(topic.due_date)}`
-              : "—"}
-        </span>
-        <ScoreBadges
-          seo={topic.article?.seo_score ?? null}
-          geo={topic.article?.geo_score ?? null}
-        />
-      </div>
-    </Link>
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -492,7 +568,13 @@ function ScorePill({ label, value }: { label: string; value: number }) {
 
 // ---------------------------------------------------------------------------
 
-function ListView({ topics }: { topics: TopicWithArticle[] }) {
+function ListView({
+  topics,
+  onDelete,
+}: {
+  topics: TopicWithArticle[];
+  onDelete: (topic: TopicWithArticle) => void;
+}) {
   return (
     <div className="overflow-hidden rounded-card border border-border bg-surface">
       <table className="w-full text-[13px]">
@@ -512,7 +594,7 @@ function ListView({ topics }: { topics: TopicWithArticle[] }) {
           {topics.map((t) => (
             <tr
               key={t.id}
-              className="border-t border-border hover:bg-surface-alt/30"
+              className="group border-t border-border hover:bg-surface-alt/30"
             >
               <td className="max-w-[360px] px-3 py-2">
                 <div className="line-clamp-1 font-semibold text-foreground">
@@ -560,19 +642,79 @@ function ListView({ topics }: { topics: TopicWithArticle[] }) {
                 />
               </td>
               <td className="px-3 py-2 text-right">
-                <Link
-                  href={`/content/${t.id}` as never}
-                  className="inline-flex items-center gap-1 text-[12px] font-semibold text-haven-coral hover:underline"
-                >
-                  Open
-                  <ArrowRight className="h-3 w-3" />
-                </Link>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    aria-label={`Delete topic "${t.title}"`}
+                    title="Delete topic"
+                    onClick={() => onDelete(t)}
+                    className="hidden rounded p-1 text-muted-foreground transition-colors hover:bg-haven-coral/10 hover:text-haven-coral focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-haven-coral/40 group-hover:inline-flex"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                  <Link
+                    href={`/content/${t.id}` as never}
+                    className="inline-flex items-center gap-1 text-[12px] font-semibold text-haven-coral hover:underline"
+                  >
+                    Open
+                    <ArrowRight className="h-3 w-3" />
+                  </Link>
+                </div>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+function DeleteTopicDialog({
+  topic,
+  onCancel,
+  onConfirm,
+}: {
+  topic: TopicWithArticle | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const open = !!topic;
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onCancel();
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete this topic?</DialogTitle>
+          <DialogDescription>
+            {topic ? (
+              <>
+                "{topic.title}" and its draft, research, scorecards, and
+                publish history will be removed. This can't be undone.
+              </>
+            ) : null}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={onConfirm}
+            className="bg-haven-coral text-white hover:bg-haven-coral-700"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete topic
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
