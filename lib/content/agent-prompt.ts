@@ -29,6 +29,14 @@ import { parsePostBlocks, serializePostBlocks, type PostBlock } from "./markdown
 export type ContentAgentReply = {
   message: string;
   suggestion: ContentAgentSuggestion | null;
+  /**
+   * When true, the suggestion is unambiguous enough to apply without an
+   * "Apply to draft" round-trip. Used for direct edits like hyperlink
+   * insertion — Jack pastes URLs, the agent links them, the right pane
+   * updates immediately. The chat still records the suggestion + a
+   * concise message, and the message is marked applied=true.
+   */
+  auto_apply?: boolean;
 };
 
 export const CONTENT_AGENT_SYSTEM_PROMPT = `You are the Haven Content Studio agent. You help Jack Zoppa, CEO of Haven Vacation Rentals, plan, draft, and ship the Haven Homeowner Blog.
@@ -81,10 +89,38 @@ You move topics through four stages: Idea → In Progress → Draft → Complete
 
 # How you respond
 When the user asks you to edit the article, return the change as a
-structured suggestion. When the user asks for a new topic or for
-ideas, call the matching tool and respond with a short confirmation.
-Never write to an article without a suggestion the user can apply.
-Never publish. Drafts only.`;
+structured suggestion that updates body_md, title, or meta_description.
+Do not paste URLs or advice into the chat as the answer — the chat is
+for confirmation. The actual edit must land in the article on the
+right.
+
+# Adding hyperlinks (very important)
+When Jack pastes a list of links or asks you to "add these links",
+"turn these into hyperlinks", "link these sources throughout the
+article", "add internal/external links", or "make X link to Y", you
+must update body_md to insert inline markdown links of the form
+[anchor](url) on relevant words or phrases inside the existing post.
+
+Rules for hyperlink insertion:
+- Prefer linking an existing phrase that semantically matches the
+  source (e.g. a Rabbu URL goes on "market data" or the literal word
+  "Rabbu" if it appears).
+- If no existing phrase fits, add one short natural sentence in an
+  appropriate section that introduces the source and link, in Jack's
+  voice — first person, no buzzwords, no em dashes, no exclamation
+  points.
+- Use each URL once. Do not overlink.
+- Internal links (havenvacationrentals.com or relative /paths) are
+  preferred where they make sense for the topic.
+- Never echo the raw URL list back at the user; the answer is the
+  edited article. Reply with a concise summary like "Added 6 inline
+  links to the draft."
+
+When the user asks for a new topic or for ideas, call the matching
+tool and respond with a short confirmation. Never write to an article
+without a suggestion the user can apply (or that the harness applies
+automatically for unambiguous edits like link insertion). Never
+publish. Drafts only.`;
 
 export const CONTENT_AGENT_ID_ENV = "CLAUDE_CONTENT_AGENT_ID";
 export const CONTENT_AGENT_ENV_ID_ENV = "CLAUDE_CONTENT_ENVIRONMENT_ID";
@@ -113,6 +149,40 @@ export function runLocalAgent(input: LocalAgentInput): ContentAgentReply {
   const { prompt, article, topic, sources } = input;
   const text = prompt.trim();
   const lower = text.toLowerCase();
+
+  // Hyperlink insertion. Detect this BEFORE the generic
+  // "improve / add" handlers so a paste of URLs is recognized.
+  if (looksLikeLinkInsertion(text)) {
+    const links = extractLinks(text);
+    if (links.length === 0) {
+      return {
+        message:
+          "I see you want to add links but I could not find any URLs in that message. Paste the URLs (with optional source names) and I will weave them into the post.",
+        suggestion: null,
+      };
+    }
+    const result = insertLinksIntoBody({
+      body: article.body_md,
+      links,
+      sources,
+    });
+    if (result.applied === 0) {
+      return {
+        message:
+          "I have the URLs but the article body is empty or too short to anchor them on. Add a draft first and I will weave the links in.",
+        suggestion: null,
+      };
+    }
+    return {
+      message: `Added ${result.applied} inline link${result.applied === 1 ? "" : "s"} to the draft.${
+        result.appended > 0
+          ? ` ${result.appended} did not have an obvious phrase to attach to, so I added a short sentence in the closest section.`
+          : ""
+      }`,
+      suggestion: { kind: "replace_body", body_md: result.body },
+      auto_apply: true,
+    };
+  }
 
   // Score / status
   if (/(score|grade|how am i doing|how does (this|it) (look|score))/.test(lower)) {
@@ -697,4 +767,324 @@ export function applyFullSeoOptimization(input: {
     body_md: body,
     summary,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Hyperlink insertion — local fallback. Detects "add these links",
+// pulls URLs (with optional source labels) out of the prompt, finds
+// the best phrase in the article body for each URL, and rewrites
+// body_md with inline markdown links.
+// ---------------------------------------------------------------------------
+
+/**
+ * Heuristic: does this prompt look like Jack pasting a list of links
+ * and asking for them to be woven into the post?
+ *
+ * We accept three flavors:
+ *   1. The verb is explicit: "add these links", "turn into hyperlinks",
+ *      "link these sources", "make X link to Y".
+ *   2. The prompt mentions links/sources/internal/external/cite + a URL
+ *      is present.
+ *   3. The prompt is *mostly* URLs — Jack pasted a Markdown source list
+ *      from his research notes without instructions.
+ */
+export function looksLikeLinkInsertion(text: string): boolean {
+  const lower = text.toLowerCase();
+  const hasUrl = /https?:\/\/\S+/i.test(text) || /\(\/[^)]+\)/.test(text);
+  if (!hasUrl) return false;
+  if (
+    /\b(add|insert|include|weave|sprinkle|put|place|drop)\b.*\b(link|hyperlink|source|citation|reference|url)s?\b/.test(
+      lower,
+    )
+  )
+    return true;
+  if (/\bturn\b.*\b(into|to)\b.*\b(link|hyperlink|anchor)s?\b/.test(lower))
+    return true;
+  if (/\blink\b.*\b(through|throughout|in)\b.*\b(article|post|draft|piece)\b/.test(lower))
+    return true;
+  if (/\b(internal|external|outbound|inbound)\s+links?\b/.test(lower)) return true;
+  if (/\bmake\s+\S+\s+(?:link|point)\s+to\b/.test(lower)) return true;
+  if (/\bhyperlink/.test(lower)) return true;
+  if (/\b(cite|reference|attribute)\b/.test(lower)) return true;
+
+  // Mostly-URLs heuristic — count how much of the text is URL-shaped.
+  const urlChars = (text.match(/https?:\/\/\S+/g) ?? []).join("").length;
+  if (urlChars > 0 && urlChars / Math.max(1, text.length) > 0.35) return true;
+
+  return false;
+}
+
+export type ParsedLink = {
+  url: string;
+  /** Optional human label scraped from the prompt, e.g. "Rabbu" */
+  label: string | null;
+};
+
+/**
+ * Pull URLs out of free-form text. Recognizes:
+ *   - bare URLs: https://rabbu.com/market/pigeon-forge
+ *   - markdown links: [Rabbu](https://rabbu.com)
+ *   - "Name - https://..." or "Name: https://..." style lines
+ *   - relative internal paths in markdown links: [About](/about)
+ */
+export function extractLinks(text: string): ParsedLink[] {
+  const out: ParsedLink[] = [];
+  const seen = new Set<string>();
+
+  // 1. Markdown-style [label](url) — captures both http(s) and /paths.
+  const mdRe = /\[([^\]]+)\]\((https?:\/\/[^)\s]+|\/[^)\s]+)\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = mdRe.exec(text))) {
+    const url = m[2]!.trim();
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push({ url, label: m[1]!.trim() || null });
+  }
+
+  // 2. "Label - https://..." / "Label: https://..." per line.
+  for (const rawLine of text.split(/\n+/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const lm = /^([^-:|–]{2,80})\s*[-–:|]\s*(https?:\/\/\S+)/.exec(line);
+    if (lm) {
+      const url = lm[2]!.replace(/[).,;]+$/, "");
+      if (seen.has(url)) continue;
+      seen.add(url);
+      out.push({ url, label: lm[1]!.trim().replace(/[*_`]/g, "") || null });
+    }
+  }
+
+  // 3. Bare URLs anywhere we haven't already captured.
+  const bareRe = /https?:\/\/[^\s<>()\[\]"']+/g;
+  while ((m = bareRe.exec(text))) {
+    const url = m[0]!.replace(/[).,;]+$/, "");
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push({ url, label: null });
+  }
+
+  return out;
+}
+
+/**
+ * Pick a short anchor phrase for a URL by looking at:
+ *   1. an explicit label from the user (if it appears in the body),
+ *   2. the registered ContentResearchSource for that exact URL (if its
+ *      finding/title contains a phrase that's in the body),
+ *   3. the URL's domain/slug as a hint (e.g. rabbu.com → "Rabbu",
+ *      airdna.co → "AirDNA"),
+ *   4. fallback: a fresh sentence we add to the most-relevant section.
+ */
+function chooseAnchorPhrase(input: {
+  url: string;
+  label: string | null;
+  body: string;
+  sources: ContentResearchSource[];
+}): string | null {
+  const { url, label, body } = input;
+  const candidates: string[] = [];
+  if (label) candidates.push(label);
+
+  // From research source matching this URL.
+  const src = input.sources.find((s) => s.url && s.url.trim() === url);
+  if (src) {
+    if (src.publisher) candidates.push(src.publisher);
+    if (src.title) candidates.push(src.title);
+    if (src.data_point) candidates.push(src.data_point);
+  }
+
+  // Domain hints — turn "rabbu.com" → "Rabbu", "airdna.co" → "AirDNA".
+  const domain = extractDomain(url);
+  if (domain) candidates.push(domain);
+
+  // Find first candidate that exists verbatim in the body and isn't
+  // already inside an existing markdown link.
+  for (const phrase of candidates) {
+    const trimmed = phrase.trim();
+    if (!trimmed || trimmed.length < 3) continue;
+    if (phraseExistsAndIsLinkable(body, trimmed)) return trimmed;
+  }
+  return null;
+}
+
+function extractDomain(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "");
+    const root = host.split(".")[0] ?? host;
+    if (!root) return null;
+    // "airdna" → "AirDNA", "rabbu" → "Rabbu"
+    if (/^[a-z]+$/.test(root)) {
+      return root[0]!.toUpperCase() + root.slice(1);
+    }
+    return root;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when the phrase appears in the body as plain text (not already
+ * part of a markdown link `[..](..)` and not inside a heading marker).
+ */
+function phraseExistsAndIsLinkable(body: string, phrase: string): boolean {
+  // Strip lines that are pure URL/link references to avoid matching
+  // there. Cheap-and-good: only check for occurrences NOT immediately
+  // preceded by `[` or already wrapped.
+  const re = new RegExp(
+    `(^|[^\\[\\w])(${escapeRegex(phrase)})(?![^\\[]*\\]\\()`,
+    "i",
+  );
+  return re.test(body);
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Replace the first plain-text occurrence of `phrase` in `body` with a
+ * markdown link `[phrase](url)`. Skips matches that are already inside
+ * a markdown link.
+ */
+function linkifyFirst(body: string, phrase: string, url: string): string | null {
+  // Walk the body, skipping over any existing `[..](..)` link spans.
+  const lower = body.toLowerCase();
+  const needle = phrase.toLowerCase();
+  let i = 0;
+  while (i < lower.length) {
+    // Skip existing markdown links — don't touch text inside `[..](..)`.
+    if (body[i] === "[") {
+      const close = body.indexOf("](", i);
+      if (close !== -1) {
+        const end = body.indexOf(")", close + 2);
+        if (end !== -1) {
+          i = end + 1;
+          continue;
+        }
+      }
+    }
+    const found = lower.indexOf(needle, i);
+    if (found === -1) return null;
+    // Make sure the match is at a word boundary (not in the middle of
+    // a longer word).
+    const before = body[found - 1] ?? " ";
+    const after = body[found + phrase.length] ?? " ";
+    const isWordChar = (c: string) => /[A-Za-z0-9_]/.test(c);
+    if (
+      (phrase[0] && isWordChar(phrase[0]) && isWordChar(before)) ||
+      (phrase[phrase.length - 1] &&
+        isWordChar(phrase[phrase.length - 1]!) &&
+        isWordChar(after))
+    ) {
+      i = found + 1;
+      continue;
+    }
+    const matched = body.slice(found, found + phrase.length);
+    return body.slice(0, found) + `[${matched}](${url})` + body.slice(found + phrase.length);
+  }
+  return null;
+}
+
+/**
+ * Append a short Jack-voice sentence introducing a URL when no
+ * existing phrase fit. Uses the source's finding/publisher when
+ * available so the sentence is specific, not generic. Falls back to a
+ * neutral "Here is the source" line.
+ */
+function appendLinkSentence(input: {
+  body: string;
+  url: string;
+  label: string | null;
+  source: ContentResearchSource | null;
+}): string {
+  const { body, url, label, source } = input;
+  const anchor =
+    label?.trim() ||
+    source?.publisher?.trim() ||
+    extractDomain(url) ||
+    "this source";
+
+  let sentence: string;
+  if (source?.finding) {
+    const finding = source.finding.trim().replace(/[.!]+$/, "");
+    sentence = `Worth a look: ${finding} ([${anchor}](${url})).`;
+  } else if (source?.data_point) {
+    sentence = `For the numbers behind that, see [${anchor}](${url}) (${source.data_point.trim()}).`;
+  } else {
+    sentence = `For context, see [${anchor}](${url}).`;
+  }
+  // No em dashes / exclamations.
+  sentence = sentence.replace(/—/g, "-").replace(/!/g, ".");
+
+  // Insert before the sign-off if present, otherwise at the end of the
+  // last paragraph in the article.
+  const blocks = parsePostBlocks(body);
+  const signIdx = blocks.findIndex(
+    (b) => b.type === "p" && b.text.includes("Jack Zoppa, CEO"),
+  );
+  const newBlock: PostBlock = {
+    id: `p_link_${Math.random().toString(36).slice(2, 8)}`,
+    type: "p",
+    text: sentence,
+  };
+  if (signIdx === -1) {
+    blocks.push(newBlock);
+  } else {
+    blocks.splice(signIdx, 0, newBlock);
+  }
+  return serializePostBlocks(blocks);
+}
+
+export function insertLinksIntoBody(input: {
+  body: string;
+  links: ParsedLink[];
+  sources: ContentResearchSource[];
+}): { body: string; applied: number; appended: number } {
+  let body = input.body ?? "";
+  let applied = 0;
+  let appended = 0;
+  const used = new Set<string>();
+
+  for (const link of input.links) {
+    if (used.has(link.url)) continue;
+
+    // Skip if the URL is already linked in the body.
+    if (body.includes(`](${link.url})`)) {
+      used.add(link.url);
+      continue;
+    }
+
+    const phrase = chooseAnchorPhrase({
+      url: link.url,
+      label: link.label,
+      body,
+      sources: input.sources,
+    });
+
+    if (phrase) {
+      const next = linkifyFirst(body, phrase, link.url);
+      if (next && next !== body) {
+        body = next;
+        applied += 1;
+        used.add(link.url);
+        continue;
+      }
+    }
+
+    // No anchor phrase found — append a natural sentence.
+    const source =
+      input.sources.find((s) => s.url && s.url.trim() === link.url) ?? null;
+    body = appendLinkSentence({
+      body,
+      url: link.url,
+      label: link.label,
+      source,
+    });
+    applied += 1;
+    appended += 1;
+    used.add(link.url);
+  }
+
+  return { body, applied, appended };
 }

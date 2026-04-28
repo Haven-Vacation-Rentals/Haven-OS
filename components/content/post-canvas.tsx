@@ -53,6 +53,7 @@ import { cn } from "@/lib/utils";
 import { updateArticle } from "@/lib/content/actions";
 import {
   parsePostBlocks,
+  renderInlineMarkdown,
   serializePostBlocks,
   type PostBlock,
 } from "@/lib/content/markdown";
@@ -710,6 +711,27 @@ function ListEditor({
 // semantic (real <h1>/<h2>/<p>) so the post looks like a post.
 // ---------------------------------------------------------------------------
 
+/**
+ * Inline markdown is preserved on disk (`body_md`). The post view should
+ * look like the published post — `[Rabbu](https://rabbu.com)` should
+ * render as a real anchor, not as raw markdown. We accomplish that with
+ * two display modes per block:
+ *
+ *   - editing  → contentEditable shows the raw markdown source so Jack
+ *                can type/paste/edit links as `[anchor](url)` directly.
+ *   - rendered → contentEditable is replaced with a read-only element
+ *                whose innerHTML is the safe HTML produced by
+ *                renderInlineMarkdown (real <a>, <strong>, <em>).
+ *
+ * Clicking the rendered view flips it into edit mode and refocuses,
+ * so the affordance still feels like a single editable block.
+ */
+function hasInlineMarkdown(text: string): boolean {
+  return /\[[^\]]+\]\([^)\s]+\)|\*\*[^*]+\*\*|(?:^|[^*])\*[^*]+\*/.test(
+    text ?? "",
+  );
+}
+
 function Editable({
   as,
   value,
@@ -730,14 +752,16 @@ function Editable({
   onBackspaceEmpty?: () => void;
 }) {
   const ref = useRef<HTMLElement | null>(null);
+  const [editing, setEditing] = useState(false);
 
   // Sync from prop only when the DOM text has actually drifted from
-  // the prop. This keeps the caret stable while typing.
+  // the prop. This keeps the caret stable while typing in edit mode.
   useEffect(() => {
+    if (!editing) return;
     const el = ref.current;
     if (!el) return;
     if (el.textContent !== value) el.textContent = value;
-  }, [value]);
+  }, [value, editing]);
 
   const handleInput = (e: React.FormEvent<HTMLElement>) => {
     const text = e.currentTarget.textContent ?? "";
@@ -765,20 +789,76 @@ function Editable({
   };
   const setRef = (node: HTMLElement | null) => {
     ref.current = node;
+    if (node && editing && document.activeElement !== node) {
+      // After flipping into edit mode, make sure caret lands at end.
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      range.collapse(false);
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      node.focus();
+    }
   };
-  const className_ = cn(
+
+  const renderedClass = cn(
+    "rounded-md cursor-text hover:bg-haven-coral/[0.03] hover:px-1 hover:-mx-1 transition",
+    "empty:before:text-muted-foreground/60 empty:before:content-[attr(data-placeholder)]",
+    className,
+  );
+  const editingClass = cn(
     "outline-none focus:bg-haven-coral/[0.03] focus:rounded-md focus:px-1 focus:-mx-1",
     "empty:before:text-muted-foreground/60 empty:before:content-[attr(data-placeholder)]",
     className,
   );
+
+  // ---- Rendered (read-only) view --------------------------------------
+  // Show real <a>/<strong>/<em> when the block contains inline markdown.
+  // Click flips into edit mode.
+  if (!editing) {
+    const html = value ? renderInlineMarkdown(value) : "";
+    const handleClick = (e: React.MouseEvent<HTMLElement>) => {
+      // Inline anchors inside a rendered block would navigate away;
+      // clicking should instead flip into edit mode so Jack can change
+      // the link. He can preview/follow links from the Source tab or
+      // after publish.
+      const target = e.target as HTMLElement;
+      if (target.tagName === "A") e.preventDefault();
+      setEditing(true);
+    };
+    const renderedProps = {
+      "data-placeholder": placeholder,
+      className: renderedClass,
+      onClick: handleClick,
+      onFocus: () => setEditing(true),
+      tabIndex: 0,
+      // dangerouslySetInnerHTML is safe here — renderInlineMarkdown
+      // escapes everything before layering whitelisted patterns.
+      dangerouslySetInnerHTML: { __html: html },
+    } as const;
+    if (as === "h1") return <h1 {...renderedProps} />;
+    if (as === "h2") return <h2 {...renderedProps} />;
+    if (as === "h3") return <h3 {...renderedProps} />;
+    if (as === "p") return <p {...renderedProps} />;
+    return <div {...renderedProps} />;
+  }
+
+  // ---- Edit mode ------------------------------------------------------
+  // Plain text contentEditable showing markdown source. On blur, flip
+  // back to rendered view. Note: clicking a rendered <a> link inside a
+  // block would normally navigate; in edit mode we let the user place
+  // the cursor anywhere in the markdown.
   const editableProps = {
     contentEditable: true as const,
     suppressContentEditableWarning: true as const,
     "data-placeholder": placeholder,
-    className: className_,
+    className: editingClass,
     onInput: handleInput,
     onKeyDown: handleKeyDown,
     onPaste: handlePaste,
+    onBlur: () => setEditing(false),
   };
 
   if (as === "h1") {

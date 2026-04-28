@@ -764,14 +764,86 @@ export async function sendAgentPrompt(input: {
     if (!agentMessage)
       return { ok: false, error: "Failed to record agent reply" };
 
+    // Auto-apply for unambiguous edits like hyperlink insertion. The
+    // chat shows the summary and the article on the right updates
+    // immediately, no extra click required.
+    let finalAgentMessage = agentMessage;
+    if (
+      reply.auto_apply &&
+      reply.suggestion &&
+      reply.suggestion.kind !== "note"
+    ) {
+      const applyRes = await applySuggestionToArticle({
+        article,
+        suggestion: reply.suggestion,
+      });
+      if (applyRes.ok) {
+        await supabase
+          .from("content_agent_messages")
+          .update({ applied: true })
+          .eq("id", agentMessage.id);
+        finalAgentMessage = { ...agentMessage, applied: true };
+      }
+    }
+
     revalidatePath(CONTENT_PATH, "layout");
     return {
       ok: true,
-      data: { user_message: userMessage, agent_message: agentMessage },
+      data: { user_message: userMessage, agent_message: finalAgentMessage },
     };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * Build an UpdateArticleInput from an agent suggestion + the current
+ * article state. Pure function — does not touch the database. Used by
+ * both `applyAgentSuggestion` (manual click) and the auto-apply path
+ * inside `sendAgentPrompt` (e.g. hyperlink insertion).
+ */
+function buildPatchFromSuggestion(
+  article: ContentArticle,
+  sug: ContentAgentSuggestion,
+): UpdateArticleInput | null {
+  switch (sug.kind) {
+    case "set_title":
+      return { title: sug.title };
+    case "set_meta":
+      return { meta_description: sug.meta_description };
+    case "replace_body":
+      return { body_md: sug.body_md };
+    case "append_section":
+      return {
+        body_md:
+          article.body_md.trimEnd() +
+          "\n\n## " +
+          sug.heading +
+          "\n\n" +
+          sug.body_md +
+          "\n",
+      };
+    case "rewrite_paragraph":
+      return {
+        body_md: article.body_md.includes(sug.before)
+          ? article.body_md.replace(sug.before, sug.after)
+          : article.body_md,
+      };
+    case "note":
+      return null;
+  }
+}
+
+async function applySuggestionToArticle(input: {
+  article: ContentArticle;
+  suggestion: ContentAgentSuggestion;
+}): Promise<Result<ContentArticle>> {
+  const patch = buildPatchFromSuggestion(input.article, input.suggestion);
+  if (!patch) return { ok: false, error: "Note suggestions are not applied" };
+  return updateArticle(input.article.id, patch, {
+    source: "agent",
+    note: `Applied suggestion ${input.suggestion.kind}`,
+  });
 }
 
 export async function applyAgentSuggestion(
@@ -793,39 +865,9 @@ export async function applyAgentSuggestion(
     const article = await getArticle(message.article_id);
     if (!article) return { ok: false, error: "Article not found" };
 
-    const patch: UpdateArticleInput = {};
-    const sug = message.suggestion;
-    switch (sug.kind) {
-      case "set_title":
-        patch.title = sug.title;
-        break;
-      case "set_meta":
-        patch.meta_description = sug.meta_description;
-        break;
-      case "replace_body":
-        patch.body_md = sug.body_md;
-        break;
-      case "append_section":
-        patch.body_md =
-          article.body_md.trimEnd() +
-          "\n\n## " +
-          sug.heading +
-          "\n\n" +
-          sug.body_md +
-          "\n";
-        break;
-      case "rewrite_paragraph":
-        patch.body_md = article.body_md.includes(sug.before)
-          ? article.body_md.replace(sug.before, sug.after)
-          : article.body_md;
-        break;
-      case "note":
-        return { ok: false, error: "Note suggestions are not applied" };
-    }
-
-    const updated = await updateArticle(message.article_id, patch, {
-      source: "agent",
-      note: `Applied suggestion ${sug.kind}`,
+    const updated = await applySuggestionToArticle({
+      article,
+      suggestion: message.suggestion,
     });
     if (!updated.ok) return updated;
 
