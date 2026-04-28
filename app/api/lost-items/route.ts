@@ -23,7 +23,6 @@ import {
   type CreateCaseResult,
 } from "@/lib/lost-items/actions";
 import type {
-  LostItemPriority,
   LostItemSource,
   LostItemStatus,
 } from "@/lib/lost-items/types";
@@ -104,7 +103,6 @@ export async function GET(req: NextRequest) {
 
 type CreateBody = {
   item_description?: string;
-  item_category?: string | null;
   found_location?: string | null;
   photo_urls?: string[];
 
@@ -114,9 +112,10 @@ type CreateBody = {
   guest_name?: string | null;
   guest_email?: string | null;
   guest_phone?: string | null;
-  reservation_ref?: string | null;
 
-  priority?: LostItemPriority;
+  slack_thread_url?: string | null;
+  conversation_url?: string | null;
+
   status?: LostItemStatus;
 
   cleaning_vendor?: string | null;
@@ -182,9 +181,7 @@ function serialize(row: any) {
     id: row.id,
     case_number: row.case_number,
     status: row.status,
-    priority: row.priority,
     item_description: row.item_description,
-    item_category: row.item_category,
     found_location: row.found_location,
     photo_urls: row.photo_urls ?? [],
     property_id: row.property_id,
@@ -192,7 +189,8 @@ function serialize(row: any) {
     guest_name: row.guest_name,
     guest_email: row.guest_email,
     guest_phone: row.guest_phone,
-    reservation_ref: row.reservation_ref,
+    slack_thread_url: row.slack_thread_url,
+    conversation_url: row.conversation_url,
     cleaning_vendor: row.cleaning_vendor,
     pickup_scheduled_at: row.pickup_scheduled_at,
     pickup_completed_at: row.pickup_completed_at,

@@ -3,24 +3,21 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, MessageSquare } from "lucide-react";
+import { ArrowLeft, MessageSquare, Slack, MessageCircle, ExternalLink } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   LOST_ITEM_PIPELINE,
   LOST_ITEM_STATUS_LABELS,
-  LOST_ITEM_PRIORITIES,
   type LostItemCaseWithRelations,
   type LostItemEventWithActor,
-  type LostItemPriority,
 } from "@/lib/lost-items/types";
 import {
   updateCase,
   setStatus,
   setAssignee,
-  setPriority,
   addComment,
 } from "@/lib/lost-items/actions";
-import { PriorityPill, StatusBadge, formatDateTime, formatRelative } from "./shared";
+import { StatusBadge, formatDateTime, formatRelative } from "./shared";
 
 type Member = {
   id: string;
@@ -71,7 +68,6 @@ export function LostItemDetail({ item, events, properties, members }: Props) {
           <span className="font-mono text-xs text-muted-foreground">
             {item.case_number}
           </span>
-          <PriorityPill priority={item.priority} />
           <StatusBadge status={item.status} />
           <span className="text-xs text-muted-foreground">
             opened {formatRelative(item.created_at)}
@@ -101,40 +97,29 @@ export function LostItemDetail({ item, events, properties, members }: Props) {
               className={
                 "rounded-full border px-3 py-1 text-xs font-medium transition-colors " +
                 (item.status === s
-                  ? "border-foreground bg-foreground text-background"
+                  ? s === "failed"
+                    ? "border-rose-500 bg-rose-500 text-white"
+                    : "border-foreground bg-foreground text-background"
                   : "border-border bg-surface text-muted-foreground hover:text-foreground")
               }
             >
               {LOST_ITEM_STATUS_LABELS[s]}
             </button>
           ))}
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => apply(() => setStatus(item.id, "cancelled"))}
-            className={
-              "rounded-full border px-3 py-1 text-xs font-medium transition-colors " +
-              (item.status === "cancelled"
-                ? "border-rose-500 bg-rose-500 text-white"
-                : "border-border bg-surface text-muted-foreground hover:text-foreground")
-            }
-          >
-            Cancelled
-          </button>
         </div>
+
+        {/* Activity feed — comments first-class */}
+        <ActivityFeed
+          caseId={item.id}
+          events={events}
+          pending={pending}
+          onApply={apply}
+        />
 
         {/* Editable details */}
         <DetailsCard
           item={item}
           properties={properties}
-          pending={pending}
-          onApply={apply}
-        />
-
-        {/* Activity feed */}
-        <ActivityFeed
-          caseId={item.id}
-          events={events}
           pending={pending}
           onApply={apply}
         />
@@ -158,18 +143,6 @@ export function LostItemDetail({ item, events, properties, members }: Props) {
               })),
             ]}
           />
-          <SelectField
-            label="Priority"
-            value={item.priority}
-            disabled={pending}
-            onChange={(v) =>
-              apply(() => setPriority(item.id, v as LostItemPriority))
-            }
-            options={LOST_ITEM_PRIORITIES.map((p) => ({
-              value: p,
-              label: p[0].toUpperCase() + p.slice(1),
-            }))}
-          />
           <DateField
             label="Follow-up date"
             value={item.follow_up_date ?? ""}
@@ -180,6 +153,26 @@ export function LostItemDetail({ item, events, properties, members }: Props) {
           />
         </SidePanel>
 
+        <SidePanel title="Links">
+          <LinkRow
+            icon={<Slack className="h-3.5 w-3.5" />}
+            label="Slack thread"
+            url={item.slack_thread_url}
+          />
+          <LinkRow
+            icon={<MessageCircle className="h-3.5 w-3.5" />}
+            label="Conversation"
+            url={item.conversation_url}
+          />
+          {item.external_url ? (
+            <LinkRow
+              icon={<ExternalLink className="h-3.5 w-3.5" />}
+              label={item.external_source ?? "Source system"}
+              url={item.external_url}
+            />
+          ) : null}
+        </SidePanel>
+
         <SidePanel title="Source">
           <KV label="Origin" value={item.source} />
           {item.external_source ? (
@@ -188,23 +181,12 @@ export function LostItemDetail({ item, events, properties, members }: Props) {
           {item.external_id ? (
             <KV label="External ID" value={item.external_id} mono />
           ) : null}
-          {item.external_url ? (
-            <a
-              href={item.external_url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs text-haven-coral-700 hover:underline"
-            >
-              Open in source system →
-            </a>
-          ) : null}
         </SidePanel>
 
         <SidePanel title="Timeline">
           <KV label="Opened" value={formatDateTime(item.created_at)} />
           <KV label="Pickup scheduled" value={formatDateTime(item.pickup_scheduled_at)} />
           <KV label="Pickup completed" value={formatDateTime(item.pickup_completed_at)} />
-          <KV label="Shipped" value={formatDateTime(item.shipped_at)} />
           <KV label="Delivered" value={formatDateTime(item.delivered_at)} />
           <KV label="Completed" value={formatDateTime(item.completed_at)} />
         </SidePanel>
@@ -233,13 +215,13 @@ function DetailsCard({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(() => ({
     item_description: item.item_description,
-    item_category: item.item_category ?? "",
     found_location: item.found_location ?? "",
     property_id: item.property_id ?? "",
     guest_name: item.guest_name ?? "",
     guest_email: item.guest_email ?? "",
     guest_phone: item.guest_phone ?? "",
-    reservation_ref: item.reservation_ref ?? "",
+    slack_thread_url: item.slack_thread_url ?? "",
+    conversation_url: item.conversation_url ?? "",
     cleaning_vendor: item.cleaning_vendor ?? "",
     return_method: item.return_method ?? "",
     shipping_carrier: item.shipping_carrier ?? "",
@@ -251,13 +233,13 @@ function DetailsCard({
     onApply(async () => {
       const res = await updateCase(item.id, {
         item_description: draft.item_description.trim(),
-        item_category: draft.item_category.trim() || null,
         found_location: draft.found_location.trim() || null,
         property_id: draft.property_id || null,
         guest_name: draft.guest_name.trim() || null,
         guest_email: draft.guest_email.trim() || null,
         guest_phone: draft.guest_phone.trim() || null,
-        reservation_ref: draft.reservation_ref.trim() || null,
+        slack_thread_url: draft.slack_thread_url.trim() || null,
+        conversation_url: draft.conversation_url.trim() || null,
         cleaning_vendor: draft.cleaning_vendor.trim() || null,
         return_method: (draft.return_method || null) as
           | "shipped"
@@ -289,7 +271,6 @@ function DetailsCard({
         </div>
         <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
           <KV label="Item" value={item.item_description} />
-          <KV label="Category" value={item.item_category ?? "—"} />
           <KV label="Found at" value={item.found_location ?? "—"} />
           <KV
             label="Property"
@@ -298,7 +279,6 @@ function DetailsCard({
           <KV label="Guest" value={item.guest_name ?? "—"} />
           <KV label="Guest email" value={item.guest_email ?? "—"} />
           <KV label="Guest phone" value={item.guest_phone ?? "—"} />
-          <KV label="Reservation #" value={item.reservation_ref ?? "—"} />
           <KV label="Cleaning vendor" value={item.cleaning_vendor ?? "—"} />
           <KV label="Return method" value={item.return_method ?? "—"} />
           <KV label="Carrier" value={item.shipping_carrier ?? "—"} />
@@ -329,14 +309,6 @@ function DetailsCard({
             value={draft.item_description}
             onChange={(e) =>
               setDraft({ ...draft, item_description: e.target.value })
-            }
-          />
-        </FieldRow>
-        <FieldRow label="Category">
-          <Input
-            value={draft.item_category}
-            onChange={(e) =>
-              setDraft({ ...draft, item_category: e.target.value })
             }
           />
         </FieldRow>
@@ -386,12 +358,22 @@ function DetailsCard({
             }
           />
         </FieldRow>
-        <FieldRow label="Reservation #">
+        <FieldRow label="Slack thread link">
           <Input
-            value={draft.reservation_ref}
+            value={draft.slack_thread_url}
             onChange={(e) =>
-              setDraft({ ...draft, reservation_ref: e.target.value })
+              setDraft({ ...draft, slack_thread_url: e.target.value })
             }
+            placeholder="https://haven.slack.com/archives/…"
+          />
+        </FieldRow>
+        <FieldRow label="Conversation link">
+          <Input
+            value={draft.conversation_url}
+            onChange={(e) =>
+              setDraft({ ...draft, conversation_url: e.target.value })
+            }
+            placeholder="Hostaway/Airbnb/email thread"
           />
         </FieldRow>
         <FieldRow label="Cleaning vendor">
@@ -467,7 +449,7 @@ function DetailsCard({
 }
 
 // ---------------------------------------------------------------------------
-// Activity feed
+// Activity feed (comments first-class)
 // ---------------------------------------------------------------------------
 
 function ActivityFeed({
@@ -484,6 +466,7 @@ function ActivityFeed({
   ) => void;
 }) {
   const [comment, setComment] = useState("");
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!comment.trim()) return;
@@ -494,60 +477,115 @@ function ActivityFeed({
     });
   };
 
+  const comments = events.filter((e) => e.event_type === "comment");
+  const otherEvents = events.filter((e) => e.event_type !== "comment");
+
   return (
     <div className="rounded-card border border-border bg-surface p-5">
       <h3 className="flex items-center gap-2 font-heading text-base font-semibold">
         <MessageSquare className="h-4 w-4" />
-        Activity
+        Comments & activity
       </h3>
-      <form onSubmit={submit} className="mt-3 flex gap-2">
-        <Input
+
+      <form onSubmit={submit} className="mt-3 flex flex-col gap-2">
+        <textarea
           value={comment}
           onChange={(e) => setComment(e.target.value)}
-          placeholder="Add a note for the team…"
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              submit(e as unknown as React.FormEvent);
+            }
+          }}
+          rows={2}
+          placeholder="Add a comment for the team — context, next steps, what the guest said…"
+          className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
         />
-        <button
-          type="submit"
-          disabled={pending || !comment.trim()}
-          className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-accent-foreground hover:brightness-95 disabled:opacity-60"
-        >
-          Post
-        </button>
-      </form>
-      <ul className="mt-4 flex flex-col gap-3 text-sm">
-        {events.length === 0 ? (
-          <li className="text-xs text-muted-foreground">No activity yet.</li>
-        ) : null}
-        {events.map((e) => (
-          <li
-            key={e.id}
-            className="flex flex-col gap-0.5 rounded-md border border-border bg-surface-alt/40 p-2.5"
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-muted-foreground">
+            {comments.length} comment{comments.length === 1 ? "" : "s"}
+          </span>
+          <button
+            type="submit"
+            disabled={pending || !comment.trim()}
+            className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-accent-foreground hover:brightness-95 disabled:opacity-60"
           >
-            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-              <span className="font-medium text-foreground">
-                {e.actor?.full_name ?? e.actor?.email ?? e.actor_label ?? "system"}
-              </span>
-              <span>·</span>
-              <span>{formatDateTime(e.created_at)}</span>
-              <span>·</span>
-              <span className="uppercase tracking-wider">{e.event_type}</span>
-            </div>
-            {e.event_type === "status_change" ? (
-              <div>
-                Status: <strong>{e.from_value ?? "—"}</strong> →{" "}
-                <strong>{e.to_value ?? "—"}</strong>
+            Post comment
+          </button>
+        </div>
+      </form>
+
+      {/* Comments — most prominent */}
+      {comments.length > 0 ? (
+        <ul className="mt-4 flex flex-col gap-3 text-sm">
+          {comments.map((e) => (
+            <li
+              key={e.id}
+              className="flex flex-col gap-1 rounded-md border border-border bg-accent-soft/30 p-3"
+            >
+              <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {e.actor?.full_name ??
+                    e.actor?.email ??
+                    e.actor_label ??
+                    "system"}
+                </span>
+                <span>·</span>
+                <span>{formatDateTime(e.created_at)}</span>
               </div>
-            ) : e.event_type === "assignment" ? (
-              <div>
-                Assigned: <strong>{e.from_value ?? "—"}</strong> →{" "}
-                <strong>{e.to_value ?? "—"}</strong>
-              </div>
-            ) : (
               <div className="whitespace-pre-wrap">{e.body}</div>
-            )}
-          </li>
-        ))}
-      </ul>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-4 text-xs text-muted-foreground">
+          No comments yet. Be the first to add context for the team.
+        </p>
+      )}
+
+      {/* Other events (status changes, assignments, created) */}
+      {otherEvents.length > 0 ? (
+        <details className="mt-5 group">
+          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground">
+            Activity log ({otherEvents.length})
+          </summary>
+          <ul className="mt-3 flex flex-col gap-2 text-sm">
+            {otherEvents.map((e) => (
+              <li
+                key={e.id}
+                className="flex flex-col gap-0.5 rounded-md border border-border bg-surface-alt/40 p-2.5"
+              >
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <span className="font-medium text-foreground">
+                    {e.actor?.full_name ??
+                      e.actor?.email ??
+                      e.actor_label ??
+                      "system"}
+                  </span>
+                  <span>·</span>
+                  <span>{formatDateTime(e.created_at)}</span>
+                  <span>·</span>
+                  <span className="uppercase tracking-wider">
+                    {e.event_type}
+                  </span>
+                </div>
+                {e.event_type === "status_change" ? (
+                  <div>
+                    Status: <strong>{e.from_value ?? "—"}</strong> →{" "}
+                    <strong>{e.to_value ?? "—"}</strong>
+                  </div>
+                ) : e.event_type === "assignment" ? (
+                  <div>
+                    Assigned: <strong>{e.from_value ?? "—"}</strong> →{" "}
+                    <strong>{e.to_value ?? "—"}</strong>
+                  </div>
+                ) : (
+                  <div className="whitespace-pre-wrap">{e.body}</div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -672,3 +710,40 @@ function DateField({
   );
 }
 
+function LinkRow({
+  icon,
+  label,
+  url,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  url: string | null;
+}) {
+  if (!url) {
+    return (
+      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5">
+          {icon}
+          {label}
+        </span>
+        <span>—</span>
+      </div>
+    );
+  }
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-alt/40 px-2 py-1.5 text-xs text-haven-coral-700 hover:bg-accent-soft/50"
+    >
+      <span className="inline-flex items-center gap-1.5">
+        {icon}
+        {label}
+      </span>
+      <span className="truncate text-muted-foreground max-w-[180px]">
+        Open ↗
+      </span>
+    </a>
+  );
+}

@@ -7,11 +7,29 @@
  *  1. Summary tiles (open / overdue / completed / total)
  *  2. Toolbar (search + filters + view toggle + new case)
  *  3. Body (Board kanban / List table)
+ *
+ * Board uses @dnd-kit/core (whole-card drag, 6px activation, optimistic
+ * update with revert + toast on failure, highlighted drop zones,
+ * keyboard-friendly).
  */
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import {
+  DndContext,
+  DragEndEvent,
+  DragOverlay,
+  DragStartEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCorners,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
 import {
   Search,
   PackageSearch,
@@ -21,6 +39,9 @@ import {
   LayoutGrid,
   List as ListIcon,
   Plus,
+  GripVertical,
+  Slack,
+  MessageCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -32,14 +53,12 @@ import {
 import {
   LOST_ITEM_PIPELINE,
   LOST_ITEM_STATUS_LABELS,
-  LOST_ITEM_PRIORITIES,
   type LostItemCaseWithRelations,
   type LostItemStatus,
-  type LostItemPriority,
 } from "@/lib/lost-items/types";
 import { setStatus } from "@/lib/lost-items/actions";
 import { LostItemNewForm } from "./lost-item-new-form";
-import { PriorityPill, StatusBadge, formatRelative } from "./shared";
+import { StatusBadge, formatRelative } from "./shared";
 
 type Member = {
   id: string;
@@ -72,9 +91,6 @@ export function LostItemsDirectory({
   const [statusFilter, setStatusFilter] = useState<
     LostItemStatus | "all" | "open"
   >("open");
-  const [priorityFilter, setPriorityFilter] = useState<
-    LostItemPriority | "all"
-  >("all");
   const [propertyFilter, setPropertyFilter] = useState<string>("all");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
   const [overdueOnly, setOverdueOnly] = useState(false);
@@ -86,11 +102,10 @@ export function LostItemsDirectory({
     const today = new Date().toISOString().slice(0, 10);
     return cases.filter((c) => {
       if (statusFilter === "open") {
-        if (c.status === "completed" || c.status === "cancelled") return false;
+        if (c.status === "completed" || c.status === "failed") return false;
       } else if (statusFilter !== "all" && c.status !== statusFilter) {
         return false;
       }
-      if (priorityFilter !== "all" && c.priority !== priorityFilter) return false;
       if (propertyFilter !== "all" && c.property_id !== propertyFilter) return false;
       if (assigneeFilter === "unassigned") {
         if (c.assigned_to) return false;
@@ -99,22 +114,22 @@ export function LostItemsDirectory({
       }
       if (overdueOnly) {
         if (!c.follow_up_date || c.follow_up_date >= today) return false;
-        if (c.status === "completed" || c.status === "cancelled") return false;
+        if (c.status === "completed" || c.status === "failed") return false;
       }
       if (needle) {
         const haystack = [
           c.case_number,
           c.item_description,
-          c.item_category,
           c.found_location,
           c.guest_name,
           c.guest_email,
           c.guest_phone,
-          c.reservation_ref,
           c.property_name,
           c.property?.name ?? null,
           c.cleaning_vendor,
           c.notes,
+          c.slack_thread_url,
+          c.conversation_url,
         ]
           .filter(Boolean)
           .map((s) => String(s).toLowerCase())
@@ -127,7 +142,6 @@ export function LostItemsDirectory({
     cases,
     q,
     statusFilter,
-    priorityFilter,
     propertyFilter,
     assigneeFilter,
     overdueOnly,
@@ -173,19 +187,6 @@ export function LostItemsDirectory({
               className="pl-9"
             />
           </div>
-          <FilterSelect
-            value={priorityFilter}
-            onChange={(v) =>
-              setPriorityFilter(v as LostItemPriority | "all")
-            }
-            options={[
-              { value: "all", label: "Any priority" },
-              ...LOST_ITEM_PRIORITIES.map((p) => ({
-                value: p,
-                label: p[0].toUpperCase() + p.slice(1),
-              })),
-            ]}
-          />
           <FilterSelect
             value={propertyFilter}
             onChange={setPropertyFilter}
@@ -243,12 +244,6 @@ export function LostItemsDirectory({
               />
             );
           })}
-          <Chip
-            label="Cancelled"
-            active={statusFilter === "cancelled"}
-            onClick={() => setStatusFilter("cancelled")}
-            count={stats.by_status.cancelled ?? 0}
-          />
         </div>
       </div>
 
@@ -417,110 +412,222 @@ function ViewToggle({
 }
 
 // ---------------------------------------------------------------------------
-// Board view (kanban by status)
+// Board view (kanban by status, dnd-kit)
 // ---------------------------------------------------------------------------
 
 function BoardView({ cases }: { cases: LostItemCaseWithRelations[] }) {
-  const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [board, setBoard] = useState<LostItemCaseWithRelations[]>(cases);
+  const [activeId, setActiveId] = useState<string | null>(null);
 
-  const grouped = useMemo(() => {
-    const map: Record<string, LostItemCaseWithRelations[]> = {};
-    for (const s of LOST_ITEM_PIPELINE) map[s] = [];
-    for (const c of cases) {
-      if (c.status === "cancelled") continue;
-      (map[c.status] ??= []).push(c);
-    }
-    return map;
+  // Resync when parent feeds in fresh data.
+  useEffect(() => {
+    setBoard(cases);
   }, [cases]);
 
-  const handleDrop = (target: LostItemStatus, id: string) => {
-    if (!id) return;
-    const c = cases.find((x) => x.id === id);
-    if (!c || c.status === target) return;
-    startTransition(async () => {
-      const res = await setStatus(id, target);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor),
+  );
+
+  const grouped = useMemo(() => {
+    const map = new Map<LostItemStatus, LostItemCaseWithRelations[]>();
+    for (const s of LOST_ITEM_PIPELINE) map.set(s, []);
+    for (const c of board) {
+      map.get(c.status)?.push(c);
+    }
+    return map;
+  }, [board]);
+
+  const activeCase = activeId
+    ? board.find((c) => c.id === activeId) ?? null
+    : null;
+
+  const onDragStart = (e: DragStartEvent) => {
+    setActiveId(String(e.active.id));
+  };
+
+  const onDragEnd = (e: DragEndEvent) => {
+    setActiveId(null);
+    const caseId = String(e.active.id);
+    const overId = e.over?.id ? String(e.over.id) : null;
+    if (!overId) return;
+
+    let targetCol: LostItemStatus | null = null;
+    if ((LOST_ITEM_PIPELINE as string[]).includes(overId)) {
+      targetCol = overId as LostItemStatus;
+    } else {
+      const overCase = board.find((c) => c.id === overId);
+      if (overCase) targetCol = overCase.status;
+    }
+    if (!targetCol) return;
+
+    const c = board.find((x) => x.id === caseId);
+    if (!c) return;
+    if (c.status === targetCol) return;
+
+    const prevStatus = c.status;
+    setBoard((curr) =>
+      curr.map((x) => (x.id === caseId ? { ...x, status: targetCol! } : x)),
+    );
+
+    void (async () => {
+      const res = await setStatus(caseId, targetCol!);
       if (!res.ok) {
-        alert(res.error);
+        setBoard((curr) =>
+          curr.map((x) =>
+            x.id === caseId ? { ...x, status: prevStatus } : x,
+          ),
+        );
+        toast.error(res.error ?? "Failed to move case");
       } else {
+        toast.success(
+          `Moved to ${LOST_ITEM_STATUS_LABELS[targetCol!]}`,
+        );
         router.refresh();
       }
-    });
+    })();
   };
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
-      {LOST_ITEM_PIPELINE.map((s) => {
-        const items = grouped[s] ?? [];
-        return (
-          <div
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragCancel={() => setActiveId(null)}
+    >
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        {LOST_ITEM_PIPELINE.map((s) => (
+          <BoardColumn
             key={s}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const id = e.dataTransfer.getData("text/plain") || draggedId;
-              if (id) handleDrop(s, id);
-              setDraggedId(null);
-            }}
-            className="flex flex-col gap-2 rounded-card border border-border bg-surface-alt/30 p-2 min-h-[200px]"
+            status={s}
+            cases={grouped.get(s) ?? []}
+            activeId={activeId}
+          />
+        ))}
+      </div>
+      <DragOverlay dropAnimation={null}>
+        {activeCase ? <BoardCard c={activeCase} isDragging /> : null}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+
+function BoardColumn({
+  status,
+  cases,
+  activeId,
+}: {
+  status: LostItemStatus;
+  cases: LostItemCaseWithRelations[];
+  activeId: string | null;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: status });
+  return (
+    <div
+      ref={setNodeRef}
+      className={
+        "flex flex-col gap-2 rounded-card border bg-surface-alt/30 p-2 min-h-[220px] transition-colors " +
+        (isOver
+          ? "border-haven-coral-600 bg-accent-soft/50 ring-2 ring-haven-coral-600/30"
+          : "border-border")
+      }
+    >
+      <div className="flex items-center justify-between px-2 pt-1">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {LOST_ITEM_STATUS_LABELS[status]}
+        </div>
+        <span className="text-[10px] text-muted-foreground tabular-nums">
+          {cases.length}
+        </span>
+      </div>
+      <div className="flex flex-col gap-2">
+        {cases.map((c) => (
+          <DraggableBoardCard
+            key={c.id}
+            c={c}
+            isOverlayActive={activeId === c.id}
+          />
+        ))}
+        {cases.length === 0 ? (
+          <div
+            className={
+              "px-2 py-4 text-center text-[11px] rounded-md border border-dashed " +
+              (isOver
+                ? "text-haven-coral-700 border-haven-coral-300 bg-accent-soft/40"
+                : "text-muted-foreground/70 border-border")
+            }
           >
-            <div className="flex items-center justify-between px-2 pt-1">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {LOST_ITEM_STATUS_LABELS[s]}
-              </div>
-              <span className="text-[10px] text-muted-foreground">
-                {items.length}
-              </span>
-            </div>
-            {items.map((c) => (
-              <BoardCard
-                key={c.id}
-                c={c}
-                onDragStart={() => setDraggedId(c.id)}
-                pending={pending}
-              />
-            ))}
-            {items.length === 0 ? (
-              <div className="px-2 py-4 text-[11px] text-muted-foreground/70">
-                Drop cases here
-              </div>
-            ) : null}
+            {isOver ? "Drop here" : "No cases"}
           </div>
-        );
-      })}
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function DraggableBoardCard({
+  c,
+  isOverlayActive,
+}: {
+  c: LostItemCaseWithRelations;
+  isOverlayActive: boolean;
+}) {
+  const router = useRouter();
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: c.id,
+  });
+  const open = () => router.push(`/operations/lost-items/${c.id}`);
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          open();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      style={{ opacity: isDragging || isOverlayActive ? 0.4 : 1 }}
+      className="touch-none cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:shadow-ring rounded-card"
+    >
+      <BoardCard c={c} />
     </div>
   );
 }
 
 function BoardCard({
   c,
-  onDragStart,
-  pending,
+  isDragging,
 }: {
   c: LostItemCaseWithRelations;
-  onDragStart: () => void;
-  pending: boolean;
+  isDragging?: boolean;
 }) {
   return (
-    <Link
-      href={`/operations/lost-items/${c.id}` as never}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData("text/plain", c.id);
-        e.dataTransfer.effectAllowed = "move";
-        onDragStart();
-      }}
+    <div
       className={
-        "block rounded-card border border-border bg-surface p-3 text-sm shadow-sm hover:border-foreground/40 " +
-        (pending ? "opacity-70" : "")
+        "group relative rounded-card border border-border bg-surface p-3 pl-4 text-sm shadow-sm " +
+        (isDragging
+          ? "shadow-lg border-haven-coral-300 rotate-1"
+          : "hover:shadow-md hover:border-foreground/30 transition-all")
       }
     >
+      <GripVertical className="absolute left-0.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
       <div className="flex items-center gap-2">
-        <PriorityPill priority={c.priority} />
         <span className="text-[10px] font-mono text-muted-foreground">
           {c.case_number}
         </span>
+        {c.slack_thread_url ? (
+          <Slack className="h-3 w-3 text-muted-foreground" aria-label="Slack thread linked" />
+        ) : null}
+        {c.conversation_url ? (
+          <MessageCircle className="h-3 w-3 text-muted-foreground" aria-label="Conversation linked" />
+        ) : null}
       </div>
       <div className="mt-1.5 line-clamp-2 font-medium">
         {c.item_description}
@@ -529,12 +636,10 @@ function BoardCard({
         {c.property?.name ?? c.property_name ?? "No property"}
       </div>
       <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
-        <span className="truncate">
-          {c.guest_name ?? "—"}
-        </span>
+        <span className="truncate">{c.guest_name ?? "—"}</span>
         <span>{formatRelative(c.created_at)}</span>
       </div>
-    </Link>
+    </div>
   );
 }
 
@@ -552,7 +657,6 @@ function ListView({ cases }: { cases: LostItemCaseWithRelations[] }) {
             <th className="px-3 py-2">Item</th>
             <th className="px-3 py-2">Property</th>
             <th className="px-3 py-2">Guest</th>
-            <th className="px-3 py-2">Priority</th>
             <th className="px-3 py-2">Status</th>
             <th className="px-3 py-2">Assigned</th>
             <th className="px-3 py-2">Follow-up</th>
@@ -577,9 +681,9 @@ function ListView({ cases }: { cases: LostItemCaseWithRelations[] }) {
                 <div className="font-medium line-clamp-1">
                   {c.item_description}
                 </div>
-                {c.item_category ? (
+                {c.found_location ? (
                   <div className="text-[11px] text-muted-foreground">
-                    {c.item_category}
+                    {c.found_location}
                   </div>
                 ) : null}
               </td>
@@ -588,9 +692,6 @@ function ListView({ cases }: { cases: LostItemCaseWithRelations[] }) {
               </td>
               <td className="px-3 py-2 text-muted-foreground">
                 {c.guest_name ?? "—"}
-              </td>
-              <td className="px-3 py-2">
-                <PriorityPill priority={c.priority} />
               </td>
               <td className="px-3 py-2">
                 <StatusBadge status={c.status} />
@@ -623,7 +724,7 @@ function EmptyState({ onNew }: { onNew: () => void }) {
       <h3 className="font-heading text-lg font-semibold">No lost items yet</h3>
       <p className="max-w-sm text-sm text-muted-foreground">
         When a guest tells the team they left something, log a case here and
-        track it from intake through return.
+        track it from pickup through return.
       </p>
       <button
         type="button"
@@ -636,4 +737,3 @@ function EmptyState({ onNew }: { onNew: () => void }) {
     </div>
   );
 }
-

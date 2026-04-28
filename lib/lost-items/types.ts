@@ -1,50 +1,44 @@
 /**
  * Lost / left-behind items tracker — type definitions.
- * Mirrors supabase/migrations/0024_lost_items.sql.
+ * Mirrors supabase/migrations/0024_lost_items.sql + 0025_lost_items_workflow_v2.sql.
+ *
+ * Final workflow (Jack's model):
+ *   pending_pickup → picked_up → delivered → completed
+ *   plus terminal "failed" state.
  */
 
 export const LOST_ITEM_STATUSES = [
-  "intake",
   "pending_pickup",
   "picked_up",
-  "in_transit",
   "delivered",
+  "failed",
   "completed",
-  "cancelled",
 ] as const;
 export type LostItemStatus = (typeof LOST_ITEM_STATUSES)[number];
 
 export const LOST_ITEM_STATUS_LABELS: Record<LostItemStatus, string> = {
-  intake: "Intake",
-  pending_pickup: "Pending pickup",
-  picked_up: "Picked up",
-  in_transit: "In transit",
+  pending_pickup: "Pending Pickup",
+  picked_up: "Picked Up",
   delivered: "Delivered",
+  failed: "Failed",
   completed: "Completed",
-  cancelled: "Cancelled",
 };
 
 /** Statuses considered "open" / actionable. */
 export const OPEN_LOST_ITEM_STATUSES: LostItemStatus[] = [
-  "intake",
   "pending_pickup",
   "picked_up",
-  "in_transit",
   "delivered",
 ];
 
-/** Pipeline ordering for board view. */
+/** Pipeline ordering for board view (left → right columns). */
 export const LOST_ITEM_PIPELINE: LostItemStatus[] = [
-  "intake",
   "pending_pickup",
   "picked_up",
-  "in_transit",
   "delivered",
+  "failed",
   "completed",
 ];
-
-export const LOST_ITEM_PRIORITIES = ["urgent", "high", "normal", "low"] as const;
-export type LostItemPriority = (typeof LOST_ITEM_PRIORITIES)[number];
 
 export const LOST_ITEM_SOURCES = [
   "internal_form",
@@ -67,10 +61,8 @@ export interface LostItemCase {
   case_number: string;
 
   status: LostItemStatus;
-  priority: LostItemPriority;
 
   item_description: string;
-  item_category: string | null;
   found_location: string | null;
   photo_urls: string[];
 
@@ -80,7 +72,9 @@ export interface LostItemCase {
   guest_name: string | null;
   guest_email: string | null;
   guest_phone: string | null;
-  reservation_ref: string | null;
+
+  slack_thread_url: string | null;
+  conversation_url: string | null;
 
   cleaning_vendor: string | null;
   pickup_scheduled_at: string | null;
@@ -148,7 +142,6 @@ export interface LostItemEventWithActor extends LostItemEvent {
 export type LostItemFilter = {
   search?: string;
   status?: LostItemStatus | "all" | "open";
-  priority?: LostItemPriority | "all";
   property_id?: string | "all";
   assigned_to?: string | "all" | "unassigned";
   overdue?: boolean;
@@ -156,7 +149,6 @@ export type LostItemFilter = {
 
 export type CreateLostItemInput = {
   item_description: string;
-  item_category?: string | null;
   found_location?: string | null;
   photo_urls?: string[];
 
@@ -166,9 +158,10 @@ export type CreateLostItemInput = {
   guest_name?: string | null;
   guest_email?: string | null;
   guest_phone?: string | null;
-  reservation_ref?: string | null;
 
-  priority?: LostItemPriority;
+  slack_thread_url?: string | null;
+  conversation_url?: string | null;
+
   status?: LostItemStatus;
 
   cleaning_vendor?: string | null;

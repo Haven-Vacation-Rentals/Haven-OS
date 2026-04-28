@@ -1,20 +1,23 @@
 /**
  * GET   /api/lost-items/:id
  * PATCH /api/lost-items/:id
+ * POST  /api/lost-items/:id/comments  (handled below via POST + ?action=comment)
  *
  * External-agent reads + updates for a single case. Same auth as the
  * collection endpoint (HAVEN_LOST_ITEMS_API_KEY).
  *
  * `:id` accepts either the UUID or the case_number (LI-001023).
+ *
+ * To add a comment from an external system, POST to this endpoint with
+ *   ?action=comment   and  body { "body": "..." }
+ * (We expose comments here rather than as a nested route to keep the
+ * external surface small.)
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminClient } from "@/lib/supabase/admin";
-import { updateCaseRaw } from "@/lib/lost-items/actions";
-import type {
-  LostItemPriority,
-  LostItemStatus,
-} from "@/lib/lost-items/types";
+import { updateCaseRaw, addCommentRaw } from "@/lib/lost-items/actions";
+import type { LostItemStatus } from "@/lib/lost-items/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -88,7 +91,6 @@ export async function GET(
 
 type PatchBody = {
   status?: LostItemStatus;
-  priority?: LostItemPriority;
   pickup_scheduled_at?: string | null;
   pickup_completed_at?: string | null;
   shipping_carrier?: string | null;
@@ -100,6 +102,8 @@ type PatchBody = {
   follow_up_date?: string | null;
   notes?: string | null;
   external_url?: string | null;
+  slack_thread_url?: string | null;
+  conversation_url?: string | null;
 };
 
 export async function PATCH(
@@ -138,4 +142,61 @@ export async function PATCH(
   }
 
   return NextResponse.json({ ok: true, case: result.data });
+}
+
+/**
+ * POST /api/lost-items/:id?action=comment   { "body": "..." }
+ *
+ * Adds a comment from an external partner. The comment is recorded with
+ * actor_label so the team sees which system posted it.
+ */
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const auth = checkApiKey(req);
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+
+  const { id } = await params;
+  const url = new URL(req.url);
+  const action = url.searchParams.get("action");
+  if (action !== "comment") {
+    return NextResponse.json(
+      { error: "Unsupported action. Use ?action=comment." },
+      { status: 400 },
+    );
+  }
+
+  let body: { body?: string };
+  try {
+    body = (await req.json()) as { body?: string };
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  const text = body.body?.trim();
+  if (!text) {
+    return NextResponse.json({ error: "body is required" }, { status: 400 });
+  }
+
+  const supabase = getAdminClient();
+  const realId = await resolveId(supabase, id);
+  if (!realId) {
+    return NextResponse.json({ error: "Case not found" }, { status: 404 });
+  }
+
+  const result = await addCommentRaw(
+    realId,
+    text,
+    {
+      actor_label: `external:${
+        req.headers.get("x-haven-source") ?? "api"
+      }`,
+    },
+    supabase,
+  );
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: 400 });
+  }
+
+  return NextResponse.json({ ok: true });
 }

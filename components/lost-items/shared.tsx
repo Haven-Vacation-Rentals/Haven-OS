@@ -2,24 +2,20 @@
 
 import {
   LOST_ITEM_STATUS_LABELS,
-  type LostItemPriority,
   type LostItemStatus,
 } from "@/lib/lost-items/types";
 
 const STATUS_TONE: Record<LostItemStatus, string> = {
-  intake: "bg-slate-100 text-slate-700 border-slate-200",
   pending_pickup:
     "bg-amber-50 text-amber-800 border-amber-200",
   picked_up:
     "bg-blue-50 text-blue-800 border-blue-200",
-  in_transit:
-    "bg-indigo-50 text-indigo-800 border-indigo-200",
   delivered:
     "bg-teal-50 text-teal-800 border-teal-200",
+  failed:
+    "bg-rose-50 text-rose-700 border-rose-200",
   completed:
     "bg-emerald-50 text-emerald-800 border-emerald-200",
-  cancelled:
-    "bg-rose-50 text-rose-700 border-rose-200",
 };
 
 export function StatusBadge({ status }: { status: LostItemStatus }) {
@@ -31,30 +27,6 @@ export function StatusBadge({ status }: { status: LostItemStatus }) {
       }
     >
       {LOST_ITEM_STATUS_LABELS[status]}
-    </span>
-  );
-}
-
-const PRIORITY_TONE: Record<LostItemPriority, string> = {
-  urgent: "bg-rose-600 text-white",
-  high: "bg-rose-100 text-rose-800",
-  normal: "bg-slate-100 text-slate-700",
-  low: "bg-slate-50 text-slate-500",
-};
-
-export function PriorityPill({
-  priority,
-}: {
-  priority: LostItemPriority;
-}) {
-  return (
-    <span
-      className={
-        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider " +
-        PRIORITY_TONE[priority]
-      }
-    >
-      {priority}
     </span>
   );
 }

@@ -19,6 +19,20 @@ return `503` — the API never accepts anonymous writes. Generate a key
 with `openssl rand -hex 32` and add it to Vercel under
 **Settings → Environment Variables → Production + Preview**.
 
+## Workflow
+
+Cases move through this fixed pipeline:
+
+```
+pending_pickup → picked_up → delivered → completed
+```
+
+`failed` is a terminal state for cases that can't be recovered (guest
+never claimed, item lost in transit, duplicate, etc.). Status transitions
+auto-stamp the matching milestone timestamp (`picked_up →
+pickup_completed_at`, `delivered → delivered_at`, `completed →
+completed_at`). You can also pass any timestamp explicitly to override.
+
 ## Endpoints
 
 ### `POST /api/lost-items` — create or upsert
@@ -26,14 +40,13 @@ with `openssl rand -hex 32` and add it to Vercel under
 ```json
 {
   "item_description": "Black iPhone 15",
-  "item_category": "electronics",
   "found_location": "left bedroom nightstand",
   "property_name": "Riverbend Lodge",
   "guest_name": "Jane Smith",
   "guest_email": "jane@example.com",
   "guest_phone": "+1-555-1234",
-  "reservation_ref": "HMABC123",
-  "priority": "high",
+  "slack_thread_url": "https://haven.slack.com/archives/C123/p1700000000",
+  "conversation_url": "https://app.hostaway.com/conversations/9921",
   "follow_up_date": "2026-05-01",
   "cleaning_vendor": "Smoky Mountain Cleaners",
   "external_source": "breezeway",
@@ -50,13 +63,14 @@ with `openssl rand -hex 32` and add it to Vercel under
   a second call with the same pair returns the existing case instead of
   duplicating it.
 - `source` defaults to `external_agent` when posted via this API.
+- `status` defaults to `pending_pickup`.
 
 Response:
 
 ```json
 {
   "ok": true,
-  "case": { "id": "...", "case_number": "LI-001023", "status": "intake", ... },
+  "case": { "id": "...", "case_number": "LI-001023", "status": "pending_pickup", ... },
   "url": "https://os.havenvacationrentals.com/operations/lost-items/<id>"
 }
 ```
@@ -75,18 +89,30 @@ Common patch bodies:
 
 ```json
 { "status": "picked_up" }
-{ "status": "in_transit", "shipping_carrier": "USPS", "shipping_tracking": "9400..." }
-{ "status": "delivered", "delivered_at": "2026-04-30T18:00:00Z" }
+{ "status": "delivered", "shipping_carrier": "USPS", "shipping_tracking": "9400..." }
 { "status": "completed", "notes": "Guest confirmed receipt." }
+{ "status": "failed", "notes": "Guest never responded after 6 weeks." }
+{ "slack_thread_url": "https://haven.slack.com/archives/C123/p1700000123" }
 ```
 
-Status transitions auto-stamp the matching milestone timestamp
-(`picked_up → pickup_completed_at`, `in_transit → shipped_at`,
-`delivered → delivered_at`, `completed → completed_at`). You can also
-pass any timestamp explicitly to override.
+Patchable fields: `status`, `pickup_scheduled_at`, `pickup_completed_at`,
+`shipping_carrier`, `shipping_tracking`, `shipped_at`, `delivered_at`,
+`return_method` (`shipped|guest_pickup|in_person|other`),
+`cleaning_vendor`, `follow_up_date`, `notes`, `external_url`,
+`slack_thread_url`, `conversation_url`.
 
 Optional header `x-haven-source: <label>` is recorded on the activity
 event so the Haven team can see which partner made the change.
+
+### `POST /api/lost-items/:id?action=comment` — add a comment
+
+```json
+{ "body": "Vendor confirmed pickup, item is in their van." }
+```
+
+The comment lands in the case's activity feed with `actor_label =
+external:<x-haven-source or "api">`. Use this to keep the team in the
+loop from external systems.
 
 ## Stable identifiers
 

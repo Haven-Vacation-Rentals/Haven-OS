@@ -8,7 +8,6 @@ import type {
   LostItemCaseWithRelations,
   LostItemEventWithActor,
   LostItemFilter,
-  LostItemPriority,
   LostItemStatus,
   CreateLostItemInput,
   UpdateLostItemInput,
@@ -52,9 +51,6 @@ export async function listCases(
       q = q.eq("status", filter.status);
     }
   }
-  if (filter?.priority && filter.priority !== "all") {
-    q = q.eq("priority", filter.priority);
-  }
   if (filter?.property_id && filter.property_id !== "all") {
     q = q.eq("property_id", filter.property_id);
   }
@@ -81,16 +77,16 @@ export async function listCases(
       const haystack = [
         r.case_number,
         r.item_description,
-        r.item_category,
         r.found_location,
         r.guest_name,
         r.guest_email,
         r.guest_phone,
-        r.reservation_ref,
         r.property_name,
         r.property?.name ?? null,
         r.cleaning_vendor,
         r.notes,
+        r.slack_thread_url,
+        r.conversation_url,
       ]
         .filter(Boolean)
         .map((s) => String(s).toLowerCase())
@@ -186,8 +182,6 @@ export async function createCase(
 /**
  * Internal: insert a case using the supplied client. Reused by both the
  * server action (RLS-aware client) and the API route handler (service-role).
- *
- * Returns the same tagged shape as createCase.
  */
 export async function createCaseRaw(
   input: CreateLostItemInput & { created_by?: string | null },
@@ -201,8 +195,6 @@ export async function createCaseRaw(
       return { ok: false, error: "Item description is required" };
     }
 
-    // Resolve property name from id when only id was given (UI flow), and
-    // vice-versa for the API flow.
     let property_id = input.property_id ?? null;
     let property_name = input.property_name ?? null;
     if (property_id && !property_name) {
@@ -224,7 +216,6 @@ export async function createCaseRaw(
 
     const row: Record<string, unknown> = {
       item_description: description,
-      item_category: input.item_category ?? null,
       found_location: input.found_location ?? null,
       photo_urls: input.photo_urls ?? [],
       property_id,
@@ -232,9 +223,9 @@ export async function createCaseRaw(
       guest_name: input.guest_name ?? null,
       guest_email: input.guest_email ?? null,
       guest_phone: input.guest_phone ?? null,
-      reservation_ref: input.reservation_ref ?? null,
-      priority: input.priority ?? "normal",
-      status: input.status ?? "intake",
+      slack_thread_url: input.slack_thread_url ?? null,
+      conversation_url: input.conversation_url ?? null,
+      status: input.status ?? "pending_pickup",
       cleaning_vendor: input.cleaning_vendor ?? null,
       follow_up_date: input.follow_up_date ?? null,
       assigned_to: input.assigned_to ?? null,
@@ -328,14 +319,12 @@ export async function updateCaseRaw(
       clean[k] = v;
     }
 
-    // Status transitions stamp the milestone timestamp + auto-complete.
+    // Status transitions stamp the matching milestone timestamp. Failed
+    // is terminal but does not stamp anything.
     if (typeof clean.status === "string") {
       const next = clean.status as LostItemStatus;
       if (next === "picked_up" && !before.pickup_completed_at) {
         clean.pickup_completed_at = new Date().toISOString();
-      }
-      if (next === "in_transit" && !before.shipped_at) {
-        clean.shipped_at = new Date().toISOString();
       }
       if (next === "delivered" && !before.delivered_at) {
         clean.delivered_at = new Date().toISOString();
@@ -343,7 +332,7 @@ export async function updateCaseRaw(
       if (next === "completed" && !before.completed_at) {
         clean.completed_at = new Date().toISOString();
       }
-      if (next !== "completed" && next !== "cancelled") {
+      if (next !== "completed" && next !== "failed") {
         clean.completed_at = null;
       }
     }
@@ -356,7 +345,6 @@ export async function updateCaseRaw(
       .single();
     if (error) return { ok: false, error: error.message };
 
-    // Timeline events for status / assignment changes.
     const events: Array<Record<string, unknown>> = [];
     if (
       typeof patch.status === "string" &&
@@ -405,13 +393,6 @@ export async function setStatus(
   return updateCase(id, { status });
 }
 
-export async function setPriority(
-  id: string,
-  priority: LostItemPriority,
-): Promise<UpdateCaseResult> {
-  return updateCase(id, { priority });
-}
-
 export async function setAssignee(
   id: string,
   assignedTo: string | null,
@@ -439,6 +420,39 @@ export async function addComment(
       event_type: "comment",
       body: text,
       actor_id: userId,
+    });
+    if (error) return { ok: false, error: error.message };
+    revalidateLostItems(caseId);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to add comment",
+    };
+  }
+}
+
+/**
+ * Variant of addComment used by external paths (API / co-pilot tool with
+ * a pre-resolved actor). Server action callers should use addComment.
+ */
+export async function addCommentRaw(
+  caseId: string,
+  body: string,
+  meta: { actor_id?: string | null; actor_label?: string | null } = {},
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  clientOverride?: any,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const text = body?.trim();
+    if (!text) return { ok: false, error: "Comment cannot be empty" };
+    const supabase = clientOverride ?? (await db());
+    const { error } = await supabase.from("lost_item_events").insert({
+      case_id: caseId,
+      event_type: "comment",
+      body: text,
+      actor_id: meta.actor_id ?? null,
+      actor_label: meta.actor_label ?? null,
     });
     if (error) return { ok: false, error: error.message };
     revalidateLostItems(caseId);

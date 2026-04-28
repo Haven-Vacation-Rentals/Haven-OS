@@ -4,10 +4,6 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { createCase } from "@/lib/lost-items/actions";
-import {
-  LOST_ITEM_PRIORITIES,
-  type LostItemPriority,
-} from "@/lib/lost-items/types";
 
 type Member = {
   id: string;
@@ -32,14 +28,13 @@ export function LostItemNewForm({
   const [error, setError] = useState<string | null>(null);
 
   const [itemDescription, setItemDescription] = useState("");
-  const [itemCategory, setItemCategory] = useState("");
   const [foundLocation, setFoundLocation] = useState("");
   const [propertyId, setPropertyId] = useState("");
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
-  const [reservationRef, setReservationRef] = useState("");
-  const [priority, setPriority] = useState<LostItemPriority>("normal");
+  const [slackThreadUrl, setSlackThreadUrl] = useState("");
+  const [conversationUrl, setConversationUrl] = useState("");
   const [followUpDate, setFollowUpDate] = useState("");
   const [assignedTo, setAssignedTo] = useState("");
   const [cleaningVendor, setCleaningVendor] = useState("");
@@ -55,14 +50,13 @@ export function LostItemNewForm({
     startTransition(async () => {
       const res = await createCase({
         item_description: itemDescription.trim(),
-        item_category: itemCategory.trim() || null,
         found_location: foundLocation.trim() || null,
         property_id: propertyId || null,
         guest_name: guestName.trim() || null,
         guest_email: guestEmail.trim() || null,
         guest_phone: guestPhone.trim() || null,
-        reservation_ref: reservationRef.trim() || null,
-        priority,
+        slack_thread_url: slackThreadUrl.trim() || null,
+        conversation_url: conversationUrl.trim() || null,
         follow_up_date: followUpDate || null,
         assigned_to: assignedTo || null,
         cleaning_vendor: cleaningVendor.trim() || null,
@@ -89,46 +83,28 @@ export function LostItemNewForm({
         />
       </Field>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Category">
-          <Input
-            value={itemCategory}
-            onChange={(e) => setItemCategory(e.target.value)}
-            placeholder="electronics, clothing, jewelry…"
-          />
-        </Field>
-        <Field label="Where item was found / left">
-          <Input
-            value={foundLocation}
-            onChange={(e) => setFoundLocation(e.target.value)}
-            placeholder="left bedroom nightstand"
-          />
-        </Field>
-      </div>
+      <Field label="Where item was found / left">
+        <Input
+          value={foundLocation}
+          onChange={(e) => setFoundLocation(e.target.value)}
+          placeholder="left bedroom nightstand"
+        />
+      </Field>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Property">
-          <select
-            value={propertyId}
-            onChange={(e) => setPropertyId(e.target.value)}
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
-          >
-            <option value="">Select property…</option>
-            {properties.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Reservation #">
-          <Input
-            value={reservationRef}
-            onChange={(e) => setReservationRef(e.target.value)}
-            placeholder="HMABC123 / Airbnb code"
-          />
-        </Field>
-      </div>
+      <Field label="Property">
+        <select
+          value={propertyId}
+          onChange={(e) => setPropertyId(e.target.value)}
+          className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
+        >
+          <option value="">Select property…</option>
+          {properties.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </Field>
 
       <div className="grid grid-cols-3 gap-3">
         <Field label="Guest name">
@@ -152,20 +128,24 @@ export function LostItemNewForm({
         </Field>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        <Field label="Priority">
-          <select
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as LostItemPriority)}
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
-          >
-            {LOST_ITEM_PRIORITIES.map((p) => (
-              <option key={p} value={p}>
-                {p[0].toUpperCase() + p.slice(1)}
-              </option>
-            ))}
-          </select>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Slack thread link">
+          <Input
+            value={slackThreadUrl}
+            onChange={(e) => setSlackThreadUrl(e.target.value)}
+            placeholder="https://haven.slack.com/archives/…"
+          />
         </Field>
+        <Field label="Conversation link">
+          <Input
+            value={conversationUrl}
+            onChange={(e) => setConversationUrl(e.target.value)}
+            placeholder="Hostaway/Airbnb/email thread URL"
+          />
+        </Field>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
         <Field label="Follow-up date">
           <Input
             type="date"
