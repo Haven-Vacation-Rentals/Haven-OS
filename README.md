@@ -1,197 +1,213 @@
 # Haven OS
 
-The operating system for [Haven Vacation Rentals](https://havenvacationrentals.com) — internal-only, one home for every module we build over time. Module 1 is **Work**, a native replacement for ClickUp.
+The internal operating system for [Haven Vacation Rentals](https://havenvacationrentals.com) — one app for property operations, GTM, content, HR, and admin tooling.
+
+- **Production:** <https://www.havenvros.com> (canonical)
+- **Legacy Vercel domain:** <https://haven-os-five.vercel.app> (redirects/back-compat only)
+- **Active feature branch:** `claude/haven-os-ui-design-7hPCX` — most recent product work lives here, not on `main`. Cut PRs from this branch.
 
 ---
 
-## What's in this first draft (Phase 0 + Phase 1)
+## Stack
 
-- Next.js 15 App Router + TypeScript (strict) + Tailwind v3.4
-- Haven design tokens wired to Tailwind: Coral `#FF564E`, Charcoal `#424242`, Sage Mist `#EDF0EE`, White
-- Typography: **Futura PT** (headings) via Adobe Typekit kit `sjo0mew`, **Raleway** (body/UI) via `next/font/google`
-- App shell with sidebar, topbar, ⌘K command palette, dark mode toggle
-- Dashboard mock (KPI cards, profit distribution, stages, activity) modeled on the Tendwell reference but re-skinned to Haven
-- Haven monoline badge recreated as inline SVG (`components/brand/haven-logo.tsx`)
-- Supabase SSR client stubs (`lib/supabase/*`), middleware session refresh
-- Login page with Google OAuth stub (enables once `.env.local` is populated)
-- "Coming soon" pages for every other module so the sidebar is clickable end-to-end
+- **Next.js 15** App Router, **React 19**, **TypeScript** (strict)
+- **Tailwind v3.4** with Haven design tokens (Coral `#FF564E`, Charcoal `#424242`, Sage Mist `#EDF0EE`)
+- **Supabase** — Postgres, Auth (Google OAuth), Row-Level Security
+- **Vercel** for hosting + preview deployments
+- **Anthropic Claude** — Managed Agents for the HavenOS assistant and Content Studio
 
-Nothing in this draft hits a database yet — everything is mock data so you can evaluate the aesthetic before we pour concrete on the Work module.
+---
+
+## Modules
+
+Sidebar layout, in order:
+
+### Overview
+- **The Board** — top-level operational dashboard.
+- **My Tasks** — per-user task inbox.
+
+### Operations
+- **Project Management** (`/work`) — projects, tasks, assignments.
+- **Properties** (`/properties`) — property roster and metadata.
+- **Onboarding** (`/onboarding`) — new-property onboarding workflow.
+- **Lost Items** (`/operations/lost-items`) — guest lost-and-found case tracker (see below).
+
+### GTM
+- **Sales Pitches** (`/sales`) — owner-facing pitch pages with draft/published flow.
+- **Content Studio** (`/content`) — Haven Homeowner Blog pipeline (see below).
+
+### Admin
+- **Northstar Scorecard** (`/scorecard`) — company KPIs.
+- **Agents** (`/agents`) — Claude Managed Agent registry + tool wiring.
+- **HR** (`/hr`) — people directory + surveys (see below).
+- **Settings** (`/settings`).
+
+---
+
+## Content Studio
+
+App-native SEO + GEO blog workspace at `/content`. Replaced the previous ClickUp-based workflow — Content Studio is now the source of truth for the Haven Homeowner Blog.
+
+- **Pipeline stages:** Idea → In Progress → Draft → Complete.
+- **Workflow:** left-side chat with the content agent, right-side article editor.
+- **Features:**
+  - Paste-draft import from existing copy.
+  - SEO/GEO optimization passes.
+  - Real inline hyperlink insertion (anchor text → URL written into the canvas).
+  - Post / Source view toggle.
+  - WordPress draft push when `HAVEN_WP_*` env vars are configured (drafts only — never publishes directly).
+  - One-click topic delete.
+- **Managed agent ID:** `agent_011CaT8cFgxnMar5p8jGrr4q` — set as `CLAUDE_CONTENT_AGENT_ID`. Without it, the studio falls back to a local rule-based agent.
+- See [`docs/CONTENT_STUDIO.md`](docs/CONTENT_STUDIO.md) for full agent + connector details.
+
+---
+
+## HR
+
+People directory + survey tooling at `/hr`. Gated by **HR access grants** — admins do **not** automatically receive HR access; it must be granted explicitly.
+
+### People directory
+Departments:
+- Maintenance and Field Ops
+- Guest Experience
+- Owner Relations
+- General Operations
+
+### HR Surveys
+- Internal survey builder with live editing.
+- Public submission form at `/survey/[slug]` — no login required.
+- Responses stream back into the HR survey detail view.
+- Anonymous submissions are scoped via Supabase RLS (see migration `0027_hr_survey_anon_answer_rls_fix.sql`).
+
+---
+
+## Lost Items
+
+Guest lost-and-found tracker at `/operations/lost-items`. Kanban built on `@dnd-kit`.
+
+- **Statuses (exact):** Pending Pickup, Picked Up, Delivered, Failed, Completed.
+- **Linked context:** Slack thread URL + Conversation URL fields per case.
+- **First-class comments** on each case.
+- **External API:** `/api/lost-items` endpoints, protected by `HAVEN_LOST_ITEMS_API_KEY` (header `x-haven-api-key: <key>`). Used by cleaning vendors and third-party trackers to create/update cases.
+- See [`docs/LOST_ITEMS_API.md`](docs/LOST_ITEMS_API.md).
+
+---
+
+## Sales Pitches
+
+Owner-facing pitch pages under `/sales`. Drafts edit privately; publishing exposes a public pitch URL.
 
 ---
 
 ## Run it locally
 
 ```bash
-pnpm install     # or npm install / yarn
-cp .env.example .env.local
-pnpm dev
+npm install
+cp .env.example .env.local   # then fill in the vars below
+npm run dev
 ```
 
-Open <http://localhost:3000> — login page first, `/dashboard` after sign-in.
+Open <http://localhost:3000>.
 
-Without a Supabase project the app still boots; the login page just shows a setup banner.
+Useful scripts:
 
-### Environment variables
+```bash
+npm run dev         # next dev
+npm run build       # next build
+npm run typecheck   # tsc --noEmit
+npm run lint        # next lint
+```
+
+---
+
+## Environment variables
 
 | Var | Purpose |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-only privileged key |
-| `ANTHROPIC_API_KEY` | For Haven Assistant (Phase 4) |
-| `NEXT_PUBLIC_APP_URL` | Absolute app URL (e.g. `https://os.havenvacationrentals.com`) |
-| `CLAUDE_CONTENT_AGENT_ID` | Optional Content Studio managed agent. Falls back to a local rule-based agent. Recommended value: `agent_011CaT8cFgxnMar5p8jGrr4q` (created in the Claude Console). See [`docs/CONTENT_STUDIO.md`](docs/CONTENT_STUDIO.md) for the auto-added WordPress.com / Slack connector caveat. |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL. |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon (browser-safe) key. |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Server-only.** Privileged Supabase key — never expose to the browser. |
+| `NEXT_PUBLIC_APP_URL` | Canonical app URL. **Production:** `https://www.havenvros.com`. Leave blank on Preview so each deploy resolves itself via `VERCEL_URL`. |
+| `ANTHROPIC_API_KEY` | Anthropic API key for the HavenOS assistant + Content Studio agent calls. |
+| `CLAUDE_CONTENT_AGENT_ID` | Content Studio managed agent ID. Recommended: `agent_011CaT8cFgxnMar5p8jGrr4q`. Falls back to a local rule-based agent if unset. |
 | `CLAUDE_CONTENT_ENVIRONMENT_ID` | Optional companion environment for the Content Studio agent. |
-| `HAVEN_WP_URL` | WordPress site for the Content Studio draft queue (defaults to `https://havenvacationrentals.com`). |
+| `HAVEN_LOST_ITEMS_API_KEY` | Shared secret for the external Lost Items API. Required for any non-Haven caller. |
+| `HAVEN_WP_URL` | WordPress site for Content Studio drafts (defaults to `https://havenvacationrentals.com`). |
 | `HAVEN_WP_USER` | WordPress user with draft permissions. |
-| `HAVEN_WP_APP_PASSWORD` | WordPress application password. Drafts only — never publishes directly. |
-| `HAVEN_LOST_ITEMS_API_KEY` | Shared secret for the external **Lost Items** API (`/api/lost-items`). Required when external partners (cleaning vendors, third-party trackers) need to create or update cases. Header: `x-haven-api-key: <key>`. See [`docs/LOST_ITEMS_API.md`](docs/LOST_ITEMS_API.md). |
+| `HAVEN_WP_APP_PASSWORD` | WordPress application password. Drafts only. |
+
+Other Claude Managed Agent IDs (HavenOS assistant, etc.) are tracked in Vercel env per environment.
 
 ---
 
-## Supabase setup
+## Supabase
 
-One-time, takes ~10 minutes.
+### Migrations
 
-### 1. Create the project
-1. Go to <https://supabase.com> → **New project** (pick the closest region).
-2. Copy **Project URL** and **anon public key** into `.env.local`:
-   ```
-   NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
-   SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOi...   # Settings → API → service_role
-   ```
+SQL migrations live in [`supabase/migrations/`](supabase/migrations) and are **applied manually** against the Supabase project (paste into the SQL Editor or `supabase db push` from a local CLI). They are not run automatically by deploy.
 
-### 2. Run the initial migration
-Open **SQL Editor** in Supabase and paste the contents of
-[`supabase/migrations/0001_init_profiles.sql`](supabase/migrations/0001_init_profiles.sql) — creates the `profiles` table, RLS policies, and the auto-provision trigger.
+Latest known migration: `0027_hr_survey_anon_answer_rls_fix.sql`. When adding a new migration, bump the prefix and apply it before merging the PR that depends on it.
 
-### 3. Enable Google OAuth
-1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an **OAuth 2.0 Client ID** (Web application).
-   - **Authorized JavaScript origins:** `http://localhost:3000`, your Vercel URL.
-   - **Authorized redirect URIs:** `https://YOUR-PROJECT.supabase.co/auth/v1/callback`.
-2. In Supabase: **Authentication → Providers → Google** → paste the Client ID + secret → Save.
-3. In Supabase: **Authentication → URL Configuration**:
-   - **Site URL:** `http://localhost:3000` (dev) or your production URL.
-   - **Redirect URLs:** add both `http://localhost:3000/auth/callback` and `https://YOUR-APP/auth/callback`.
+### Auth setup
 
-### 4. (Optional) Restrict to Haven Google Workspace
-In Google Cloud Console → **OAuth consent screen** → set **User type = Internal** so only `@havenvacationrentals.com` accounts can complete the flow. That + the redirect URL allowlist is enough to keep the tool internal without any per-user invite flow.
+1. Supabase → **Authentication → Providers → Google** — paste the OAuth Client ID + secret from Google Cloud Console.
+2. Supabase → **Authentication → URL Configuration**:
+   - **Site URL:** `https://www.havenvros.com`
+   - **Redirect URLs:** must include the custom-domain callback `https://www.havenvros.com/auth/callback`, plus `http://localhost:3000/auth/callback` for dev. Optionally include the legacy Vercel domain callback during the cutover window.
+3. In Google Cloud Console → OAuth consent screen, set **User type = Internal** so only `@havenvacationrentals.com` accounts can complete sign-in.
 
-### 5. Restart dev server
-`pnpm dev` — login page should now let you click **Continue with Google**.
+### Security model
+
+- **Service-role key is server-only.** Used in route handlers/server components; never shipped to the browser.
+- **HR data is gated by HR access grants.** Admins are not auto-granted HR access; check `app/(app)/hr` and the access-control migrations (`0023_work_access_controls.sql`).
+- **Public survey submissions** rely on a scoped anon RLS policy — see `0027_hr_survey_anon_answer_rls_fix.sql`.
+- **Lost Items external API** requires the `HAVEN_LOST_ITEMS_API_KEY` header on every request.
 
 ---
 
-## Deploy to Vercel
+## Managed agent tools
 
-~5 minutes end-to-end once Supabase is set up.
-
-### 1. Import the repo
-1. <https://vercel.com/new> → **Import Git Repository** → select `haven-vacation-rentals/haven-os`.
-2. Framework Preset → **Next.js** (auto-detected).
-3. Root Directory → leave as `.` Build + Output settings → leave as defaults.
-4. **Don't click Deploy yet** — add env vars first (next step).
-
-### 2. Environment variables
-Open **Settings → Environment Variables** and add each of these. For each one, tick the environments it applies to.
-
-| Variable | Production | Preview | Development | Notes |
-|---|:-:|:-:|:-:|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | ✅ | ✅ | From Supabase → Settings → API |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | ✅ | ✅ | Same screen |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | ✅ | ✅ | Server-only. Same screen. |
-| `NEXT_PUBLIC_APP_URL` | ✅ | — | — | Set to your custom domain (e.g. `https://os.havenvacationrentals.com`). Leave blank on Preview so each preview redirects to itself via `VERCEL_URL`. |
-| `ANTHROPIC_API_KEY` | ✅ | ✅ | — | Only required once the Haven Assistant lands. |
-
-Then hit **Deploy**. First build takes about 60 seconds.
-
-### 3. Tell Supabase about your Vercel URLs
-Still in the Supabase dashboard → **Authentication → URL Configuration**:
-
-- **Site URL** → your production URL (e.g. `https://os.havenvacationrentals.com`).
-- **Redirect URLs** → add *all* of these:
-  ```
-  http://localhost:3000/auth/callback
-  https://os.havenvacationrentals.com/auth/callback   # or your vercel.app URL
-  https://haven-os-*-haven.vercel.app/auth/callback   # optional: wildcard for previews
-  ```
-  > The wildcard is only needed if you want Google sign-in to work on preview deployments. For an internal tool, many teams skip it and only auth-test on prod.
-
-### 4. (Optional but recommended) Custom domain
-1. Vercel → **Settings → Domains** → add `os.havenvacationrentals.com`.
-2. Add the CNAME record Vercel shows you to the Haven DNS.
-3. Update `NEXT_PUBLIC_APP_URL` (Production only) to the custom domain.
-4. In Supabase → URL Configuration, update **Site URL** and the Redirect URL list to use the custom domain.
-5. In Google Cloud → OAuth Client → **Authorized JavaScript origins**, add the custom domain.
-
-### 5. Restrict access (internal-only tool)
-Two layers of defense in depth:
-
-- **Google Workspace**: Google Cloud Console → **OAuth consent screen** → User type = **Internal**. Only `@havenvacationrentals.com` accounts can complete sign-in.
-- **Vercel Password Protection**: Vercel → **Settings → Deployment Protection** → enable *Vercel Authentication* on Preview environments so random preview URLs aren't crawlable. Production sits behind the Google Workspace check above, which is enough.
-
-### 6. Verify
-After the first deploy:
+When you change the agent tool registry, sync it to the Anthropic side after pulling Vercel env:
 
 ```bash
-curl https://os.havenvacationrentals.com/api/health
+npx vercel pull --yes --environment=production
+set -a && . .vercel/.env.production.local && set +a
+npx tsx scripts/sync-agent-tools.ts
 ```
 
-Should return JSON like:
+---
+
+## Deploy
+
+Standard flow:
+
+1. **Local sanity:** `npm run typecheck` and (when feasible) `npm run build`.
+2. **Commit + push** to the active feature branch.
+3. **Vercel** auto-builds on push.
+
+Remote Vercel builds occasionally flake. Proven fallback (deploys directly from your machine using prebuilt output):
+
+```bash
+npx vercel pull --yes --environment=production
+npx vercel build --prod
+npx vercel deploy --prebuilt --prod --yes
+```
+
+### Verify after deploy
+
+```bash
+curl https://www.havenvros.com/api/health
+```
+
+Expect:
+
 ```json
-{"ok":true,"app":"haven-os","env":"production","commit":"5c5835f","supabase":"configured"}
+{"ok":true,"app":"haven-os","env":"production","commit":"<sha>","supabase":"configured"}
 ```
 
-If `supabase: "missing"` the env vars didn't take — go re-check step 2 and redeploy.
+If `supabase: "missing"`, the env vars didn't take — re-check Vercel project settings and redeploy.
 
----
-
----
-
-## Roadmap
-
-| Phase | Scope | Status |
-|---|---|---|
-| 0 | Scaffold + design system | ✅ |
-| 1 | App shell, ⌘K, dashboard mock | ✅ |
-| 1.5 | Supabase Auth (Google OAuth), profiles table, RLS, gated routes | ✅ |
-| 1.6 | Vercel-ready: health probe, robots, VERCEL_URL-aware OAuth | ✅ |
-| 2 | **Work** — data model, Spaces/Lists/Tasks, List + Board + Calendar, custom fields, saved views | ⏭️ next |
-| 3 | Work power features — Timeline/Gantt, dependencies, recurring, Docs, time tracking | |
-| 4 | **Haven Assistant** — Claude Agent SDK in ⌘J drawer, context-aware, tool-use on Haven data | |
-| 5 | **Managed Agents** — YAML-defined long-horizon agents, audit log, spend caps, webhook ingest | |
-| 6 | Properties module — lifecycle, revenue, checklists | |
-| 7 | **Content Studio** — app-native SEO + GEO blog workspace, agent-driven editing, WordPress draft queue. See [`docs/CONTENT_STUDIO.md`](docs/CONTENT_STUDIO.md). | ✅ v1 |
-
----
-
-## Design system
-
-All tokens live in two places:
-
-1. `app/globals.css` — semantic CSS variables (`--accent`, `--foreground`, etc.) that flip on `.dark`.
-2. `tailwind.config.ts` — raw Haven palette (`haven-coral`, `haven-charcoal`, …) + semantic aliases.
-
-**Use the semantic names in components** (`bg-accent`, `text-foreground`) so dark mode and future re-skins are a one-file change.
-
-The primary-CTA variant of `<Button>` (`variant="cta"`) matches the havenvacationrentals.com button spec 1:1: pill radius, Raleway 14px/900, uppercase, 2px tracking, coral fill.
-
-### Logo
-
-The inline `<HavenLogo />` is a recreation. Drop the official PNG (`Haven-Logo-Black-Transparent-2.png`) into `public/brand/` and we'll swap the sidebar/login hero to the authoritative asset.
-
----
-
-## Haven Assistant — architecture preview
-
-Two tiers, both planned around Anthropic's current offerings:
-
-- **Tier A (sync, conversational)** — built on the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview) (TypeScript). Lives in the ⌘J drawer. Tools exposed to it are Haven-native (`tasks.create`, `people.lookup`, etc.), not shell. Streams responses with visible tool-use.
-- **Tier B (async, long-horizon)** — [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview). YAML-defined in `/agents/*.yaml`, invoked from the backend, results streamed back via `/api/agents/webhook`. For jobs like "audit every active property's onboarding."
-
-Every tool call is scoped by the caller's RBAC and written to an audit log. Destructive tools run in dry-run by default and require a human approve in a diff view.
+Spot-check live custom-domain routes (`/dashboard`, `/content`, `/operations/lost-items`, `/hr`) before declaring a deploy good.
 
 ---
 
@@ -199,19 +215,51 @@ Every tool call is scoped by the caller's RBAC and written to an audit log. Dest
 
 ```
 app/
-  (app)/            authenticated shell + module pages
-  (auth)/login      Google OAuth entry
-  layout.tsx        root — fonts, providers
-  globals.css       design tokens
+  (app)/
+    dashboard/         The Board
+    my-tasks/
+    work/              Project Management
+    properties/
+    onboarding/
+    operations/
+      lost-items/
+    sales/             Sales Pitches
+    content/           Content Studio
+    scorecard/         Northstar Scorecard
+    agents/            Managed Agent registry
+    hr/                People + Surveys
+    settings/
+  (auth)/login         Google OAuth entry
+  api/                 route handlers (incl. /api/health, /api/lost-items, /api/agents/*)
+  survey/[slug]/       public HR survey form
 components/
-  brand/            logo, topographic motif
-  shell/            sidebar, topbar, command palette, theme
-  ui/               Button, Card, Badge, Input
-  dashboard/        KPI + stage + activity widgets
-  soon.tsx          module placeholder page
+  brand/               logo, topographic motif
+  shell/               sidebar, topbar, command palette, theme
+  ui/                  Button, Card, Badge, Input, …
+  content/, hr/, lost-items/, sales/, work/   module-specific components
+docs/
+  CONTENT_STUDIO.md
+  LOST_ITEMS_API.md
 lib/
-  supabase/         ssr client/server/middleware
-  utils.ts          cn + formatters
-  fonts.ts          next/font setup
-middleware.ts       refreshes Supabase session on every request
+  supabase/            ssr client/server/middleware
+  utils.ts, fonts.ts
+scripts/
+  sync-agent-tools.ts  push tool registry to Claude Managed Agents
+supabase/migrations/   hand-applied SQL migrations
+middleware.ts          refreshes Supabase session on every request
 ```
+
+---
+
+## Design system
+
+Tokens live in two places:
+
+1. `app/globals.css` — semantic CSS variables (`--accent`, `--foreground`, …) that flip on `.dark`.
+2. `tailwind.config.ts` — raw Haven palette (`haven-coral`, `haven-charcoal`, …) + semantic aliases.
+
+Use the semantic names in components (`bg-accent`, `text-foreground`) so dark mode and future re-skins are a one-file change. The primary CTA `<Button variant="cta">` matches the havenvacationrentals.com button spec: pill radius, Raleway 14px/900, uppercase, 2px tracking, coral fill.
+
+Typography: **Futura PT** (headings) via Adobe Typekit kit `sjo0mew`; **Raleway** (body/UI) via `next/font/google`.
+
+The `<HavenLogo />` component is an inline SVG recreation of the Haven monoline badge.
