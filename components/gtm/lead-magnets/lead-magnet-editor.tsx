@@ -37,6 +37,7 @@ import {
   type LeadMagnetCta,
   type LeadMagnetCtaField,
 } from "@/lib/gtm/lead-magnets/actions";
+import { getHtmlDocument } from "@/lib/gtm/lead-magnets/html-document";
 
 const TEXTAREA_CLS =
   "w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:shadow-ring";
@@ -83,6 +84,11 @@ const SECTION_KINDS: { kind: string; label: string; template: () => LeadMagnetSe
       heading: "",
       body: "",
     }),
+  },
+  {
+    kind: "html_document",
+    label: "Full-page HTML document",
+    template: () => ({ kind: "html_document", html: "" }),
   },
 ];
 
@@ -237,6 +243,14 @@ export function LeadMagnetEditor({
             Add as many sections as you need. The public page renders them in
             order.
           </p>
+          {getHtmlDocument(content) ? (
+            <div className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-[12px] text-indigo-800">
+              This lead magnet uses a <strong>full-page HTML document</strong>.
+              The branded hero/CTA template is bypassed — the document is
+              rendered full-screen inside a sandboxed iframe. To return to the
+              branded template, remove this section.
+            </div>
+          ) : null}
 
           <div className="flex flex-col gap-3">
             {content.map((section, idx) => (
@@ -609,6 +623,8 @@ function SectionEditor({
           onChange={(e) => onChange({ ...section, body_md: e.target.value })}
           placeholder="Markdown supported. Headings, lists, **bold**, *italic*, [links](https://…), etc."
         />
+      ) : kind === "html_document" ? (
+        <HtmlDocumentEditor section={section} onChange={onChange} />
       ) : kind === "bullets" ? (
         <BulletsEditor section={section} onChange={onChange} />
       ) : kind === "stat_band" ? (
@@ -799,6 +815,36 @@ function FaqEditor({
       >
         + Add Q&amp;A
       </button>
+    </div>
+  );
+}
+
+function HtmlDocumentEditor({
+  section,
+  onChange,
+}: {
+  section: LeadMagnetSection;
+  onChange: (s: LeadMagnetSection) => void;
+}) {
+  const html = (section.html as string) ?? "";
+  const sizeKb = Math.round(new Blob([html]).size / 1024);
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-[12px] text-muted-foreground">
+        Paste a complete <code className="text-haven-coral-700">&lt;!DOCTYPE html&gt;</code>{" "}
+        document. The public page renders it full-screen inside a sandboxed
+        iframe — the rest of this lead magnet's branded template is bypassed.
+      </p>
+      <textarea
+        className={`${TEXTAREA_CLS} min-h-[260px] resize-y font-mono text-[12px]`}
+        value={html}
+        onChange={(e) => onChange({ ...section, html: e.target.value })}
+        placeholder="<!DOCTYPE html>…"
+        spellCheck={false}
+      />
+      <div className="text-[11px] text-muted-foreground">
+        {html ? `${sizeKb.toLocaleString()} KB · ${html.length.toLocaleString()} chars` : "Empty"}
+      </div>
     </div>
   );
 }

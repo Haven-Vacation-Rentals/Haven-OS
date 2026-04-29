@@ -4,7 +4,9 @@ import {
   getLeadMagnetBySlug,
   type LeadMagnet,
 } from "@/lib/gtm/lead-magnets/actions";
+import { getHtmlDocument } from "@/lib/gtm/lead-magnets/html-document";
 import { LeadMagnetTemplate } from "@/components/gtm/lead-magnets/lead-magnet-template";
+import { LeadMagnetHtmlDocument } from "@/components/gtm/lead-magnets/lead-magnet-html-document";
 import { ExpiredLeadMagnet } from "@/components/gtm/lead-magnets/expired-lead-magnet";
 import { canonicalUrl } from "@/lib/canonical-url";
 
@@ -49,6 +51,11 @@ export default async function LeadMagnetPage(props: {
   const isExpired = new Date(magnet.expires_at).getTime() < Date.now();
   if (isExpired || magnet.status !== "active") {
     return <ExpiredLeadMagnet title={magnet.title} />;
+  }
+
+  const htmlDoc = getHtmlDocument(magnet.content);
+  if (htmlDoc) {
+    return <LeadMagnetHtmlDocument html={htmlDoc.html} />;
   }
 
   return <LeadMagnetTemplate magnet={magnet} />;

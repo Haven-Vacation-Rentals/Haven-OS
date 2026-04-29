@@ -35,6 +35,7 @@ import {
   publishLeadMagnet,
   type LeadMagnet,
 } from "@/lib/gtm/lead-magnets/actions";
+import { getHtmlDocument } from "@/lib/gtm/lead-magnets/html-document";
 import { CreateLeadMagnetDialog } from "@/components/gtm/lead-magnets/create-lead-magnet-dialog";
 
 type Tab = "active" | "drafts" | "archived";
@@ -234,15 +235,27 @@ function Row({
     });
   };
 
+  const htmlDoc = getHtmlDocument(magnet.content);
+
   return (
     <tr className="border-t border-border hover:bg-surface-alt/30">
       <td className="px-4 py-3">
-        <Link
-          href={`/gtm/lead-magnets/${magnet.id}` as never}
-          className="font-semibold text-foreground hover:text-haven-coral"
-        >
-          {magnet.title}
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/gtm/lead-magnets/${magnet.id}` as never}
+            className="font-semibold text-foreground hover:text-haven-coral"
+          >
+            {magnet.title}
+          </Link>
+          {htmlDoc ? (
+            <span
+              className="rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-indigo-700"
+              title="This lead magnet renders a custom HTML document instead of the branded template."
+            >
+              HTML doc
+            </span>
+          ) : null}
+        </div>
         {magnet.subtitle ? (
           <div
             className="truncate text-[12px] text-muted-foreground"

@@ -34,7 +34,7 @@ Sidebar layout, in order:
 
 ### GTM
 - **Sales Pitches** (`/sales`) — owner-facing pitch pages with draft/published flow.
-- **Lead Magnets** (`/gtm/lead-magnets`) — branded landing pages at `/lead-magnet/<slug>` for guides, checklists, calculators. Flexible content sections (rich text / bullets / FAQ / stats / CTA), configurable capture forms, expiring public slugs, submission tracking.
+- **Lead Magnets** (`/gtm/lead-magnets`) — branded landing pages at `/lead-magnet/<slug>` for guides, checklists, calculators. Flexible content sections (rich text / bullets / FAQ / stats / CTA), configurable capture forms, expiring public slugs, submission tracking. Also supports a `html_document` section that renders an uploaded standalone HTML document full-screen inside a sandboxed iframe (`{ kind: "html_document", html: "<!DOCTYPE html>…" }`), for hosting custom one-off pages without forking the template.
 - **Content Studio** (`/content`) — Haven Homeowner Blog pipeline (see below).
 
 ### Admin

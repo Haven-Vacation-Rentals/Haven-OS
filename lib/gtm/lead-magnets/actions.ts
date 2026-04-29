@@ -35,7 +35,8 @@ export type LeadMagnetSectionKind =
   | "bullets"
   | "stat_band"
   | "faq"
-  | "cta_block";
+  | "cta_block"
+  | "html_document";
 
 export type LeadMagnetSection = {
   kind: LeadMagnetSectionKind | string;
@@ -43,6 +44,7 @@ export type LeadMagnetSection = {
   // a schema rev. The renderer is permissive and ignores unknown kinds.
   [k: string]: unknown;
 };
+
 
 export type LeadMagnetCtaField =
   | "name"
@@ -149,6 +151,19 @@ function generateSlug(): string {
   return hex;
 }
 
+function normalizeContent(raw: unknown): LeadMagnetSection[] {
+  if (Array.isArray(raw)) return raw as LeadMagnetSection[];
+  // Tolerate object-shaped html_document and any other top-level section
+  // by wrapping it in a single-element array. Anything else becomes [].
+  if (raw && typeof raw === "object") {
+    const r = raw as Record<string, unknown>;
+    if (typeof r.kind === "string") {
+      return [r as LeadMagnetSection];
+    }
+  }
+  return [];
+}
+
 function rowToLeadMagnet(r: Record<string, unknown>): LeadMagnet {
   return {
     id: r.id as string,
@@ -157,9 +172,7 @@ function rowToLeadMagnet(r: Record<string, unknown>): LeadMagnet {
     subtitle: (r.subtitle as string | null) ?? null,
     eyebrow: (r.eyebrow as string | null) ?? null,
     hero_image_url: (r.hero_image_url as string | null) ?? null,
-    content: Array.isArray(r.content)
-      ? (r.content as LeadMagnetSection[])
-      : [],
+    content: normalizeContent(r.content),
     cta: {
       ...DEFAULT_CTA,
       ...((r.cta as Record<string, unknown>) ?? {}),
