@@ -29,6 +29,7 @@ import * as hostaway from "@/lib/hostaway/actions";
 import * as admin from "@/lib/admin/actions";
 import * as sales from "@/lib/sales/actions";
 import { extractListing } from "@/lib/sales/listing-extractor";
+import * as leadMagnets from "@/lib/gtm/lead-magnets/actions";
 import {
   getPermissions,
   requireHrAccess,
@@ -2285,6 +2286,217 @@ export const TOOLS: ToolDef[] = [
   },
 
   // =========================================================================
+  // GTM — LEAD MAGNETS
+  // =========================================================================
+  {
+    name: "list_lead_magnets",
+    description:
+      "List Haven GTM lead magnet landing pages. By default returns drafts + active (excludes archived). Pass include_archived=true to also include archived ones. Each row has the slug, title, status, expiration, view_count, submission_count.",
+    input_schema: {
+      type: "object",
+      properties: {
+        include_archived: { type: "boolean" },
+      },
+      required: [],
+    },
+    execute: async (input) =>
+      leadMagnets.listLeadMagnets({
+        includeArchived: !!b(input.include_archived),
+      }),
+  },
+  {
+    name: "get_lead_magnet",
+    description:
+      "Get a single lead magnet landing page by id, including its full content sections, CTA config, and engagement counters.",
+    input_schema: {
+      type: "object",
+      properties: { lead_magnet_id: { type: "string" } },
+      required: ["lead_magnet_id"],
+    },
+    execute: async (input) =>
+      leadMagnets.getLeadMagnet(s(input.lead_magnet_id)!),
+  },
+  {
+    name: "list_lead_magnet_submissions",
+    description:
+      "List every public form submission captured by a lead magnet, newest first. Each row has the captured fields (name/email/phone/property_address/message), referrer, user_agent, and created_at.",
+    input_schema: {
+      type: "object",
+      properties: { lead_magnet_id: { type: "string" } },
+      required: ["lead_magnet_id"],
+    },
+    execute: async (input) =>
+      leadMagnets.listLeadMagnetSubmissions(s(input.lead_magnet_id)!),
+  },
+  {
+    name: "create_lead_magnet",
+    description:
+      "Create a new Haven lead magnet landing page hosted at <site>/lead-magnet/<slug>. Required: title. Everything else is optional and can be edited later from /gtm/lead-magnets/<id>. status defaults to 'draft' — pass status='active' to publish the public URL immediately. Use the `content` array for body sections (kinds: rich_text {body_md}, bullets {heading?, items[]}, stat_band {stats:[{value,label}]}, faq {items:[{q,a}]}, cta_block {heading?, body?}). Use `cta` for the capture form: { label, type:'form'|'link', href?, fields?: ('name'|'email'|'phone'|'property_address'|'message')[], success_message? }. Pages expire 90 days after creation by default. After creating, ALWAYS surface the full public URL back to the user as a clickable link.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        eyebrow: { type: "string" },
+        subtitle: { type: "string" },
+        hero_image_url: { type: "string" },
+        content: {
+          type: "array",
+          description:
+            "Array of content sections. Each section is { kind, ... } — see tool description for shapes.",
+          items: { type: "object", additionalProperties: true },
+        },
+        cta: {
+          type: "object",
+          additionalProperties: true,
+          description:
+            "Capture form / CTA config: { label, type:'form'|'link', href?, fields?, success_message? }.",
+        },
+        owner_name: { type: "string" },
+        owner_email: { type: "string" },
+        status: {
+          type: "string",
+          enum: ["draft", "active", "archived"],
+        },
+        expires_in_days: {
+          type: "number",
+          description: "Days until the page expires. Default 90.",
+        },
+      },
+      required: ["title"],
+    },
+    execute: async (input) => {
+      const result = await leadMagnets.createLeadMagnetOrThrow({
+        title: s(input.title)!,
+        eyebrow: s(input.eyebrow),
+        subtitle: s(input.subtitle),
+        hero_image_url: s(input.hero_image_url),
+        content: arr<leadMagnets.LeadMagnetSection>(input.content),
+        cta: (input.cta ?? undefined) as
+          | Partial<leadMagnets.LeadMagnetCta>
+          | undefined,
+        owner_name: s(input.owner_name),
+        owner_email: s(input.owner_email),
+        status: s(input.status) as leadMagnets.LeadMagnetStatus | undefined,
+        expires_in_days: n(input.expires_in_days),
+      });
+      const url = canonicalUrl(`/lead-magnet/${result.slug}`);
+      return { ...result, public_url: url };
+    },
+  },
+  {
+    name: "update_lead_magnet",
+    description:
+      "Update fields on an existing lead magnet. Pass only the fields you want to change. Use this to tweak copy (title/eyebrow/subtitle), swap the hero image, change status (draft|active|archived), bump the expiration date (`expires_at` ISO timestamp), edit the `content` sections array, or change the `cta` config. Editing `content` replaces the whole array — pass the full new array.",
+    input_schema: {
+      type: "object",
+      properties: {
+        lead_magnet_id: { type: "string" },
+        title: { type: "string" },
+        eyebrow: { type: "string" },
+        subtitle: { type: "string" },
+        hero_image_url: { type: "string" },
+        content: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+        cta: { type: "object", additionalProperties: true },
+        owner_name: { type: "string" },
+        owner_email: { type: "string" },
+        status: { type: "string", enum: ["draft", "active", "archived"] },
+        expires_at: { type: "string", description: "ISO timestamp" },
+      },
+      required: ["lead_magnet_id"],
+    },
+    execute: async (input) => {
+      const patch: leadMagnets.UpdateLeadMagnetInput = {};
+      if (s(input.title) !== undefined) patch.title = s(input.title);
+      if (s(input.eyebrow) !== undefined) patch.eyebrow = s(input.eyebrow);
+      if (s(input.subtitle) !== undefined) patch.subtitle = s(input.subtitle);
+      if (s(input.hero_image_url) !== undefined)
+        patch.hero_image_url = s(input.hero_image_url);
+      if (input.content !== undefined)
+        patch.content = arr<leadMagnets.LeadMagnetSection>(input.content);
+      if (input.cta !== undefined)
+        patch.cta = input.cta as Partial<leadMagnets.LeadMagnetCta>;
+      if (s(input.owner_name) !== undefined)
+        patch.owner_name = s(input.owner_name);
+      if (s(input.owner_email) !== undefined)
+        patch.owner_email = s(input.owner_email);
+      if (s(input.status) !== undefined)
+        patch.status = s(input.status) as leadMagnets.LeadMagnetStatus;
+      if (s(input.expires_at) !== undefined)
+        patch.expires_at = s(input.expires_at);
+      const result = await leadMagnets.updateLeadMagnetOrThrow(
+        s(input.lead_magnet_id)!,
+        patch,
+      );
+      const url = canonicalUrl(`/lead-magnet/${result.slug}`);
+      return { ...result, public_url: url };
+    },
+  },
+  {
+    name: "publish_lead_magnet",
+    description:
+      "Flip a draft (or archived) lead magnet to status='active' so its public URL goes live. Reversible via archive_lead_magnet.",
+    input_schema: {
+      type: "object",
+      properties: { lead_magnet_id: { type: "string" } },
+      required: ["lead_magnet_id"],
+    },
+    execute: async (input) => {
+      const r = await leadMagnets.publishLeadMagnet(s(input.lead_magnet_id)!);
+      if (!r.ok) throw new Error(r.error);
+      return {
+        ...r.data,
+        public_url: canonicalUrl(`/lead-magnet/${r.data.slug}`),
+      };
+    },
+  },
+  {
+    name: "archive_lead_magnet",
+    description:
+      "Archive a lead magnet. The public URL flips to a friendly 'no longer available' page. Reversible via update_lead_magnet status='active'.",
+    input_schema: {
+      type: "object",
+      properties: { lead_magnet_id: { type: "string" } },
+      required: ["lead_magnet_id"],
+    },
+    execute: async (input) =>
+      leadMagnets.archiveLeadMagnetOrThrow(s(input.lead_magnet_id)!),
+  },
+  {
+    name: "delete_lead_magnet",
+    description:
+      "Permanently delete a lead magnet AND all its captured submissions. Use only when the user explicitly says delete — otherwise prefer archive_lead_magnet.",
+    input_schema: {
+      type: "object",
+      properties: { lead_magnet_id: { type: "string" } },
+      required: ["lead_magnet_id"],
+    },
+    execute: async (input) =>
+      leadMagnets.deleteLeadMagnetOrThrow(s(input.lead_magnet_id)!),
+  },
+  {
+    name: "get_lead_magnet_public_url",
+    description:
+      "Return the full public URL for a lead magnet (<site>/lead-magnet/<slug>). Surface this back to the user as a clickable link so they can preview / share it.",
+    input_schema: {
+      type: "object",
+      properties: { lead_magnet_id: { type: "string" } },
+      required: ["lead_magnet_id"],
+    },
+    execute: async (input) => {
+      const m = await leadMagnets.getLeadMagnet(s(input.lead_magnet_id)!);
+      if (!m) throw new Error("Lead magnet not found");
+      return {
+        url: canonicalUrl(`/lead-magnet/${m.slug}`),
+        slug: m.slug,
+        status: m.status,
+      };
+    },
+  },
+
+  // =========================================================================
   // OPERATIONS — LOST / LEFT-BEHIND ITEMS
   // =========================================================================
   {
@@ -2616,6 +2828,7 @@ You have tools that give you live read + write access across the entire Haven OS
 - **HR Surveys** — author flexible per-survey forms (short_text, long_text, single_choice, multi_choice, rating, yes_no), activate them to expose a public landing page at \`<site>/survey/<slug>\`, and read aggregated results (avg rating, choice counts, yes/no, text samples). Workflow: call \`create_hr_survey\` with a \`questions\` array (defaults to draft). To go live, set status='active' on creation or via \`set_hr_survey_status\`. Surface the share link via \`get_hr_survey_share_link\`. Use \`get_hr_survey_summary\` for "how's it going?" questions. Use \`add_hr_survey_question\` / \`update_hr_survey_question\` to iterate after creation — these are safe on live surveys. To retire a question on a live survey use \`archive_hr_survey_question\` (the public form hides it but historical answers stay intact); \`delete_hr_survey_question\` does this automatically when responses already exist.
 - **Admin** (super-admin only) — list users; create users (default invite-by-email, optionally direct-create with password); change roles (user / admin / super_admin); delete users; grant or revoke HR access; manage departments. When the user asks to "add" or "invite" someone, default to invite mode (email-based) unless they say otherwise.
 - **Sales / Property Pitches** (admin or super_admin) — generate a personalized one-pager that gets sent to a prospective property owner, hosted at \`/pitch/<slug>\`. Workflow: when the user gives you a Zillow / Airbnb / VRBO / Booking link, call \`extract_listing_details\` first to auto-fill address, beds/baths/sleeps, and a hero photo. Then call \`create_sales_pitch\` with the owner's name and a projection range (annual gross revenue, low + high in USD). The pitch expires 30 days after creation; you can extend it via \`update_sales_pitch\` with a new \`expires_at\`. Use \`archive_sales_pitch\` to retire a pitch (the public URL flips to a friendly contact page); only use \`delete_sales_pitch\` when the user explicitly says delete. After creating, surface the public URL — it's \`<site>/pitch/<slug>\`.
+- **GTM / Lead Magnets** (admin or super_admin) — Haven-branded landing pages for guides, checklists, calculators, etc., hosted at \`/lead-magnet/<slug>\`. Create a page with \`create_lead_magnet\` (title is the only required field, status defaults to 'draft'); set status='active' on creation or call \`publish_lead_magnet\` to make the URL live. Edit copy / content / CTA via \`update_lead_magnet\` — the \`content\` field is a flexible array of sections (rich_text, bullets, stat_band, faq, cta_block) and \`cta\` controls the capture form (label + which fields to collect). Pages expire 90 days after creation by default; bump \`expires_at\` to extend. Use \`list_lead_magnet_submissions\` to read captured leads. Use \`archive_lead_magnet\` to retire a page; only use \`delete_lead_magnet\` when the user explicitly says delete (it also wipes captured submissions). Always surface the full public URL (\`<site>/lead-magnet/<slug>\`) back to the user.
 - **System** — test Hostaway connection, list team members.
 
 ## How to work

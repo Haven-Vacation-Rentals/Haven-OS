@@ -34,6 +34,7 @@ Sidebar layout, in order:
 
 ### GTM
 - **Sales Pitches** (`/sales`) — owner-facing pitch pages with draft/published flow.
+- **Lead Magnets** (`/gtm/lead-magnets`) — branded landing pages at `/lead-magnet/<slug>` for guides, checklists, calculators. Flexible content sections (rich text / bullets / FAQ / stats / CTA), configurable capture forms, expiring public slugs, submission tracking.
 - **Content Studio** (`/content`) — Haven Homeowner Blog pipeline (see below).
 
 ### Admin
@@ -238,6 +239,7 @@ app/
     operations/
       lost-items/
     sales/             Sales Pitches
+    gtm/lead-magnets/  Lead Magnet landing pages
     content/           Content Studio
     scorecard/         Northstar Scorecard
     agents/            Managed Agent registry
@@ -246,6 +248,8 @@ app/
   (auth)/login         Google OAuth entry
   api/                 route handlers (incl. /api/health, /api/lost-items, /api/agents/*)
   survey/[slug]/       public HR survey form
+  pitch/[slug]/        public Sales Pitch page
+  lead-magnet/[slug]/  public Lead Magnet landing page
 components/
   brand/               logo, topographic motif
   shell/               sidebar, topbar, command palette, theme

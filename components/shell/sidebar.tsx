@@ -16,6 +16,7 @@ import {
   Bot,
   Megaphone,
   PenSquare,
+  Magnet,
   PackageSearch,
   type LucideIcon,
 } from "lucide-react";
@@ -85,6 +86,7 @@ function buildSections(flags: {
       heading: "GTM",
       items: [
         { label: "Pitches", href: "/sales/pitches", icon: Megaphone },
+        { label: "Lead Magnets", href: "/gtm/lead-magnets", icon: Magnet },
         { label: "Content Studio", href: "/content", icon: PenSquare },
       ],
     });
