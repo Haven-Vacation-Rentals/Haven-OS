@@ -1495,6 +1495,60 @@ export const TOOLS: ToolDef[] = [
       return { ok: true };
     },
   },
+  {
+    name: "get_candidate",
+    description:
+      "Fetch a single candidate's full record (name, contact, stage, source, application notes, timestamps). HR admin only.",
+    input_schema: {
+      type: "object",
+      properties: { candidate_id: { type: "string" } },
+      required: ["candidate_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      const c = await hr.getCandidate(s(input.candidate_id)!);
+      if (!c) throw new Error("Candidate not found");
+      return c;
+    },
+  },
+  {
+    name: "list_candidate_notes",
+    description:
+      "List chronological notes/comments left on a candidate by HR. HR admin only.",
+    input_schema: {
+      type: "object",
+      properties: { candidate_id: { type: "string" } },
+      required: ["candidate_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      return hr.listCandidateNotes(s(input.candidate_id)!);
+    },
+  },
+  {
+    name: "add_candidate_note",
+    description:
+      "Add a note/comment to a candidate's profile. The signed-in HR user is recorded as the author. Pass role_id when known to revalidate the candidate page. HR admin only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        candidate_id: { type: "string" },
+        body: { type: "string" },
+        role_id: { type: "string" },
+      },
+      required: ["candidate_id", "body"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      const res = await hr.addCandidateNote({
+        candidate_id: s(input.candidate_id)!,
+        body: s(input.body)!,
+        role_id: s(input.role_id),
+      });
+      if (!res.ok) throw new Error(res.error);
+      return res.data;
+    },
+  },
 
   // ---- HR Docs ---------------------------------------------------------
   {

@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth/permissions";
 import type {
   DbCandidate,
+  DbCandidateNote,
   DbEmployee,
   DbHrDoc,
   DbHrIssue,
@@ -737,6 +738,39 @@ export async function updateCandidateStage(
   const supabase = await db();
   await supabase.from("hr_candidates").update({ stage }).eq("id", id);
   revalidatePath(`/hr/hiring/${roleId}`);
+  revalidatePath(`/hr/hiring/${roleId}/candidates/${id}`);
+}
+
+/**
+ * Result-shape variant of {@link updateCandidateStage} used by the candidate
+ * Kanban for optimistic-update + revert-on-error UX. Same permissions as the
+ * throwing version.
+ */
+export async function setCandidateStage(
+  id: string,
+  stage: string,
+  roleId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await updateCandidateStage(id, stage, roleId);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to update stage",
+    };
+  }
+}
+
+export async function getCandidate(id: string): Promise<DbCandidate | null> {
+  await requireHrAdmin();
+  const supabase = await db();
+  const { data } = await supabase
+    .from("hr_candidates")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  return (data ?? null) as DbCandidate | null;
 }
 
 export async function updateCandidate(
@@ -763,6 +797,102 @@ export async function deleteCandidate(id: string, roleId: string): Promise<void>
   const supabase = await db();
   await supabase.from("hr_candidates").delete().eq("id", id);
   revalidatePath(`/hr/hiring/${roleId}`);
+}
+
+// ---------------------------------------------------------------------------
+// Hiring — candidate notes / comments
+// ---------------------------------------------------------------------------
+
+export async function listCandidateNotes(
+  candidateId: string,
+): Promise<DbCandidateNote[]> {
+  await requireHrAdmin();
+  const supabase = await db();
+  const { data } = await supabase
+    .from("hr_candidate_notes")
+    .select("*")
+    .eq("candidate_id", candidateId)
+    .order("created_at", { ascending: true });
+  return (data ?? []) as DbCandidateNote[];
+}
+
+export async function addCandidateNote(input: {
+  candidate_id: string;
+  body: string;
+  role_id?: string;
+}): Promise<
+  | { ok: true; data: DbCandidateNote }
+  | { ok: false; error: string }
+> {
+  try {
+    await requireHrAdmin();
+    const body = (input.body ?? "").trim();
+    if (!body) return { ok: false, error: "Note cannot be empty" };
+
+    const supabase = await db();
+    const perm = await getPermissions();
+    let authorName: string | null = null;
+    if (perm.user_id) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", perm.user_id)
+        .maybeSingle();
+      authorName =
+        (profile as { full_name: string | null } | null)?.full_name ?? null;
+    }
+
+    const { data, error } = await supabase
+      .from("hr_candidate_notes")
+      .insert({
+        candidate_id: input.candidate_id,
+        author_id: perm.user_id,
+        author_email: perm.email,
+        author_name: authorName,
+        body,
+      })
+      .select()
+      .single();
+    if (error) return { ok: false, error: error.message };
+
+    if (input.role_id) {
+      revalidatePath(`/hr/hiring/${input.role_id}`);
+      revalidatePath(
+        `/hr/hiring/${input.role_id}/candidates/${input.candidate_id}`,
+      );
+    }
+    return { ok: true, data: data as DbCandidateNote };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to add note",
+    };
+  }
+}
+
+export async function deleteCandidateNote(
+  id: string,
+  candidateId: string,
+  roleId?: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await requireHrAdmin();
+    const supabase = await db();
+    const { error } = await supabase
+      .from("hr_candidate_notes")
+      .delete()
+      .eq("id", id);
+    if (error) return { ok: false, error: error.message };
+    if (roleId) {
+      revalidatePath(`/hr/hiring/${roleId}/candidates/${candidateId}`);
+    }
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to delete note",
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -75,6 +75,17 @@ export type DbCandidate = {
   updated_at: string;
 };
 
+export type DbCandidateNote = {
+  id: string;
+  candidate_id: string;
+  author_id: string | null;
+  author_email: string | null;
+  author_name: string | null;
+  body: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type DbHrDoc = {
   id: string;
   kind: string; // policy | procedure

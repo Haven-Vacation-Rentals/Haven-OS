@@ -116,7 +116,8 @@ export function RoleDetail({ role, candidates }: Props) {
           <div>
             <h3 className="font-heading text-[15px] font-bold">Candidates</h3>
             <p className="text-[12px] text-muted-foreground">
-              Drag-free kanban — change stages from the card menu.
+              Drag a card between columns to change stage, or click to open
+              the candidate profile.
             </p>
           </div>
           <Button variant="primary" size="sm" onClick={() => setCandOpen(true)}>
