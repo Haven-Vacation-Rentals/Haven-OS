@@ -99,6 +99,20 @@ Owner-facing pitch pages under `/sales`. Drafts edit privately; publishing expos
 
 ---
 
+## Public API & Personal Access Tokens
+
+Haven OS exposes a user-scoped REST surface under `/api/v1` for external agents and scripts. Authentication is via **Personal Access Tokens** (`hvn_pat_…`) created from **Settings → Personal Access Tokens**.
+
+- Tokens authenticate as the user who created them — they cannot do anything that user can't do.
+- Scopes (`platform:full`, `tasks:read`, `lost-items:write`, etc.) let owners restrict a token below their own permissions.
+- Hashed at rest (sha256). Raw token shown once at creation; revoke any time.
+- Endpoints span: profile, my tasks, work tasks/lists/spaces, lost items, properties, content studio, HR (read-only, with grant).
+- The legacy `/api/lost-items` shared-key endpoint still works; PATs are the preferred path for new integrations.
+
+See [`docs/PERSONAL_ACCESS_TOKENS.md`](docs/PERSONAL_ACCESS_TOKENS.md) for the full endpoint catalog and security model.
+
+---
+
 ## Run it locally
 
 ```bash

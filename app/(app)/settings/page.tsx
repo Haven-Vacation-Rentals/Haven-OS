@@ -10,7 +10,7 @@ import { isAdmin, listAdmins } from "@/lib/board/actions";
 import { isHrAdmin, listHrAdmins } from "@/lib/hr/actions";
 import { getPermissions } from "@/lib/auth/permissions";
 import Link from "next/link";
-import { Users, Building2, ChevronRight, ShieldCheck } from "lucide-react";
+import { Users, Building2, ChevronRight, ShieldCheck, KeyRound } from "lucide-react";
 import type { DbBoardSetting } from "@/lib/board/types";
 
 export const dynamic = "force-dynamic";
@@ -125,6 +125,33 @@ export default async function SettingsPage() {
           currentUserEmail={user.email}
         />
       )}
+
+      {/* Developer */}
+      <div className="flex flex-col gap-3">
+        <h2 className="font-heading text-[13px] font-bold uppercase tracking-wide text-muted-foreground">
+          Developer
+        </h2>
+        <section className="rounded-card border border-border bg-surface shadow-card">
+          <Link
+            href={"/settings/api-tokens" as never}
+            className="flex items-center gap-3 px-5 py-4 transition-colors hover:bg-surface-alt/60"
+          >
+            <div className="rounded-md bg-surface-alt p-2">
+              <KeyRound className="h-4 w-4 text-muted-foreground" aria-hidden />
+            </div>
+            <div className="flex-1">
+              <div className="font-heading text-[14px] font-bold">
+                Personal Access Tokens
+              </div>
+              <div className="text-[12px] text-muted-foreground">
+                Create bearer tokens for external agents and scripts to call
+                the Haven OS API as you.
+              </div>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </Link>
+        </section>
+      </div>
 
       {/* Integrations */}
       <div className="flex flex-col gap-3">
