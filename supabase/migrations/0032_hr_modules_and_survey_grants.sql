@@ -59,27 +59,63 @@ create index if not exists hr_module_grants_grantee_idx
 -- =============================================================================
 -- 2. Extend hr_access_grants with 'survey' scope
 -- =============================================================================
+--
+-- Note on Supabase SQL Editor compatibility:
+--   The Supabase SQL Editor wraps each script in a single transaction.
+--   PostgreSQL forbids using a newly-added enum value in the SAME
+--   transaction that added it (error 55P04 "unsafe use of new value"). To
+--   stay safe, this migration converts hr_access_grants.scope from the
+--   hr_grant_scope enum to a plain text column with a CHECK constraint
+--   that enumerates the allowed values. Existing rows ('all', 'department',
+--   'employee') are preserved verbatim by the implicit enum-to-text cast.
+--   The hr_grant_scope enum type is kept around (still referenced only by
+--   migration history) to avoid breaking any rollback tooling.
 
--- Recreate the scope enum with the new 'survey' value if it isn't already
--- there. Postgres only allows additive changes so use ALTER TYPE ADD VALUE.
-do $$ begin
-  if not exists (
-    select 1 from pg_enum e
-    join pg_type t on t.oid = e.enumtypid
-    where t.typname = 'hr_grant_scope' and e.enumlabel = 'survey'
-  ) then
-    alter type public.hr_grant_scope add value 'survey';
-  end if;
-end $$;
-
+-- 2a. Add the new survey_id column up front so the new CHECK constraint can reference it.
 alter table public.hr_access_grants
   add column if not exists survey_id uuid references public.hr_surveys (id) on delete cascade;
 
--- Drop and re-add the scope/target check constraint to include the new
--- 'survey' branch.
+-- 2b. Drop the original CHECK constraint (auto-named in 0016 via inline `check (...)`).
+--     The constraint name is deterministic because Postgres assigns
+--     <table>_check for the first unnamed table-level CHECK.
 alter table public.hr_access_grants
   drop constraint if exists hr_access_grants_check;
 
+-- Defensive: also drop the named variant in case the migration is being
+-- re-run after a partial failure on a database that already renamed it.
+alter table public.hr_access_grants
+  drop constraint if exists hr_access_grants_scope_target_check;
+
+-- 2c. Convert scope from enum to text. The USING clause preserves all
+--     existing values ('all', 'department', 'employee') as their text
+--     representation. This sidesteps the 55P04 problem entirely because
+--     after this point the column is a free-form text column and we can
+--     reference any string literal — including 'survey' — in the same
+--     transaction.
+do $$ begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name   = 'hr_access_grants'
+      and column_name  = 'scope'
+      and udt_name     = 'hr_grant_scope'
+  ) then
+    alter table public.hr_access_grants
+      alter column scope type text using scope::text;
+  end if;
+end $$;
+
+-- 2d. Add a CHECK constraint that pins scope to the allowed values. This
+--     replaces the type-level guarantee that the enum used to provide.
+alter table public.hr_access_grants
+  drop constraint if exists hr_access_grants_scope_allowed_check;
+
+alter table public.hr_access_grants
+  add constraint hr_access_grants_scope_allowed_check
+    check (scope in ('all', 'department', 'employee', 'survey'));
+
+-- 2e. Re-add the scope/target shape check, now including the 'survey' branch.
 alter table public.hr_access_grants
   add constraint hr_access_grants_scope_target_check check (
     (scope = 'all'        and department_id is null and employee_id is null and survey_id is null) or
@@ -88,7 +124,7 @@ alter table public.hr_access_grants
     (scope = 'survey'     and survey_id is not null     and department_id is null and employee_id is null)
   );
 
--- Replace the unique constraint to cover survey_id too.
+-- 2f. Replace the unique constraint to cover survey_id too.
 alter table public.hr_access_grants
   drop constraint if exists hr_access_grants_grantee_id_scope_department_id_employee_id_key;
 
