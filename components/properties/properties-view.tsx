@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Bath,
   BedDouble,
+  ChevronLeft,
+  ChevronRight,
   Home,
   LayoutGrid,
   List as ListIcon,
@@ -23,66 +26,147 @@ import { StatusBadge, TierBadge } from "./property-badges";
 import { PropertyTable } from "./property-table";
 import type {
   Property,
+  PropertyFilter,
   PropertyStatus,
   PropertyTier,
 } from "@/lib/properties/types";
 
 type ViewMode = "grid" | "list";
 
+type Facets = {
+  regions: string[];
+  account_managers: string[];
+  airbnb_accounts: string[];
+  revenue_managers: string[];
+};
+
 export function PropertiesView({
   properties,
+  total,
+  page,
+  pageSize,
+  hasMore,
+  initialFilters,
   facets,
 }: {
   properties: Property[];
-  facets: {
-    regions: string[];
-    account_managers: string[];
-    airbnb_accounts: string[];
-    revenue_managers: string[];
-  };
+  /** Total properties matching the active filters across all pages. */
+  total?: number;
+  page?: number;
+  pageSize?: number;
+  hasMore?: boolean;
+  initialFilters?: PropertyFilter;
+  facets: Facets;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const totalCount = total ?? properties.length;
+  const currentPage = page ?? 0;
+  const effectivePageSize = pageSize ?? Math.max(properties.length, 50);
+  const moreAvailable = hasMore ?? false;
+
   const [view, setView] = useState<ViewMode>("list");
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<"all" | PropertyStatus>("all");
-  const [tier, setTier] = useState<"all" | PropertyTier>("all");
-  const [region, setRegion] = useState<string>("all");
-  const [manager, setManager] = useState<string>("all");
-  const [airbnb, setAirbnb] = useState<string>("all");
+  const [search, setSearch] = useState(initialFilters?.search ?? "");
+  const status = (initialFilters?.status ?? "all") as "all" | PropertyStatus;
+  const tier = (initialFilters?.tier ?? "all") as "all" | PropertyTier;
+  const region = initialFilters?.region ?? "all";
+  const manager = initialFilters?.account_manager ?? "all";
+  const airbnb = initialFilters?.airbnb_account ?? "all";
   const [createOpen, setCreateOpen] = useState(false);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return properties.filter((p) => {
-      if (status !== "all" && p.status !== status) return false;
-      if (tier !== "all" && p.tier !== tier) return false;
-      if (region !== "all" && p.region !== region) return false;
-      if (manager !== "all" && p.account_manager !== manager) return false;
-      if (airbnb !== "all" && p.airbnb_account !== airbnb) return false;
-      if (!q) return true;
-      return (
-        p.name.toLowerCase().includes(q) ||
-        (p.address?.toLowerCase().includes(q) ?? false) ||
-        (p.account_manager?.toLowerCase().includes(q) ?? false) ||
-        (p.region?.toLowerCase().includes(q) ?? false)
-      );
-    });
-  }, [properties, search, status, tier, region, manager, airbnb]);
+  const updateParam = useCallback(
+    (patch: Record<string, string | undefined>) => {
+      const next = new URLSearchParams(searchParams.toString());
+      let touchedFilter = false;
+      for (const [key, val] of Object.entries(patch)) {
+        if (key !== "page") touchedFilter = true;
+        if (!val || val === "all") next.delete(key);
+        else next.set(key, val);
+      }
+      if (touchedFilter) next.delete("page");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      router.push(`${pathname}?${next.toString()}` as any);
+    },
+    [router, pathname, searchParams],
+  );
+
+  const setStatus = useCallback(
+    (v: "all" | PropertyStatus) => updateParam({ status: v }),
+    [updateParam],
+  );
+  const setTier = useCallback(
+    (v: "all" | PropertyTier) => updateParam({ tier: v }),
+    [updateParam],
+  );
+  const setRegion = useCallback(
+    (v: string) => updateParam({ region: v }),
+    [updateParam],
+  );
+  const setManager = useCallback(
+    (v: string) => updateParam({ account_manager: v }),
+    [updateParam],
+  );
+  const setAirbnb = useCallback(
+    (v: string) => updateParam({ airbnb_account: v }),
+    [updateParam],
+  );
+
+  // Debounced search → URL → server query.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const initial = initialFilters?.search ?? "";
+      if (search !== initial) {
+        updateParam({ search: search.trim() || undefined });
+      }
+    }, 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  const filtered = properties;
 
   const activeFilters = [
-    status !== "all" && { key: "status", label: `Status: ${status}`, clear: () => setStatus("all") },
-    tier !== "all" && { key: "tier", label: `Tier: ${tier}`, clear: () => setTier("all") },
-    region !== "all" && { key: "region", label: `Region: ${region}`, clear: () => setRegion("all") },
-    manager !== "all" && { key: "manager", label: `AM: ${manager}`, clear: () => setManager("all") },
-    airbnb !== "all" && { key: "airbnb", label: `Airbnb: ${airbnb}`, clear: () => setAirbnb("all") },
+    status !== "all" && {
+      key: "status",
+      label: `Status: ${status}`,
+      clear: () => setStatus("all"),
+    },
+    tier !== "all" && {
+      key: "tier",
+      label: `Tier: ${tier}`,
+      clear: () => setTier("all"),
+    },
+    region !== "all" && {
+      key: "region",
+      label: `Region: ${region}`,
+      clear: () => setRegion("all"),
+    },
+    manager !== "all" && {
+      key: "manager",
+      label: `AM: ${manager}`,
+      clear: () => setManager("all"),
+    },
+    airbnb !== "all" && {
+      key: "airbnb",
+      label: `Airbnb: ${airbnb}`,
+      clear: () => setAirbnb("all"),
+    },
   ].filter(Boolean) as { key: string; label: string; clear: () => void }[];
 
+  // Stat tiles use the visible page only — adding a separate aggregated
+  // query just for these would double the round-trip cost on every
+  // filter change.
   const stats = useMemo(() => {
-    const total = filtered.length;
     const live = filtered.filter((p) => p.status === "live").length;
     const onboarding = filtered.filter((p) => p.status === "onboarding").length;
-    const bedrooms = filtered.reduce((sum, p) => sum + (p.bedroom_count ?? 0), 0);
-    return { total, live, onboarding, bedrooms };
-  }, [filtered]);
+    const bedrooms = filtered.reduce(
+      (sum, p) => sum + (p.bedroom_count ?? 0),
+      0,
+    );
+    return { total: totalCount, live, onboarding, bedrooms };
+  }, [filtered, totalCount]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -232,6 +316,51 @@ export function PropertiesView({
       ) : (
         <PropertyTable properties={filtered} facets={facets} />
       )}
+
+      {/* Pagination */}
+      {totalCount > effectivePageSize ? (
+        <div className="flex items-center justify-between border-t border-border pt-3">
+          <span className="text-[11px] text-muted-foreground">
+            {(() => {
+              const start = currentPage * effectivePageSize + 1;
+              const end = Math.min(
+                start + filtered.length - 1,
+                totalCount,
+              );
+              return `${start.toLocaleString()}–${end.toLocaleString()} of ${totalCount.toLocaleString()}`;
+            })()}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1 text-[12px]"
+              disabled={currentPage === 0}
+              onClick={() =>
+                updateParam({
+                  page:
+                    currentPage <= 1 ? undefined : String(currentPage - 1),
+                })
+              }
+              aria-label="Previous page"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Prev
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1 text-[12px]"
+              disabled={!moreAvailable}
+              onClick={() => updateParam({ page: String(currentPage + 1) })}
+              aria-label="Next page"
+            >
+              Next
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       <PropertyEditor open={createOpen} onOpenChange={setCreateOpen} />
     </div>
