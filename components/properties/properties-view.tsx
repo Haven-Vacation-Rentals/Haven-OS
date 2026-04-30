@@ -10,11 +10,13 @@ import {
   ChevronRight,
   Home,
   LayoutGrid,
-  List as ListIcon,
+  Rows3,
   MapPin,
   Plus,
   Search,
   Sparkles,
+  Table2,
+  UserX,
   Users,
   X,
 } from "lucide-react";
@@ -24,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { PropertyEditor } from "./property-editor";
 import { StatusBadge, TierBadge } from "./property-badges";
 import { PropertyTable } from "./property-table";
+import { PropertyDirectory } from "./property-directory";
 import type {
   Property,
   PropertyFilter,
@@ -31,7 +34,7 @@ import type {
   PropertyTier,
 } from "@/lib/properties/types";
 
-type ViewMode = "grid" | "list";
+type ViewMode = "directory" | "cards" | "sheet";
 
 type Facets = {
   regions: string[];
@@ -67,7 +70,7 @@ export function PropertiesView({
   const effectivePageSize = pageSize ?? Math.max(properties.length, 50);
   const moreAvailable = hasMore ?? false;
 
-  const [view, setView] = useState<ViewMode>("list");
+  const [view, setView] = useState<ViewMode>("directory");
   const [search, setSearch] = useState(initialFilters?.search ?? "");
   const status = (initialFilters?.status ?? "all") as "all" | PropertyStatus;
   const tier = (initialFilters?.tier ?? "all") as "all" | PropertyTier;
@@ -161,43 +164,48 @@ export function PropertiesView({
   const stats = useMemo(() => {
     const live = filtered.filter((p) => p.status === "live").length;
     const onboarding = filtered.filter((p) => p.status === "onboarding").length;
-    const bedrooms = filtered.reduce(
-      (sum, p) => sum + (p.bedroom_count ?? 0),
-      0,
-    );
-    return { total: totalCount, live, onboarding, bedrooms };
+    const missingManager = filtered.filter(
+      (p) => !p.account_manager || !p.revenue_manager,
+    ).length;
+    return { total: totalCount, live, onboarding, missingManager };
   }, [filtered, totalCount]);
 
   return (
     <div className="flex flex-col gap-4">
       {/* Stats bar */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard icon={Home} label="Properties" value={stats.total} tint="accent" />
-        <StatCard
+        <StatTile
+          icon={Home}
+          label="Total properties"
+          value={stats.total}
+          tint="charcoal"
+        />
+        <StatTile
           icon={Sparkles}
           label="Live"
           value={stats.live}
           tint="emerald"
         />
-        <StatCard
-          icon={Home}
+        <StatTile
+          icon={Users}
           label="Onboarding"
           value={stats.onboarding}
           tint="amber"
         />
-        <StatCard
-          icon={BedDouble}
-          label="Total Bedrooms"
-          value={stats.bedrooms}
-          tint="sky"
+        <StatTile
+          icon={UserX}
+          label="Missing manager"
+          value={stats.missingManager}
+          tint="coral"
+          subtle="On this page"
         />
       </div>
 
       {/* Search + controls */}
       <div className="flex flex-col gap-3 rounded-card border border-border bg-surface p-4 shadow-card">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -205,24 +213,37 @@ export function PropertiesView({
               className="pl-9"
             />
           </div>
-          <div className="flex items-center gap-1 rounded-md border border-border bg-surface-alt p-0.5">
-            <ViewToggle
-              active={view === "list"}
-              onClick={() => setView("list")}
-              icon={ListIcon}
-              label="List"
-            />
-            <ViewToggle
-              active={view === "grid"}
-              onClick={() => setView("grid")}
-              icon={LayoutGrid}
-              label="Grid"
-            />
+          <div className="flex items-center justify-between gap-3 md:justify-end">
+            <div
+              className="flex items-center gap-0.5 rounded-md border border-border bg-surface-alt p-0.5"
+              role="tablist"
+              aria-label="View"
+            >
+              <ViewToggle
+                active={view === "directory"}
+                onClick={() => setView("directory")}
+                icon={Rows3}
+                label="Directory"
+              />
+              <ViewToggle
+                active={view === "cards"}
+                onClick={() => setView("cards")}
+                icon={LayoutGrid}
+                label="Cards"
+              />
+              <ViewToggle
+                active={view === "sheet"}
+                onClick={() => setView("sheet")}
+                icon={Table2}
+                label="Sheet"
+              />
+            </div>
+            <Button variant="primary" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Add property</span>
+              <span className="sm:hidden">Add</span>
+            </Button>
           </div>
-          <Button variant="primary" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" />
-            Add property
-          </Button>
         </div>
 
         {/* Filters */}
@@ -263,7 +284,7 @@ export function PropertiesView({
             value={manager}
             onChange={setManager}
             options={[
-              { value: "all", label: "All managers" },
+              { value: "all", label: "All account managers" },
               ...facets.account_managers.map((m) => ({ value: m, label: m })),
             ]}
           />
@@ -271,7 +292,7 @@ export function PropertiesView({
             value={airbnb}
             onChange={setAirbnb}
             options={[
-              { value: "all", label: "All Airbnb accts" },
+              { value: "all", label: "All Airbnb accounts" },
               ...facets.airbnb_accounts.map((a) => ({ value: a, label: a })),
             ]}
           />
@@ -279,7 +300,7 @@ export function PropertiesView({
 
         {/* Active filter chips */}
         {activeFilters.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {activeFilters.map((f) => (
               <button
                 key={f.key}
@@ -311,10 +332,12 @@ export function PropertiesView({
       {/* Results */}
       {filtered.length === 0 ? (
         <EmptyState onAdd={() => setCreateOpen(true)} />
-      ) : view === "grid" ? (
+      ) : view === "cards" ? (
         <PropertyGrid properties={filtered} />
-      ) : (
+      ) : view === "sheet" ? (
         <PropertyTable properties={filtered} facets={facets} />
+      ) : (
+        <PropertyDirectory properties={filtered} />
       )}
 
       {/* Pagination */}
@@ -368,38 +391,50 @@ export function PropertiesView({
 }
 
 // ---------------------------------------------------------------------------
-// Stat card
+// Stat tile
 // ---------------------------------------------------------------------------
 
-function StatCard({
+function StatTile({
   icon: Icon,
   label,
   value,
   tint,
+  subtle,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: number;
-  tint: "accent" | "emerald" | "amber" | "sky";
+  tint: "charcoal" | "emerald" | "amber" | "coral";
+  subtle?: string;
 }) {
   const tints = {
-    accent: "bg-accent-soft text-accent",
-    emerald: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-    amber: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-    sky: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
+    charcoal: "bg-haven-sage text-haven-charcoal dark:bg-haven-charcoal/30 dark:text-foreground",
+    emerald:
+      "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+    amber:
+      "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+    coral: "bg-accent-soft text-accent",
   };
   return (
     <div className="flex items-center gap-3 rounded-card border border-border bg-surface p-4 shadow-card">
-      <span className={cn("grid h-10 w-10 place-items-center rounded-full", tints[tint])}>
+      <span
+        className={cn(
+          "grid h-10 w-10 shrink-0 place-items-center rounded-full",
+          tints[tint],
+        )}
+      >
         <Icon className="h-5 w-5" />
       </span>
-      <div>
-        <div className="font-heading text-xl font-bold tabular-nums">
+      <div className="min-w-0">
+        <div className="font-heading text-xl font-bold tabular-nums leading-none">
           {value.toLocaleString()}
         </div>
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="mt-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
           {label}
         </div>
+        {subtle ? (
+          <div className="text-[10px] text-muted-foreground/70">{subtle}</div>
+        ) : null}
       </div>
     </div>
   );
@@ -424,6 +459,8 @@ function ViewToggle({
     <button
       type="button"
       onClick={onClick}
+      role="tab"
+      aria-selected={active}
       className={cn(
         "flex items-center gap-1.5 rounded px-2 py-1 text-[12px] font-semibold transition-colors",
         active
@@ -431,8 +468,10 @@ function ViewToggle({
           : "text-muted-foreground hover:text-foreground",
       )}
       title={label}
+      aria-label={label}
     >
       <Icon className="h-3.5 w-3.5" />
+      <span className="hidden md:inline">{label}</span>
     </button>
   );
 }
@@ -489,7 +528,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// Grid view — cards
+// Cards view
 // ---------------------------------------------------------------------------
 
 function PropertyGrid({ properties }: { properties: Property[] }) {
@@ -511,23 +550,24 @@ function PropertyCard({ property }: { property: Property }) {
         "transition-all hover:-translate-y-px hover:shadow-card-hover",
       )}
     >
-      {/* Header */}
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate font-heading text-[15px] font-bold leading-tight group-hover:text-accent">
-            {property.name}
-          </h3>
-          {property.address ? (
-            <div className="mt-1 flex items-start gap-1 text-[11.5px] text-muted-foreground">
-              <MapPin className="mt-px h-3 w-3 shrink-0" />
-              <span className="line-clamp-2">{property.address}</span>
-            </div>
-          ) : null}
-        </div>
-        <div className="flex flex-col items-end gap-1 shrink-0">
-          <StatusBadge status={property.status} />
-          <TierBadge tier={property.tier} />
-        </div>
+      {/* Header — name + address. Status/tier moved BELOW so chips never
+          overlap a long property name. */}
+      <div className="min-w-0">
+        <h3 className="truncate font-heading text-[15px] font-bold leading-tight group-hover:text-accent">
+          {property.name}
+        </h3>
+        {property.address ? (
+          <div className="mt-1 flex items-start gap-1 text-[11.5px] text-muted-foreground">
+            <MapPin className="mt-px h-3 w-3 shrink-0" />
+            <span className="line-clamp-2">{property.address}</span>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Chips row — flex-wrap so they reflow rather than collide. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <StatusBadge status={property.status} />
+        {property.tier ? <TierBadge tier={property.tier} /> : null}
       </div>
 
       {/* Stats row */}
@@ -575,4 +615,3 @@ function Stat({
     </span>
   );
 }
-
