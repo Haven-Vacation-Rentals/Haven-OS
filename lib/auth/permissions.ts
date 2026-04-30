@@ -17,6 +17,7 @@
 
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
+import { getAdminClient } from "@/lib/supabase/admin";
 
 export type HavenUserRole = "user" | "admin" | "super_admin";
 
@@ -66,8 +67,41 @@ export const getPermissions = cache(async (): Promise<CurrentPermissions> => {
     .eq("id", user.id)
     .maybeSingle();
 
-  const role: HavenUserRole =
+  // If the auth user has no profile row (e.g. they signed in before the
+  // handle_new_user trigger existed, or the trigger errored), create
+  // one on the fly via the service-role admin client. This guarantees
+  // the user shows up in the Settings users list and gets a default
+  // 'user' role on every subsequent permission check.
+  let role: HavenUserRole =
     (profile?.role as HavenUserRole | undefined) ?? "user";
+  if (!profile) {
+    try {
+      const admin = getAdminClient();
+      const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
+      const fullName =
+        (meta.full_name as string | undefined) ??
+        (meta.name as string | undefined) ??
+        null;
+      const avatar =
+        (meta.avatar_url as string | undefined) ??
+        (meta.picture as string | undefined) ??
+        null;
+      await admin.from("profiles").upsert(
+        {
+          id: user.id,
+          email: user.email ?? "",
+          full_name: fullName,
+          avatar_url: avatar,
+          role: "user",
+        },
+        { onConflict: "id", ignoreDuplicates: true },
+      );
+      role = "user";
+    } catch (e) {
+      console.error("getPermissions: ensure-profile failed", e);
+      // Keep role='user' default; the user is still recognized.
+    }
+  }
 
   // Do we have any HR grants? (Super admins short-circuit.)
   // A user counts as "has HR access" if they have any access grant

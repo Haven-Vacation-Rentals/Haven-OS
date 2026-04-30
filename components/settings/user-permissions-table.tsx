@@ -11,6 +11,7 @@ import {
   X,
   ChevronDown,
   ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AddUserDialog } from "@/components/settings/add-user-dialog";
@@ -19,6 +20,7 @@ import {
   grantHrAccess,
   revokeHrAccess,
   setHrModulesForUser,
+  syncAuthUsers,
   type AdminSurveyOption,
   type AdminUser,
   type Department,
@@ -65,7 +67,33 @@ export function UserPermissionsTable({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [pending, startTransition] = useTransition();
+
+  const handleSync = () => {
+    setError(null);
+    setSyncMsg(null);
+    setSyncing(true);
+    (async () => {
+      try {
+        const r = await syncAuthUsers();
+        if (!r.ok) {
+          setError(r.error);
+        } else {
+          setSyncMsg(
+            r.synced === 0
+              ? `All ${r.total} auth users already have profiles.`
+              : `Synced ${r.synced} new user${r.synced === 1 ? "" : "s"}. Refresh to see them.`,
+          );
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setSyncing(false);
+      }
+    })();
+  };
 
   useEffect(() => {
     setUsers(initialUsers);
@@ -161,19 +189,40 @@ export function UserPermissionsTable({
         </div>
       )}
 
+      {syncMsg && (
+        <div className="border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-[12px] text-emerald-700">
+          {syncMsg}
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div className="text-[12px] text-muted-foreground">
           {users.length} user{users.length === 1 ? "" : "s"}
         </div>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => setAddOpen(true)}
-          className="gap-1.5"
-        >
-          <UserPlus className="h-4 w-4" />
-          Add user
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleSync}
+            disabled={syncing}
+            className="gap-1.5"
+            title="Reconcile profiles with Supabase auth.users (creates a profile for any signed-in user that's missing one)."
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
+            />
+            {syncing ? "Syncing…" : "Sync auth users"}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setAddOpen(true)}
+            className="gap-1.5"
+          >
+            <UserPlus className="h-4 w-4" />
+            Add user
+          </Button>
+        </div>
       </div>
 
       <AddUserDialog open={addOpen} onOpenChange={setAddOpen} />

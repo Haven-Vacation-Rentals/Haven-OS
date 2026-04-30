@@ -45,16 +45,212 @@ export type AdminUser = {
   created_at: string;
 };
 
+/**
+ * List every user in the organization.
+ *
+ * Source of truth is `auth.users` (via the service-role admin client) so
+ * we never silently drop somebody who signed in via Google but doesn't
+ * have a profile row yet (e.g. they signed up before the
+ * `handle_new_user` trigger existed, or the trigger errored).
+ *
+ * For any auth user without a profile, we backfill one synchronously
+ * with role='user' and the metadata Google handed us. Because the
+ * service-role client bypasses RLS, this works regardless of the
+ * profiles policies.
+ *
+ * Super-admin only.
+ */
 export async function listUsers(): Promise<AdminUser[]> {
   await requireSuperAdmin();
-  const supabase = await db();
-  const { data, error } = await supabase
+  const admin = getAdminClient();
+
+  // 1. Pull every auth user (paginated). The Supabase admin API caps
+  //    perPage at 1000; iterate until we get a short page.
+  type AuthUserLite = {
+    id: string;
+    email: string | null | undefined;
+    created_at: string;
+    user_metadata?: Record<string, unknown> | null;
+  };
+  const authUsers: AuthUserLite[] = [];
+  const perPage = 1000;
+  for (let page = 1; ; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+    if (error) throw error;
+    const batch = (data?.users ?? []) as AuthUserLite[];
+    authUsers.push(...batch);
+    if (batch.length < perPage) break;
+    if (page >= 50) break; // hard safety cap (50k users)
+  }
+
+  // 2. Pull every profile via service-role (bypasses RLS).
+  const { data: profileRows, error: profErr } = await admin
     .from("profiles")
-    .select("id, email, full_name, avatar_url, role, created_at")
-    .order("role", { ascending: false })
-    .order("email", { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as AdminUser[];
+    .select("id, email, full_name, avatar_url, role, created_at");
+  if (profErr) throw profErr;
+  const profileById = new Map<string, AdminUser>();
+  for (const r of (profileRows ?? []) as AdminUser[]) {
+    profileById.set(r.id, r);
+  }
+
+  // 3. Backfill profiles for any auth user without one. Use upsert so
+  //    concurrent calls don't race; on_conflict=id keeps existing rows.
+  const missing = authUsers.filter((u) => !profileById.has(u.id));
+  if (missing.length > 0) {
+    const rows = missing.map((u) => {
+      const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+      const fullName =
+        (meta.full_name as string | undefined) ??
+        (meta.name as string | undefined) ??
+        null;
+      const avatar =
+        (meta.avatar_url as string | undefined) ??
+        (meta.picture as string | undefined) ??
+        null;
+      return {
+        id: u.id,
+        email: u.email ?? "",
+        full_name: fullName,
+        avatar_url: avatar,
+        role: "user" as HavenUserRole,
+      };
+    });
+    const { data: inserted, error: upErr } = await admin
+      .from("profiles")
+      .upsert(rows, { onConflict: "id", ignoreDuplicates: true })
+      .select("id, email, full_name, avatar_url, role, created_at");
+    if (upErr) {
+      console.error("listUsers: profile backfill failed", upErr);
+      // Fall through — we still have auth users to surface below.
+    } else {
+      for (const r of (inserted ?? []) as AdminUser[]) {
+        profileById.set(r.id, r);
+      }
+    }
+  }
+
+  // 4. Build the merged list. Prefer the profile row when present;
+  //    otherwise fall back to a synthesized record from auth metadata
+  //    so the user is at least visible in the UI even if backfill
+  //    failed for some reason.
+  const merged: AdminUser[] = authUsers.map((u) => {
+    const p = profileById.get(u.id);
+    if (p) return p;
+    const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+    const fullName =
+      (meta.full_name as string | undefined) ??
+      (meta.name as string | undefined) ??
+      null;
+    const avatar =
+      (meta.avatar_url as string | undefined) ??
+      (meta.picture as string | undefined) ??
+      null;
+    return {
+      id: u.id,
+      email: u.email ?? "",
+      full_name: fullName,
+      avatar_url: avatar,
+      role: "user",
+      created_at: u.created_at,
+    };
+  });
+
+  // 5. Sort: super_admin first (role desc lexically: super_admin > user > admin
+  //    is wrong, so sort by an explicit rank), then email asc.
+  const rank: Record<HavenUserRole, number> = {
+    super_admin: 0,
+    admin: 1,
+    user: 2,
+  };
+  merged.sort((a, b) => {
+    const r = rank[a.role] - rank[b.role];
+    if (r !== 0) return r;
+    return (a.email || "").localeCompare(b.email || "");
+  });
+  return merged;
+}
+
+/**
+ * Manually sync auth.users → profiles. Idempotent. Returns the number
+ * of profiles created.
+ *
+ * Super-admin only.
+ */
+export type SyncAuthUsersResult =
+  | { ok: true; synced: number; total: number }
+  | { ok: false; error: string };
+
+export async function syncAuthUsers(): Promise<SyncAuthUsersResult> {
+  try {
+    await requireSuperAdmin();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  let admin: ReturnType<typeof getAdminClient>;
+  try {
+    admin = getAdminClient();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+
+  type AuthUserLite = {
+    id: string;
+    email: string | null | undefined;
+    user_metadata?: Record<string, unknown> | null;
+  };
+  const authUsers: AuthUserLite[] = [];
+  const perPage = 1000;
+  for (let page = 1; ; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+    if (error) return { ok: false, error: error.message };
+    const batch = (data?.users ?? []) as AuthUserLite[];
+    authUsers.push(...batch);
+    if (batch.length < perPage) break;
+    if (page >= 50) break;
+  }
+
+  const { data: existing, error: pErr } = await admin
+    .from("profiles")
+    .select("id");
+  if (pErr) return { ok: false, error: pErr.message };
+  const have = new Set<string>(
+    ((existing ?? []) as { id: string }[]).map((r) => r.id),
+  );
+  const missing = authUsers.filter((u) => !have.has(u.id));
+  if (missing.length === 0) {
+    revalidatePath("/settings/users");
+    return { ok: true, synced: 0, total: authUsers.length };
+  }
+
+  const rows = missing.map((u) => {
+    const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+    return {
+      id: u.id,
+      email: u.email ?? "",
+      full_name:
+        (meta.full_name as string | undefined) ??
+        (meta.name as string | undefined) ??
+        null,
+      avatar_url:
+        (meta.avatar_url as string | undefined) ??
+        (meta.picture as string | undefined) ??
+        null,
+      role: "user" as HavenUserRole,
+    };
+  });
+  const { error: upErr } = await admin
+    .from("profiles")
+    .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+  if (upErr) return { ok: false, error: upErr.message };
+
+  revalidatePath("/settings/users");
+  return { ok: true, synced: missing.length, total: authUsers.length };
 }
 
 export async function setUserRole(
