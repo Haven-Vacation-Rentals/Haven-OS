@@ -305,6 +305,19 @@ export interface GlobalTaskFilters {
   due?: "all" | "overdue" | "today" | "this_week" | "none";
   include_archived?: boolean;
   include_completed?: boolean;
+  /** Zero-based page index. Defaults to 0. */
+  page?: number;
+  /** Page size — defaults to 100. Hard-capped server-side. */
+  page_size?: number;
+}
+
+/** Paginated result shape for global tasks. */
+export interface PaginatedTasks {
+  tasks: GlobalTask[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
 }
 
 /** Flat list item for the list view — includes depth for indentation */

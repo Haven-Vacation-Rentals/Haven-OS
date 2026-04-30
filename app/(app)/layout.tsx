@@ -10,6 +10,7 @@ import {
   canAccessHrModule,
   canAccessSales,
 } from "@/lib/auth/permissions";
+import { getMyUnreadCount } from "@/lib/notifications/actions";
 import { Toaster } from "sonner";
 
 export default async function AppLayout({
@@ -18,11 +19,12 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const user = await requireUser();
-  const [canScorecard, canAgents, canHr, canSales] = await Promise.all([
+  const [canScorecard, canAgents, canHr, canSales, unread] = await Promise.all([
     canAccessScorecard(),
     canAccessAgentChat(),
     canAccessHrModule(),
     canAccessSales(),
+    getMyUnreadCount().catch(() => 0),
   ]);
 
   return (
@@ -35,7 +37,7 @@ export default async function AppLayout({
         canSales={canSales}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar user={user} />
+        <Topbar user={user} initialUnread={unread} />
         <main className="flex-1 px-8 py-8">{children}</main>
       </div>
       <CommandPalette />

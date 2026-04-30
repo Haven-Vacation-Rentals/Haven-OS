@@ -18,18 +18,41 @@ import {
   ArrowDown,
   ArrowUpDown,
   CheckSquare,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { TaskDetailDrawer } from "@/components/work/task-detail-drawer";
 import { ListTypeIcon } from "@/components/work/list-type-icon";
-import { getGlobalTasks, getStatuses, getCustomFieldDefs } from "@/lib/work/actions";
+import {
+  DndContext,
+  type DragEndEvent,
+  type DragStartEvent,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCorners,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  getGlobalTasks,
+  getStatuses,
+  getCustomFieldDefs,
+  updateTask,
+  setTaskStatusByCategory,
+} from "@/lib/work/actions";
 import type {
   GlobalTask,
   GlobalTaskFilters,
   TaskPriority,
+  TaskStatusCategory,
   Space,
   Status,
   CustomFieldDef,
@@ -436,105 +459,272 @@ function ListView({
 }
 
 // ---------------------------------------------------------------------------
-// Board view (scaffolded — no drag-drop in this branch)
+// Board view — drag-drop between status categories.
 // ---------------------------------------------------------------------------
+
+const BOARD_CATEGORIES: TaskStatusCategory[] = [
+  "todo",
+  "in_progress",
+  "done",
+  "closed",
+];
+
+const CATEGORY_LABELS: Record<TaskStatusCategory, string> = {
+  todo: "To Do",
+  in_progress: "In Progress",
+  done: "Done",
+  closed: "Closed",
+};
 
 function BoardView({
   tasks,
   onSelect,
+  onTaskMoved,
 }: {
   tasks: GlobalTask[];
   onSelect: (id: string) => void;
+  onTaskMoved: (taskId: string, category: TaskStatusCategory) => void;
 }) {
-  // TODO: Add drag-drop between columns (out of scope for this branch)
-  const statusCategories = ["todo", "in_progress", "done", "closed"] as const;
-  const categoryLabels: Record<string, string> = {
-    todo: "To Do",
-    in_progress: "In Progress",
-    done: "Done",
-    closed: "Closed",
-  };
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor),
+  );
 
   const byCategory = useMemo(() => {
-    const map: Record<string, GlobalTask[]> = {};
-    for (const cat of statusCategories) map[cat] = [];
+    const map: Record<TaskStatusCategory, GlobalTask[]> = {
+      todo: [],
+      in_progress: [],
+      done: [],
+      closed: [],
+    };
     for (const t of tasks) {
-      const cat = t.status?.category ?? "todo";
-      if (map[cat]) map[cat].push(t);
-      else map["todo"].push(t);
+      const cat = (t.status?.category ?? "todo") as TaskStatusCategory;
+      (map[cat] ?? map.todo).push(t);
     }
     return map;
-  }, [tasks]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tasks]);
+
+  function onDragStart(e: DragStartEvent) {
+    setActiveId(String(e.active.id));
+  }
+
+  function onDragEnd(e: DragEndEvent) {
+    setActiveId(null);
+    const taskId = String(e.active.id);
+    const overId = e.over?.id ? String(e.over.id) : null;
+    if (!overId) return;
+
+    let target: TaskStatusCategory | null = null;
+    if ((BOARD_CATEGORIES as string[]).includes(overId)) {
+      target = overId as TaskStatusCategory;
+    } else {
+      const overTask = tasks.find((t) => t.id === overId);
+      const cat = overTask?.status?.category as TaskStatusCategory | undefined;
+      if (cat) target = cat;
+    }
+    if (!target) return;
+
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    const prev = (t.status?.category ?? "todo") as TaskStatusCategory;
+    if (prev === target) return;
+
+    const moveTo = target;
+    onTaskMoved(taskId, moveTo);
+    void (async () => {
+      try {
+        await setTaskStatusByCategory(taskId, moveTo);
+        toast.success(`Moved to ${CATEGORY_LABELS[moveTo]}`);
+      } catch (err) {
+        onTaskMoved(taskId, prev);
+        toast.error(
+          err instanceof Error ? err.message : "Couldn't move task",
+        );
+      }
+    })();
+  }
+
+  const activeTask = activeId ? tasks.find((t) => t.id === activeId) : null;
 
   return (
-    <div className="flex gap-4 overflow-x-auto pb-4">
-      {statusCategories.map((cat) => (
-        <div
-          key={cat}
-          className="w-64 shrink-0 rounded-card border border-border bg-surface-alt/30"
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragCancel={() => setActiveId(null)}
+    >
+      <div className="flex gap-4 overflow-x-auto pb-4">
+        {BOARD_CATEGORIES.map((cat) => (
+          <BoardColumn
+            key={cat}
+            category={cat}
+            tasks={byCategory[cat]}
+            onSelect={onSelect}
+            activeId={activeId}
+          />
+        ))}
+      </div>
+      <DragOverlay dropAnimation={null}>
+        {activeTask ? <BoardCard task={activeTask} isDragging /> : null}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+
+function BoardColumn({
+  category,
+  tasks,
+  onSelect,
+  activeId,
+}: {
+  category: TaskStatusCategory;
+  tasks: GlobalTask[];
+  onSelect: (id: string) => void;
+  activeId: string | null;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: category });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "w-64 shrink-0 rounded-card border bg-surface-alt/30 transition-colors",
+        isOver
+          ? "border-accent ring-2 ring-accent/30"
+          : "border-border",
+      )}
+    >
+      <div className="border-b border-border px-3 py-2">
+        <span className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {CATEGORY_LABELS[category]}
+        </span>
+        <span className="ml-1.5 text-[11px] text-muted-foreground">
+          ({tasks.length})
+        </span>
+      </div>
+      <div className="space-y-2 p-2">
+        {tasks.map((task) => (
+          <DraggableBoardCard
+            key={task.id}
+            task={task}
+            onSelect={onSelect}
+            isOverlayActive={activeId === task.id}
+          />
+        ))}
+        {tasks.length === 0 ? (
+          <div
+            className={cn(
+              "rounded-md border border-dashed px-2 py-4 text-center text-[11px]",
+              isOver
+                ? "border-accent bg-accent-soft/40 text-accent"
+                : "border-border text-muted-foreground/60",
+            )}
+          >
+            {isOver ? "Drop here" : "No tasks"}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function DraggableBoardCard({
+  task,
+  onSelect,
+  isOverlayActive,
+}: {
+  task: GlobalTask;
+  onSelect: (id: string) => void;
+  isOverlayActive: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: task.id,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      onClick={() => onSelect(task.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onSelect(task.id);
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      style={{ opacity: isDragging || isOverlayActive ? 0.4 : 1 }}
+      className="touch-none cursor-grab rounded-md focus-visible:outline-none focus-visible:shadow-ring active:cursor-grabbing"
+    >
+      <BoardCard task={task} />
+    </div>
+  );
+}
+
+function BoardCard({
+  task,
+  isDragging,
+}: {
+  task: GlobalTask;
+  isDragging?: boolean;
+}) {
+  const due = formatDueDate(task.due_date);
+  return (
+    <div
+      className={cn(
+        "rounded-md border bg-surface p-2 text-left transition-all",
+        isDragging
+          ? "rotate-1 border-accent/50 shadow-lg"
+          : "border-border hover:border-accent/50 hover:shadow-sm",
+      )}
+    >
+      <div className="mb-1 flex items-start justify-between gap-1">
+        <span className="line-clamp-2 text-[12.5px] font-medium text-foreground">
+          {task.title}
+        </span>
+        <span
+          className={cn(
+            "shrink-0 text-[10px] font-semibold",
+            PRIORITY_COLORS[task.priority],
+          )}
         >
-          <div className="border-b border-border px-3 py-2">
-            <span className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {categoryLabels[cat]}
-            </span>
-            <span className="ml-1.5 text-[11px] text-muted-foreground">
-              ({byCategory[cat].length})
-            </span>
-          </div>
-          <div className="space-y-2 p-2">
-            {byCategory[cat].map((task) => {
-              const due = formatDueDate(task.due_date);
-              return (
-                <button
-                  key={task.id}
-                  type="button"
-                  onClick={() => onSelect(task.id)}
-                  className="w-full rounded-md border border-border bg-surface p-2 text-left hover:border-accent/50 hover:shadow-sm"
-                >
-                  <div className="mb-1 flex items-start justify-between gap-1">
-                    <span className="line-clamp-2 text-[12.5px] font-medium text-foreground">
-                      {task.title}
-                    </span>
-                    <span
-                      className={cn(
-                        "shrink-0 text-[10px] font-semibold",
-                        PRIORITY_COLORS[task.priority],
-                      )}
-                    >
-                      {PRIORITY_LABELS[task.priority]}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className={cn("text-[11px]", due.cls)}>
-                      {task.due_date ? due.label : ""}
-                    </span>
-                    {task.assignees[0] && (
-                      <Avatar profile={task.assignees[0]} isPrimary />
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
+          {PRIORITY_LABELS[task.priority]}
+        </span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className={cn("text-[11px]", due.cls)}>
+          {task.due_date ? due.label : ""}
+        </span>
+        {task.assignees[0] && (
+          <Avatar profile={task.assignees[0]} isPrimary />
+        )}
+      </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Calendar view (scaffolded)
+// Calendar view — drag a task chip onto a different day to reschedule.
 // ---------------------------------------------------------------------------
 
 function CalendarView({
   tasks,
   onSelect,
+  onTaskRescheduled,
 }: {
   tasks: GlobalTask[];
   onSelect: (id: string) => void;
+  onTaskRescheduled: (taskId: string, newDate: string) => void;
 }) {
-  // TODO: Add drag-reschedule (out of scope for this branch)
   const [monthOffset, setMonthOffset] = useState(0);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor),
+  );
+
   const base = new Date();
   base.setMonth(base.getMonth() + monthOffset);
   const year = base.getFullYear();
@@ -564,87 +754,198 @@ function CalendarView({
 
   const todayStr = new Date().toISOString().split("T")[0];
 
+  function onDragStart(e: DragStartEvent) {
+    setActiveId(String(e.active.id));
+  }
+
+  function onDragEnd(e: DragEndEvent) {
+    setActiveId(null);
+    const taskId = String(e.active.id);
+    const overId = e.over?.id ? String(e.over.id) : null;
+    if (!overId || !overId.startsWith("day:")) return;
+    const newDate = overId.slice("day:".length);
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t || t.due_date === newDate) return;
+    const prev = t.due_date;
+
+    onTaskRescheduled(taskId, newDate);
+    void (async () => {
+      try {
+        await updateTask(taskId, { due_date: newDate });
+        toast.success(
+          `Rescheduled to ${new Date(newDate + "T00:00:00").toLocaleDateString(
+            "en-US",
+            { month: "short", day: "numeric" },
+          )}`,
+        );
+      } catch (err) {
+        onTaskRescheduled(taskId, prev ?? "");
+        toast.error(
+          err instanceof Error ? err.message : "Couldn't reschedule task",
+        );
+      }
+    })();
+  }
+
+  const activeTask = activeId ? tasks.find((t) => t.id === activeId) : null;
+
   return (
-    <div className="flex-1">
-      <div className="mb-3 flex items-center justify-between">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setMonthOffset((m) => m - 1)}
-        >
-          &lt;
-        </Button>
-        <span className="text-sm font-semibold">{monthLabel}</span>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setMonthOffset((m) => m + 1)}
-        >
-          &gt;
-        </Button>
-      </div>
-      <div className="grid grid-cols-7 gap-px overflow-hidden rounded-card border border-border bg-border">
-        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-          <div
-            key={d}
-            className="bg-surface-alt px-2 py-1.5 text-center text-[11px] font-medium text-muted-foreground"
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragCancel={() => setActiveId(null)}
+    >
+      <div className="flex-1">
+        <div className="mb-3 flex items-center justify-between">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setMonthOffset((m) => m - 1)}
+            aria-label="Previous month"
           >
-            {d}
-          </div>
-        ))}
-        {days.map((day, i) => {
-          if (day === null)
-            return <div key={i} className="min-h-[80px] bg-background" />;
-          const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-          const dayTasks = tasksByDate[dateStr] ?? [];
-          const isToday = dateStr === todayStr;
-          return (
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </Button>
+          <span className="text-sm font-semibold">{monthLabel}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setMonthOffset((m) => m + 1)}
+            aria-label="Next month"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+        <div className="grid grid-cols-7 gap-px overflow-hidden rounded-card border border-border bg-border">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
             <div
-              key={i}
-              className={cn(
-                "min-h-[80px] bg-background p-1",
-                isToday && "ring-2 ring-inset ring-accent",
-              )}
+              key={d}
+              className="bg-surface-alt px-2 py-1.5 text-center text-[11px] font-medium text-muted-foreground"
             >
-              <span
-                className={cn(
-                  "text-[11px]",
-                  isToday
-                    ? "font-bold text-accent"
-                    : "text-muted-foreground",
-                )}
-              >
-                {day}
-              </span>
-              <div className="mt-0.5 space-y-0.5">
-                {dayTasks.slice(0, 3).map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => onSelect(t.id)}
-                    className={cn(
-                      "w-full truncate rounded px-1 py-0.5 text-left text-[10px]",
-                      t.status?.category === "done" ||
-                        t.status?.category === "closed"
-                        ? "bg-emerald-100 text-emerald-700 line-through dark:bg-emerald-900/20 dark:text-emerald-400"
-                        : t.priority === "urgent"
-                          ? "bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-400"
-                          : "bg-accent/10 text-accent",
-                    )}
-                  >
-                    {t.title}
-                  </button>
-                ))}
-                {dayTasks.length > 3 && (
-                  <span className="text-[10px] text-muted-foreground">
-                    +{dayTasks.length - 3} more
-                  </span>
-                )}
-              </div>
+              {d}
             </div>
-          );
-        })}
+          ))}
+          {days.map((day, i) => {
+            if (day === null)
+              return <div key={i} className="min-h-[80px] bg-background" />;
+            const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+            const dayTasks = tasksByDate[dateStr] ?? [];
+            return (
+              <CalendarDay
+                key={i}
+                date={dateStr}
+                day={day}
+                tasks={dayTasks}
+                isToday={dateStr === todayStr}
+                activeId={activeId}
+                onSelect={onSelect}
+              />
+            );
+          })}
+        </div>
       </div>
+      <DragOverlay dropAnimation={null}>
+        {activeTask ? (
+          <span className="rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-medium text-accent shadow">
+            {activeTask.title}
+          </span>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+
+function CalendarDay({
+  date,
+  day,
+  tasks,
+  isToday,
+  activeId,
+  onSelect,
+}: {
+  date: string;
+  day: number;
+  tasks: GlobalTask[];
+  isToday: boolean;
+  activeId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `day:${date}` });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "min-h-[80px] bg-background p-1 transition-colors",
+        isToday && "ring-2 ring-inset ring-accent",
+        isOver && "bg-accent-soft/40",
+      )}
+    >
+      <span
+        className={cn(
+          "text-[11px]",
+          isToday ? "font-bold text-accent" : "text-muted-foreground",
+        )}
+      >
+        {day}
+      </span>
+      <div className="mt-0.5 space-y-0.5">
+        {tasks.slice(0, 3).map((t) => (
+          <DraggableCalendarChip
+            key={t.id}
+            task={t}
+            onSelect={onSelect}
+            dimmed={activeId === t.id}
+          />
+        ))}
+        {tasks.length > 3 && (
+          <span className="text-[10px] text-muted-foreground">
+            +{tasks.length - 3} more
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DraggableCalendarChip({
+  task,
+  onSelect,
+  dimmed,
+}: {
+  task: GlobalTask;
+  onSelect: (id: string) => void;
+  dimmed: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: task.id,
+  });
+  const cls = cn(
+    "block w-full cursor-grab truncate rounded px-1 py-0.5 text-left text-[10px] transition-opacity active:cursor-grabbing",
+    task.status?.category === "done" || task.status?.category === "closed"
+      ? "bg-emerald-100 text-emerald-700 line-through dark:bg-emerald-900/20 dark:text-emerald-400"
+      : task.priority === "urgent"
+        ? "bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-400"
+        : "bg-accent/10 text-accent",
+    (isDragging || dimmed) && "opacity-30",
+  );
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      onClick={() => onSelect(task.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onSelect(task.id);
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      className={cls}
+    >
+      {task.title}
     </div>
   );
 }
@@ -655,12 +956,24 @@ function CalendarView({
 
 export function GlobalTasksView({
   initialTasks,
+  total,
+  page,
+  pageSize,
+  hasMore,
   spaces,
   members,
   initialFilters,
   hideAssigneeFilter = false,
 }: {
   initialTasks: GlobalTask[];
+  /** Total tasks matching the active filters (across all pages). */
+  total?: number;
+  /** Zero-based current page. */
+  page?: number;
+  /** Number of tasks per page. */
+  pageSize?: number;
+  /** Server hint that another page is available. */
+  hasMore?: boolean;
   spaces: Space[];
   members: {
     id: string;
@@ -677,6 +990,11 @@ export function GlobalTasksView({
   const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
 
+  const totalCount = total ?? initialTasks.length;
+  const currentPage = page ?? 0;
+  const effectivePageSize = pageSize ?? Math.max(initialTasks.length, 100);
+  const moreAvailable = hasMore ?? false;
+
   const [tasks, setTasks] = useState<GlobalTask[]>(initialTasks);
   const [view, setView] = useState<ViewMode>("list");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -686,7 +1004,9 @@ export function GlobalTasksView({
   // Debounce search
   const [localSearch, setLocalSearch] = useState(initialFilters.search ?? "");
 
-  // Update URL params and refresh data
+  // Update URL params and refresh data. Any filter change (other than an
+  // explicit page bump) resets the page to 0 so the user always sees the
+  // first page of new results.
   const updateFilters = useCallback(
     (patch: Partial<GlobalTaskFilters>) => {
       const current = new URLSearchParams(searchParams.toString());
@@ -709,6 +1029,14 @@ export function GlobalTasksView({
       if (patch.list_ids !== undefined) set("list_ids", patch.list_ids);
       if (patch.space_ids !== undefined) set("space_ids", patch.space_ids);
       if (patch.due !== undefined) set("due", patch.due);
+
+      const isPageBump = Object.keys(patch).length === 1 && "page" in patch;
+      if (patch.page !== undefined) {
+        if (patch.page === 0) current.delete("page");
+        else current.set("page", String(patch.page));
+      } else if (!isPageBump) {
+        current.delete("page");
+      }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       router.push(`${pathname}?${current.toString()}` as any);
@@ -816,7 +1144,18 @@ export function GlobalTasksView({
           All Tasks
         </h1>
         <span className="text-[12px] text-muted-foreground">
-          {tasks.length} task{tasks.length !== 1 ? "s" : ""}
+          {(() => {
+            if (totalCount === 0) return "0 tasks";
+            const start = currentPage * effectivePageSize + 1;
+            const end = Math.min(
+              start + tasks.length - 1,
+              totalCount,
+            );
+            if (totalCount <= tasks.length && currentPage === 0) {
+              return `${totalCount} task${totalCount === 1 ? "" : "s"}`;
+            }
+            return `${start}–${end} of ${totalCount.toLocaleString()}`;
+          })()}
         </span>
       </div>
 
@@ -1019,10 +1358,34 @@ export function GlobalTasksView({
             <ListView tasks={tasks} onSelect={setSelectedTaskId} />
           )}
           {view === "board" && (
-            <BoardView tasks={tasks} onSelect={setSelectedTaskId} />
+            <BoardView
+              tasks={tasks}
+              onSelect={setSelectedTaskId}
+              onTaskMoved={(taskId, category) => {
+                setTasks((curr) =>
+                  curr.map((t) =>
+                    t.id === taskId && t.status
+                      ? { ...t, status: { ...t.status, category } }
+                      : t,
+                  ),
+                );
+              }}
+            />
           )}
           {view === "calendar" && (
-            <CalendarView tasks={tasks} onSelect={setSelectedTaskId} />
+            <CalendarView
+              tasks={tasks}
+              onSelect={setSelectedTaskId}
+              onTaskRescheduled={(taskId, newDate) => {
+                setTasks((curr) =>
+                  curr.map((t) =>
+                    t.id === taskId
+                      ? { ...t, due_date: newDate || null }
+                      : t,
+                  ),
+                );
+              }}
+            />
           )}
         </div>
 
@@ -1052,6 +1415,42 @@ export function GlobalTasksView({
           />
         )}
       </div>
+
+      {/* Pagination */}
+      {totalCount > effectivePageSize ? (
+        <div className="flex items-center justify-between border-t border-border pt-3">
+          <span className="text-[11px] text-muted-foreground">
+            Page {currentPage + 1} of{" "}
+            {Math.max(1, Math.ceil(totalCount / effectivePageSize))}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1 text-[12px]"
+              disabled={currentPage === 0}
+              onClick={() =>
+                updateFilters({ page: Math.max(0, currentPage - 1) })
+              }
+              aria-label="Previous page"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Prev
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1 text-[12px]"
+              disabled={!moreAvailable}
+              onClick={() => updateFilters({ page: currentPage + 1 })}
+              aria-label="Next page"
+            >
+              Next
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

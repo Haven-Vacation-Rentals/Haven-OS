@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireSignedIn } from "@/lib/auth/permissions";
-import type { Property, PropertyUpdateInput } from "./types";
+import type {
+  Property,
+  PropertyFilter,
+  PropertyUpdateInput,
+} from "./types";
 
 export type CreatePropertyInput = Partial<
   Omit<Property, "id" | "created_at" | "updated_at" | "archived_at">
@@ -34,6 +38,78 @@ export async function getProperties(): Promise<Property[]> {
     .order("name");
   if (error) throw error;
   return (data ?? []) as Property[];
+}
+
+export interface PropertyQuery extends PropertyFilter {
+  page?: number;
+  page_size?: number;
+}
+
+export interface PaginatedProperties {
+  properties: Property[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+}
+
+/**
+ * Server-side property search + pagination.
+ *
+ * Uses the `search_vector` tsvector column (migration 0031) for >=3 char
+ * queries — covers name, address, region, account_manager,
+ * revenue_manager, notes. Shorter queries fall back to `ilike` on name
+ * + address. Returns the page slice plus the total count for pagination
+ * UI; the filtered total respects all facets.
+ */
+export async function getPropertiesPaginated(
+  q: PropertyQuery = {},
+): Promise<PaginatedProperties> {
+  const supabase = await db();
+  const pageSize = Math.min(Math.max(q.page_size ?? 50, 10), 200);
+  const page = Math.max(q.page ?? 0, 0);
+
+  let query = supabase
+    .from("properties")
+    .select("*", { count: "exact" })
+    .is("archived_at", null);
+
+  if (q.status && q.status !== "all") query = query.eq("status", q.status);
+  if (q.tier && q.tier !== "all") query = query.eq("tier", q.tier);
+  if (q.region && q.region !== "all") query = query.eq("region", q.region);
+  if (q.account_manager && q.account_manager !== "all")
+    query = query.eq("account_manager", q.account_manager);
+  if (q.airbnb_account && q.airbnb_account !== "all")
+    query = query.eq("airbnb_account", q.airbnb_account);
+
+  const term = q.search?.trim();
+  if (term && term.length >= 3) {
+    query = query.textSearch("search_vector", term, {
+      type: "websearch",
+      config: "english",
+    });
+  } else if (term && term.length > 0) {
+    // Short queries — fall back to ilike on the user-visible identifiers.
+    query = query.or(
+      `name.ilike.%${term}%,address.ilike.%${term}%,region.ilike.%${term}%`,
+    );
+  }
+
+  const from = page * pageSize;
+  const to = from + pageSize - 1;
+  query = query.order("name").range(from, to);
+
+  const { data, error, count } = await query;
+  if (error) throw error;
+
+  const total = count ?? 0;
+  return {
+    properties: (data ?? []) as Property[],
+    total,
+    page,
+    page_size: pageSize,
+    has_more: from + (data?.length ?? 0) < total,
+  };
 }
 
 export async function getProperty(id: string): Promise<Property | null> {

@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getPermissions } from "@/lib/auth/permissions";
+import {
+  deliverNotifications,
+  notifyTaskWatchers,
+} from "@/lib/notifications/actions";
 import type {
   CreateSpaceInput,
   CreateFolderInput,
@@ -30,6 +34,7 @@ import type {
   CustomFieldDef,
   GlobalTask,
   GlobalTaskFilters,
+  PaginatedTasks,
   Checklist,
   ChecklistItem,
   TimeEntry,
@@ -742,23 +747,24 @@ export async function updateTask(
   input: UpdateTaskInput,
 ): Promise<void> {
   const supabase = await db();
+  const actorId = await currentUserId().catch(() => null);
 
-  // Look up the host list and require editor access.
-  {
-    const { data: t } = await supabase
-      .from("tasks")
-      .select("list_id")
-      .eq("id", id)
-      .maybeSingle();
-    if (t?.list_id) await requireListAccess(t.list_id, "editor");
-  }
+  // Look up the host list and the prior task state so we can detect
+  // changes for notifications.
+  const { data: prior } = await supabase
+    .from("tasks")
+    .select("list_id, title, status_id, due_date")
+    .eq("id", id)
+    .maybeSingle();
+  if (prior?.list_id) await requireListAccess(prior.list_id, "editor");
 
   // If marking done, set completed_at
   let justCompleted = false;
+  let newStatusName: string | null = null;
   if (input.status_id) {
     const { data: status } = await supabase
       .from("statuses")
-      .select("category")
+      .select("category, name")
       .eq("id", input.status_id)
       .single();
     if (status?.category === "done" || status?.category === "closed") {
@@ -767,6 +773,7 @@ export async function updateTask(
     } else {
       input.completed_at = null;
     }
+    newStatusName = status?.name ?? null;
   }
 
   const { error } = await supabase.from("tasks").update(input).eq("id", id);
@@ -784,6 +791,53 @@ export async function updateTask(
       console.error("[recurrence] rollover failed", err);
     }
   }
+
+  // Fire-and-forget notifications. We swallow any error so a delivery
+  // failure can never block the task update.
+  void (async () => {
+    try {
+      const taskTitle = prior?.title ?? "task";
+      if (justCompleted) {
+        await notifyTaskWatchers({
+          taskId: id,
+          actorId,
+          kind: "task_completed",
+          title: `Task completed: ${taskTitle}`,
+        });
+      } else if (
+        input.status_id &&
+        prior?.status_id &&
+        input.status_id !== prior.status_id
+      ) {
+        await notifyTaskWatchers({
+          taskId: id,
+          actorId,
+          kind: "task_status_changed",
+          title: `Status changed on “${taskTitle}”`,
+          body: newStatusName
+            ? `Now ${newStatusName}.`
+            : null,
+          metadata: { status_id: input.status_id },
+        });
+      }
+      if (
+        input.due_date !== undefined &&
+        input.due_date !== prior?.due_date
+      ) {
+        await notifyTaskWatchers({
+          taskId: id,
+          actorId,
+          kind: "task_due_changed",
+          title: `Due date updated on “${taskTitle}”`,
+          body: input.due_date
+            ? `Now due ${input.due_date}.`
+            : "Due date cleared.",
+        });
+      }
+    } catch (err) {
+      console.error("[notifications] updateTask fan-out failed", err);
+    }
+  })();
 
   revalidatePath("/work", "layout");
   revalidatePath("/my-tasks");
@@ -1180,6 +1234,28 @@ export async function createComment(
     .from("comments")
     .insert({ task_id: taskId, author_id: userId, body });
   if (error) throw error;
+
+  void (async () => {
+    try {
+      const { data: t } = await supabase
+        .from("tasks")
+        .select("title")
+        .eq("id", taskId)
+        .maybeSingle();
+      const title = t?.title ?? "a task";
+      const preview = body.length > 140 ? `${body.slice(0, 140)}…` : body;
+      await notifyTaskWatchers({
+        taskId,
+        actorId: userId,
+        kind: "task_comment_added",
+        title: `New comment on “${title}”`,
+        body: preview,
+      });
+    } catch (err) {
+      console.error("[notifications] createComment fan-out failed", err);
+    }
+  })();
+
   revalidatePath("/work", "layout");
   revalidatePath("/my-tasks");
 }
@@ -1194,10 +1270,34 @@ export async function addAssignee(
   role: AssigneeRole = "secondary",
 ): Promise<void> {
   const supabase = await db();
+  const actorId = await currentUserId().catch(() => null);
   const { error } = await supabase
     .from("task_assignees")
     .upsert({ task_id: taskId, profile_id: profileId, role });
   if (error) throw error;
+
+  void (async () => {
+    try {
+      const { data: t } = await supabase
+        .from("tasks")
+        .select("title")
+        .eq("id", taskId)
+        .maybeSingle();
+      await deliverNotifications({
+        recipientIds: [profileId],
+        actorId,
+        kind: "task_assigned",
+        subjectType: "task",
+        subjectId: taskId,
+        subjectUrl: `/work/tasks?task=${taskId}`,
+        title: `You were assigned to “${t?.title ?? "a task"}”`,
+        metadata: { role },
+      });
+    } catch (err) {
+      console.error("[notifications] addAssignee fan-out failed", err);
+    }
+  })();
+
   revalidatePath("/work", "layout");
   revalidatePath("/my-tasks");
 }
@@ -1588,7 +1688,20 @@ export async function getGlobalTasks(
   }
 
   if (filters.search) {
-    query = query.ilike("title", `%${filters.search}%`);
+    const term = filters.search.trim();
+    if (term.length >= 3) {
+      // Full-text search across title (weight A), description (B), and
+      // joined comment bodies (C). websearch_to_tsquery handles AND/OR
+      // and quoted phrases without us hand-rolling the syntax.
+      query = query.textSearch("search_vector", term, {
+        type: "websearch",
+        config: "english",
+      });
+    } else if (term.length > 0) {
+      // Short queries fall back to ilike — FTS struggles with 1-2 char
+      // prefixes (and the GIN index won't help anyway).
+      query = query.ilike("title", `%${term}%`);
+    }
   }
 
   if (filters.priorities && filters.priorities.length > 0) {
@@ -1706,6 +1819,58 @@ export async function getGlobalTasks(
         return true;
     }
   });
+}
+
+/**
+ * Move a task to the first status with the given category in its host
+ * list. Used by drag-drop on the global Board view, where the client
+ * doesn't know per-list status ids.
+ */
+export async function setTaskStatusByCategory(
+  taskId: string,
+  category: TaskStatusCategory,
+): Promise<void> {
+  const supabase = await db();
+  const { data: t } = await supabase
+    .from("tasks")
+    .select("list_id")
+    .eq("id", taskId)
+    .maybeSingle();
+  if (!t?.list_id) throw new Error("Task not found");
+  await requireListAccess(t.list_id, "editor");
+
+  const { data: status } = await supabase
+    .from("statuses")
+    .select("id")
+    .eq("list_id", t.list_id)
+    .eq("category", category)
+    .order("order")
+    .limit(1)
+    .maybeSingle();
+  if (!status?.id) throw new Error(`No "${category}" status on this list`);
+  await updateTask(taskId, { status_id: status.id });
+}
+
+/**
+ * Paginated wrapper around `getGlobalTasks`. Visibility and date
+ * filtering happen post-query in JS, so we slice the same way to give
+ * callers a consistent total + page contract.
+ */
+export async function getGlobalTasksPaginated(
+  filters: GlobalTaskFilters = {},
+): Promise<PaginatedTasks> {
+  const pageSize = Math.min(Math.max(filters.page_size ?? 100, 10), 500);
+  const page = Math.max(filters.page ?? 0, 0);
+  const all = await getGlobalTasks({ ...filters, page: undefined, page_size: undefined });
+  const start = page * pageSize;
+  const slice = all.slice(start, start + pageSize);
+  return {
+    tasks: slice,
+    total: all.length,
+    page,
+    page_size: pageSize,
+    has_more: start + slice.length < all.length,
+  };
 }
 
 // ---------------------------------------------------------------------------

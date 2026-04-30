@@ -11,6 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Check } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { updateProperty } from "@/lib/properties/actions";
 import { StatusBadge, TierBadge } from "./property-badges";
@@ -244,7 +245,14 @@ function TextCell({
     if (parsed === value) return;
     setLocalVal(parsed);
     startTransition(async () => {
-      await updateProperty(propertyId, { [field]: parsed } as never);
+      try {
+        await updateProperty(propertyId, { [field]: parsed } as never);
+      } catch (err) {
+        setLocalVal(value);
+        toast.error(
+          err instanceof Error ? err.message : "Couldn't save change",
+        );
+      }
     });
   }
 
@@ -333,9 +341,17 @@ function SelectCell({
       setOpen(false);
       const parsed = v || null;
       if (parsed === localVal) return;
+      const prev = localVal;
       setLocalVal(parsed);
       startTransition(async () => {
-        await updateProperty(propertyId, { [field]: parsed } as never);
+        try {
+          await updateProperty(propertyId, { [field]: parsed } as never);
+        } catch (err) {
+          setLocalVal(prev);
+          toast.error(
+            err instanceof Error ? err.message : "Couldn't save change",
+          );
+        }
       });
     },
     [propertyId, field, localVal],
@@ -400,7 +416,14 @@ function BooleanCell({
     const next = !localVal;
     setLocalVal(next);
     startTransition(async () => {
-      await updateProperty(propertyId, { [field]: next } as never);
+      try {
+        await updateProperty(propertyId, { [field]: next } as never);
+      } catch (err) {
+        setLocalVal(!next);
+        toast.error(
+          err instanceof Error ? err.message : "Couldn't save change",
+        );
+      }
     });
   }
 
@@ -439,7 +462,14 @@ function NameCell({ property }: { property: Property }) {
     const val = raw.trim();
     if (!val || val === property.name) return;
     startTransition(async () => {
-      await updateProperty(property.id, { name: val });
+      try {
+        await updateProperty(property.id, { name: val });
+        toast.success("Property renamed");
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Couldn't rename property",
+        );
+      }
     });
   }
 
