@@ -47,19 +47,16 @@ Sidebar layout, in order:
 
 ## Content Studio
 
-App-native SEO + GEO blog workspace at `/content`. Replaced the previous ClickUp-based workflow — Content Studio is now the source of truth for the Haven Homeowner Blog.
+Editorial pipeline for the Haven Homeowner Blog at `/content`. A focused content strategy tracker — topics move through a Kanban from idea to publish, each one owned by a specific person and watched against deadlines.
 
-- **Pipeline stages:** Idea → In Progress → Draft → Complete.
-- **Workflow:** left-side chat with the content agent, right-side article editor.
-- **Features:**
-  - Paste-draft import from existing copy.
-  - SEO/GEO optimization passes.
-  - Real inline hyperlink insertion (anchor text → URL written into the canvas).
-  - Post / Source view toggle.
-  - WordPress draft push when `HAVEN_WP_*` env vars are configured (drafts only — never publishes directly).
-  - One-click topic delete.
-- **Managed agent ID:** `agent_011CaT8cFgxnMar5p8jGrr4q` — set as `CLAUDE_CONTENT_AGENT_ID`. Without it, the studio falls back to a local rule-based agent.
-- See [`docs/CONTENT_STUDIO.md`](docs/CONTENT_STUDIO.md) for full agent + connector details.
+- **Pipeline stages:** Idea → In Progress → Draft → Complete (drag-and-drop Kanban, list, and calendar views).
+- **Strategy metadata:** assignee, content pillar, target keyword, priority, due date, publish target. All visible on cards, in the list, and in the article header.
+- **Status strip:** running counts per stage plus *Needs owner* and *Overdue* indicators across the filtered backlog.
+- **Filters:** by pillar and by assignee (including an *Unassigned* shortcut).
+- **Article workspace:** Post editor, SEO & GEO scorecard, and Publish (WordPress draft) tabs. Optimize-for-SEO is a one-click action in the header.
+- **Paste-draft import:** drop in markdown or plain text and the studio derives a topic skeleton (title, pillar, keyword) and seeds the post body.
+- **WordPress draft push:** when `HAVEN_WP_*` env vars are configured. Drafts only — never publishes directly.
+- See [`docs/CONTENT_STUDIO.md`](docs/CONTENT_STUDIO.md) for the data model and scoring details.
 
 ---
 

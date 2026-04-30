@@ -18,18 +18,23 @@ import { createTopic } from "@/lib/content/actions";
 import {
   PILLAR_LABELS,
   PRIORITY_LABELS,
+  type ContentAssignee,
   type ContentPillar,
   type ContentPriority,
 } from "@/lib/content/types";
+
+const SELF_OWNER = "__self__";
 
 export function CreateTopicDialog({
   open,
   onOpenChange,
   spaceId,
+  assignees,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   spaceId: string;
+  assignees: ContentAssignee[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -42,6 +47,7 @@ export function CreateTopicDialog({
   const [hypothesis, setHypothesis] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [publishTarget, setPublishTarget] = useState("");
+  const [ownerId, setOwnerId] = useState<string>(SELF_OWNER);
 
   function reset() {
     setTitle("");
@@ -52,6 +58,7 @@ export function CreateTopicDialog({
     setHypothesis("");
     setDueDate("");
     setPublishTarget("");
+    setOwnerId(SELF_OWNER);
   }
 
   function submit() {
@@ -60,6 +67,14 @@ export function CreateTopicDialog({
       return;
     }
     startTransition(async () => {
+      // Sentinel SELF_OWNER → leave owner_id undefined so the action
+      // defaults to the creator. Empty string → explicit unassigned.
+      const ownerArg =
+        ownerId === SELF_OWNER
+          ? undefined
+          : ownerId === ""
+            ? null
+            : ownerId;
       const result = await createTopic({
         space_id: spaceId,
         title: title.trim(),
@@ -70,6 +85,7 @@ export function CreateTopicDialog({
         hypothesis: hypothesis.trim() || undefined,
         due_date: dueDate || null,
         publish_target: publishTarget || null,
+        owner_id: ownerArg,
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -128,6 +144,22 @@ export function CreateTopicDialog({
               />
             </Field>
           </div>
+
+          <Field label="Assignee">
+            <select
+              value={ownerId}
+              onChange={(e) => setOwnerId(e.target.value)}
+              className="h-9 rounded-md border border-border bg-surface px-2 text-[13px] text-foreground"
+            >
+              <option value={SELF_OWNER}>Me (default)</option>
+              <option value="">Unassigned</option>
+              {assignees.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.full_name || a.email}
+                </option>
+              ))}
+            </select>
+          </Field>
 
           <Field label="Target keyword">
             <Input

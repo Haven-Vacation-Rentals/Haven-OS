@@ -245,8 +245,16 @@ export interface ContentPublishJob {
   updated_at: string;
 }
 
+export interface ContentAssignee {
+  id: string;
+  full_name: string | null;
+  email: string;
+  avatar_url: string | null;
+}
+
 export interface TopicWithArticle extends ContentTopic {
   article: ContentArticle | null;
+  owner: ContentAssignee | null;
 }
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };

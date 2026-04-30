@@ -5,9 +5,8 @@ import { ArrowLeft } from "lucide-react";
 import { canAccessSales } from "@/lib/auth/permissions";
 import {
   getTopic,
-  listAgentMessages,
-  listResearch,
   getLatestScores,
+  listContentAssignees,
   listPublishJobs,
   getWordPressEnvStatus,
 } from "@/lib/content/actions";
@@ -31,12 +30,11 @@ export default async function ArticleWorkspacePage({
   const topic = await getTopic(topicId);
   if (!topic || !topic.article) notFound();
 
-  const [messages, sources, scores, jobs, wp] = await Promise.all([
-    listAgentMessages(topic.article.id),
-    listResearch(topicId),
+  const [scores, jobs, wp, assignees] = await Promise.all([
     getLatestScores(topic.article.id),
     listPublishJobs(topic.article.id),
     getWordPressEnvStatus(),
+    listContentAssignees(),
   ]);
 
   return (
@@ -53,12 +51,11 @@ export default async function ArticleWorkspacePage({
       <ArticleWorkspace
         topic={topic}
         article={topic.article}
-        messages={messages}
-        sources={sources}
         seo={scores.seo}
         geo={scores.geo}
         jobs={jobs}
         wpConfigured={wp.configured}
+        assignees={assignees}
       />
     </div>
   );

@@ -20,6 +20,7 @@ import {
   type ContentAgentMessage,
   type ContentAgentRole,
   type ContentAgentSuggestion,
+  type ContentAssignee,
   type ContentCheck,
   type ContentGeoCheck,
   type ContentPillar,
@@ -212,6 +213,48 @@ export async function listSpaces(): Promise<ContentSpace[]> {
 // Topics
 // ---------------------------------------------------------------------------
 
+function rowToAssignee(r: Record<string, unknown>): ContentAssignee {
+  return {
+    id: r.id as string,
+    full_name: (r.full_name as string | null) ?? null,
+    email: (r.email as string) ?? "",
+    avatar_url: (r.avatar_url as string | null) ?? null,
+  };
+}
+
+async function fetchAssigneeMap(
+  ids: string[],
+): Promise<Record<string, ContentAssignee>> {
+  if (ids.length === 0) return {};
+  const supabase = await db();
+  const unique = Array.from(new Set(ids));
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, full_name, email, avatar_url")
+    .in("id", unique);
+  const map: Record<string, ContentAssignee> = {};
+  for (const row of data ?? []) {
+    const a = rowToAssignee(row as Record<string, unknown>);
+    map[a.id] = a;
+  }
+  return map;
+}
+
+/**
+ * People who can be assigned a content topic. Pulled from profiles —
+ * any signed-in app user can own a topic. Sorted by name; missing
+ * names fall back to email so the picker stays readable.
+ */
+export async function listContentAssignees(): Promise<ContentAssignee[]> {
+  const supabase = await db();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, full_name, email, avatar_url")
+    .order("full_name", { ascending: true });
+  if (error || !data) return [];
+  return (data as Record<string, unknown>[]).map(rowToAssignee);
+}
+
 export async function listTopics(spaceId: string): Promise<TopicWithArticle[]> {
   const supabase = await db();
   const { data: topics, error } = await supabase
@@ -235,9 +278,18 @@ export async function listTopics(spaceId: string): Promise<TopicWithArticle[]> {
     }
   }
 
+  const ownerIds = topics
+    .map((t) => (t.owner_id as string | null) ?? null)
+    .filter((v): v is string => !!v);
+  const owners = await fetchAssigneeMap(ownerIds);
+
   return topics.map((row) => {
     const t = rowToTopic(row as Record<string, unknown>);
-    return { ...t, article: articles[t.id] ?? null };
+    return {
+      ...t,
+      article: articles[t.id] ?? null,
+      owner: t.owner_id ? owners[t.owner_id] ?? null : null,
+    };
   });
 }
 
@@ -255,9 +307,11 @@ export async function getTopic(topicId: string): Promise<TopicWithArticle | null
     .select("*")
     .eq("topic_id", topicId)
     .maybeSingle();
+  const owners = topic.owner_id ? await fetchAssigneeMap([topic.owner_id]) : {};
   return {
     ...topic,
     article: articleRow ? rowToArticle(articleRow) : null,
+    owner: topic.owner_id ? owners[topic.owner_id] ?? null : null,
   };
 }
 
@@ -272,6 +326,7 @@ export type CreateTopicInput = {
   hypothesis?: string;
   due_date?: string | null;
   publish_target?: string | null;
+  owner_id?: string | null;
 };
 
 export async function createTopic(
@@ -294,7 +349,8 @@ export async function createTopic(
         due_date: input.due_date ?? null,
         publish_target: input.publish_target ?? null,
         created_by: userId,
-        owner_id: userId,
+        owner_id:
+          input.owner_id === undefined ? userId : input.owner_id,
       })
       .select("*")
       .single();
@@ -312,7 +368,10 @@ export async function createTopic(
 
     revalidatePath(CONTENT_PATH, "layout");
     const full = await getTopic(topic.id);
-    return { ok: true, data: full ?? { ...topic, article: null } };
+    return {
+      ok: true,
+      data: full ?? { ...topic, article: null, owner: null },
+    };
   } catch (err) {
     return {
       ok: false,
@@ -333,6 +392,7 @@ export type UpdateTopicInput = Partial<{
   hypothesis: string | null;
   due_date: string | null;
   publish_target: string | null;
+  owner_id: string | null;
 }>;
 
 export async function updateTopic(
@@ -369,6 +429,18 @@ export async function setTopicStage(
   stage: ContentTopicStage,
 ): Promise<Result<ContentTopic>> {
   return updateTopic(topicId, { stage });
+}
+
+/**
+ * Reassign a topic. `null` clears the owner so the topic shows up in
+ * "Needs owner" filters. Profile id must already exist in the
+ * profiles table; the FK on content_topics.owner_id enforces that.
+ */
+export async function setTopicOwner(
+  topicId: string,
+  ownerId: string | null,
+): Promise<Result<ContentTopic>> {
+  return updateTopic(topicId, { owner_id: ownerId });
 }
 
 /**
@@ -1105,7 +1177,7 @@ export async function createTopicFromConversation(input: {
     return {
       ok: true,
       data: {
-        topic: full ?? { ...topic, article: null },
+        topic: full ?? { ...topic, article: null, owner: null },
         draft,
       },
     };
@@ -1191,7 +1263,7 @@ export async function createTopicFromPastedDraft(input: {
     return {
       ok: true,
       data: {
-        topic: full ?? { ...topic, article: null },
+        topic: full ?? { ...topic, article: null, owner: null },
         draft,
         word_count: wc,
       },
@@ -1372,7 +1444,7 @@ export async function addSuggestedTopicToBacklog(input: {
 
     revalidatePath(CONTENT_PATH, "layout");
     const full = await getTopic(topic.id);
-    return { ok: true, data: full ?? { ...topic, article: null } };
+    return { ok: true, data: full ?? { ...topic, article: null, owner: null } };
   } catch (err) {
     return {
       ok: false,

@@ -10,6 +10,9 @@ import {
   ListIcon,
   ArrowRight,
   Trash2,
+  AlertTriangle,
+  UserRound,
+  ClipboardPaste,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -39,6 +42,7 @@ import {
   PILLAR_LABELS,
   STAGE_LABELS,
   STAGE_ORDER,
+  type ContentAssignee,
   type ContentPillar,
   type ContentPriority,
   type ContentSpace,
@@ -47,9 +51,10 @@ import {
 } from "@/lib/content/types";
 import { deleteTopic, setTopicStage } from "@/lib/content/actions";
 import { CreateTopicDialog } from "@/components/content/create-topic-dialog";
-import { StudioChat } from "@/components/content/studio-chat";
+import { PasteDraftDialog } from "@/components/content/paste-draft-dialog";
 
 type View = "pipeline" | "list" | "calendar";
+type OwnerFilter = "all" | "unassigned" | string;
 
 const PRIORITY_TONE: Record<ContentPriority, string> = {
   urgent: "bg-haven-coral/15 text-haven-coral-700 border-haven-coral/40",
@@ -73,14 +78,18 @@ const STAGE_TONE: Record<ContentTopicStage, string> = {
 export function TopicTracker({
   space,
   topics,
+  assignees,
 }: {
   space: ContentSpace;
   topics: TopicWithArticle[];
+  assignees: ContentAssignee[];
 }) {
   const router = useRouter();
   const [view, setView] = useState<View>("pipeline");
   const [createOpen, setCreateOpen] = useState(false);
+  const [pasteOpen, setPasteOpen] = useState(false);
   const [pillarFilter, setPillarFilter] = useState<ContentPillar | "all">("all");
+  const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("all");
   const [pendingDelete, setPendingDelete] = useState<TopicWithArticle | null>(
     null,
   );
@@ -94,12 +103,17 @@ export function TopicTracker({
   }, [topics]);
 
   const filtered = useMemo(() => {
-    return board.filter(
-      (t) =>
-        t.stage !== "archived" &&
-        (pillarFilter === "all" || t.pillar === pillarFilter),
-    );
-  }, [board, pillarFilter]);
+    return board.filter((t) => {
+      if (t.stage === "archived") return false;
+      if (pillarFilter !== "all" && t.pillar !== pillarFilter) return false;
+      if (ownerFilter === "unassigned" && t.owner_id) return false;
+      if (ownerFilter !== "all" && ownerFilter !== "unassigned" && t.owner_id !== ownerFilter)
+        return false;
+      return true;
+    });
+  }, [board, pillarFilter, ownerFilter]);
+
+  const stats = useMemo(() => computeStats(filtered), [filtered]);
 
   const moveTopic = (topicId: string, nextStage: ContentTopicStage) => {
     setBoard((curr) =>
@@ -115,13 +129,10 @@ export function TopicTracker({
     const target = pendingDelete;
     if (!target) return;
     setPendingDelete(null);
-    // Optimistic remove.
     setBoard((curr) => curr.filter((t) => t.id !== target.id));
     startTransition(async () => {
       const r = await deleteTopic(target.id);
       if (!r.ok) {
-        // Roll back by re-injecting at the end; the next router.refresh
-        // will re-establish the canonical order.
         setBoard((curr) => [...curr, target]);
         toast.error(r.error || "Failed to delete topic");
         return;
@@ -133,20 +144,28 @@ export function TopicTracker({
 
   return (
     <div className="flex flex-col gap-5">
-      <StudioChat
-        spaceId={space.id}
-        onAdvancedTopic={() => setCreateOpen(true)}
-      />
+      <StatusStrip stats={stats} />
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
         <div className="flex flex-wrap items-center gap-2">
           <ViewToggle view={view} setView={setView} />
           <PillarFilter value={pillarFilter} setValue={setPillarFilter} />
+          <OwnerFilterSelect
+            value={ownerFilter}
+            setValue={setOwnerFilter}
+            assignees={assignees}
+          />
         </div>
-        <Button variant="outline" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Advanced form
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => setPasteOpen(true)}>
+            <ClipboardPaste className="h-4 w-4" />
+            Import draft
+          </Button>
+          <Button variant="primary" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" />
+            New topic
+          </Button>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -167,6 +186,13 @@ export function TopicTracker({
         open={createOpen}
         onOpenChange={setCreateOpen}
         spaceId={space.id}
+        assignees={assignees}
+      />
+
+      <PasteDraftDialog
+        open={pasteOpen}
+        onOpenChange={setPasteOpen}
+        spaceId={space.id}
       />
 
       <DeleteTopicDialog
@@ -174,6 +200,116 @@ export function TopicTracker({
         onCancel={() => setPendingDelete(null)}
         onConfirm={confirmDelete}
       />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+interface TrackerStats {
+  total: number;
+  byStage: Record<ContentTopicStage, number>;
+  needsOwner: number;
+  overdue: number;
+  publishingThisWeek: number;
+}
+
+function computeStats(topics: TopicWithArticle[]): TrackerStats {
+  const byStage: Record<ContentTopicStage, number> = {
+    idea: 0,
+    in_progress: 0,
+    draft: 0,
+    complete: 0,
+    archived: 0,
+  };
+  let needsOwner = 0;
+  let overdue = 0;
+  let publishingThisWeek = 0;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const weekFromNow = new Date(today);
+  weekFromNow.setDate(weekFromNow.getDate() + 7);
+
+  for (const t of topics) {
+    byStage[t.stage] = (byStage[t.stage] ?? 0) + 1;
+    if (!t.owner_id) needsOwner += 1;
+    const target = t.publish_target ?? t.due_date;
+    if (target && t.stage !== "complete") {
+      const d = new Date(target + "T00:00:00");
+      if (d < today) overdue += 1;
+      else if (d <= weekFromNow) publishingThisWeek += 1;
+    }
+  }
+
+  return { total: topics.length, byStage, needsOwner, overdue, publishingThisWeek };
+}
+
+function StatusStrip({ stats }: { stats: TrackerStats }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
+      <StatTile label="Total" value={stats.total} />
+      {STAGE_ORDER.map((s) => (
+        <StatTile
+          key={s}
+          label={STAGE_LABELS[s]}
+          value={stats.byStage[s] ?? 0}
+          tone={STAGE_TONE[s]}
+        />
+      ))}
+      <StatTile
+        label="Needs owner"
+        value={stats.needsOwner}
+        tone={
+          stats.needsOwner > 0
+            ? "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200"
+            : undefined
+        }
+        emphasize={stats.needsOwner > 0}
+      />
+      <StatTile
+        label="Overdue"
+        value={stats.overdue}
+        tone={
+          stats.overdue > 0
+            ? "bg-haven-coral/15 text-haven-coral-700 border-haven-coral/40"
+            : undefined
+        }
+        emphasize={stats.overdue > 0}
+      />
+    </div>
+  );
+}
+
+function StatTile({
+  label,
+  value,
+  tone,
+  emphasize,
+}: {
+  label: string;
+  value: number;
+  tone?: string;
+  emphasize?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-0.5 rounded-card border bg-surface px-3 py-2",
+        tone ? tone : "border-border",
+      )}
+    >
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span
+        className={cn(
+          "font-heading text-lg font-bold leading-tight",
+          emphasize ? "text-current" : "text-foreground",
+        )}
+      >
+        {value}
+      </span>
     </div>
   );
 }
@@ -241,6 +377,32 @@ function PillarFilter({
   );
 }
 
+function OwnerFilterSelect({
+  value,
+  setValue,
+  assignees,
+}: {
+  value: OwnerFilter;
+  setValue: (v: OwnerFilter) => void;
+  assignees: ContentAssignee[];
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => setValue(e.target.value as OwnerFilter)}
+      className="h-8 rounded-md border border-border bg-surface px-2 text-[12px] font-medium text-foreground"
+    >
+      <option value="all">All assignees</option>
+      <option value="unassigned">Unassigned</option>
+      {assignees.map((a) => (
+        <option key={a.id} value={a.id}>
+          {a.full_name || a.email}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 // ---------------------------------------------------------------------------
 
 function PipelineView({
@@ -265,8 +427,6 @@ function PipelineView({
     ? topics.find((t) => t.id === activeId) ?? null
     : null;
 
-  // 6px activation distance keeps clicks → navigation working; small
-  // movements past that threshold start a drag.
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor),
@@ -284,8 +444,6 @@ function PipelineView({
     const overId = e.over?.id ? String(e.over.id) : null;
     if (!overId) return;
 
-    // Resolve drop target → stage. Columns use stage id; cards expose
-    // their own stage via data.current.
     let nextStage: ContentTopicStage | null = null;
     if ((stages as string[]).includes(overId)) {
       nextStage = overId as ContentTopicStage;
@@ -311,7 +469,6 @@ function PipelineView({
         return;
       }
       toast.success(`Moved to ${STAGE_LABELS[nextStage]}`);
-      // Refresh server data so other views see the new stage.
       router.refresh();
     })();
   };
@@ -451,11 +608,15 @@ function TopicCard({
   isOverlay?: boolean;
   onDelete: ((topic: TopicWithArticle) => void) | null;
 }) {
-  // The whole card drags via PointerSensor with a 6px activation
-  // distance, so a click still navigates. We use Link for native
-  // accessibility (Enter, middle-click open in new tab, etc.). The
-  // delete button is a sibling button absolutely positioned on top of
-  // the link, so it can stop propagation cleanly.
+  const target = topic.publish_target ?? topic.due_date;
+  const dateLabel = topic.publish_target
+    ? `Publish ${formatDate(topic.publish_target)}`
+    : topic.due_date
+      ? `Due ${formatDate(topic.due_date)}`
+      : "—";
+  const overdue =
+    !!target && topic.stage !== "complete" && isPastDate(target);
+
   return (
     <div
       className={cn(
@@ -470,6 +631,7 @@ function TopicCard({
         className={cn(
           "flex flex-col gap-1.5 rounded-md border border-border bg-surface p-3 pr-8 shadow-card transition hover:border-haven-coral/40 hover:shadow-card-hover",
           isOverlay && "border-haven-coral/40 shadow-card-hover",
+          overdue && "border-haven-coral/50",
         )}
       >
         <div className="flex items-start justify-between gap-2">
@@ -495,17 +657,22 @@ function TopicCard({
           ) : null}
         </div>
         <div className="flex items-center justify-between text-[11px]">
-          <span className="text-muted-foreground">
-            {topic.publish_target
-              ? `Publish ${formatDate(topic.publish_target)}`
-              : topic.due_date
-                ? `Due ${formatDate(topic.due_date)}`
-                : "—"}
+          <span
+            className={cn(
+              "flex items-center gap-1",
+              overdue ? "font-semibold text-haven-coral" : "text-muted-foreground",
+            )}
+          >
+            {overdue ? <AlertTriangle className="h-3 w-3" /> : null}
+            {overdue ? `Overdue · ${dateLabel}` : dateLabel}
           </span>
           <ScoreBadges
             seo={topic.article?.seo_score ?? null}
             geo={topic.article?.geo_score ?? null}
           />
+        </div>
+        <div className="flex items-center justify-between text-[11px]">
+          <AssigneeChip owner={topic.owner} />
         </div>
       </Link>
       {onDelete ? (
@@ -513,8 +680,6 @@ function TopicCard({
           type="button"
           aria-label={`Delete topic "${topic.title}"`}
           title="Delete topic"
-          // Stop the drag/link propagation so this button is its own
-          // hit target.
           onPointerDown={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
@@ -528,6 +693,24 @@ function TopicCard({
         </button>
       ) : null}
     </div>
+  );
+}
+
+function AssigneeChip({ owner }: { owner: TopicWithArticle["owner"] }) {
+  if (!owner) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+        <UserRound className="h-3 w-3" />
+        Needs owner
+      </span>
+    );
+  }
+  const label = owner.full_name || owner.email;
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-alt/60 px-1.5 py-0.5 text-[10px] font-semibold text-foreground/80">
+      <UserRound className="h-3 w-3" />
+      {label}
+    </span>
   );
 }
 
@@ -583,6 +766,7 @@ function ListView({
             <th className="px-3 py-2 text-left">Topic</th>
             <th className="px-3 py-2 text-left">Pillar</th>
             <th className="px-3 py-2 text-left">Stage</th>
+            <th className="px-3 py-2 text-left">Assignee</th>
             <th className="px-3 py-2 text-left">Priority</th>
             <th className="px-3 py-2 text-left">Due</th>
             <th className="px-3 py-2 text-left">Publish</th>
@@ -591,78 +775,108 @@ function ListView({
           </tr>
         </thead>
         <tbody>
-          {topics.map((t) => (
-            <tr
-              key={t.id}
-              className="group border-t border-border hover:bg-surface-alt/30"
-            >
-              <td className="max-w-[360px] px-3 py-2">
-                <div className="line-clamp-1 font-semibold text-foreground">
-                  {t.title}
-                </div>
-                {t.target_keyword ? (
-                  <div className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">
-                    kw: {t.target_keyword}
+          {topics.map((t) => {
+            const target = t.publish_target ?? t.due_date;
+            const overdue =
+              !!target && t.stage !== "complete" && isPastDate(target);
+            return (
+              <tr
+                key={t.id}
+                className="group border-t border-border hover:bg-surface-alt/30"
+              >
+                <td className="max-w-[360px] px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    {overdue ? (
+                      <AlertTriangle
+                        className="h-3.5 w-3.5 shrink-0 text-haven-coral"
+                        aria-label="Overdue"
+                      />
+                    ) : null}
+                    <span className="line-clamp-1 font-semibold text-foreground">
+                      {t.title}
+                    </span>
                   </div>
-                ) : null}
-              </td>
-              <td className="px-3 py-2 text-muted-foreground">
-                {PILLAR_LABELS[t.pillar]}
-              </td>
-              <td className="px-3 py-2">
-                <span
+                  {t.target_keyword ? (
+                    <div className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">
+                      kw: {t.target_keyword}
+                    </div>
+                  ) : null}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {PILLAR_LABELS[t.pillar]}
+                </td>
+                <td className="px-3 py-2">
+                  <span
+                    className={cn(
+                      "rounded-full border px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-wider",
+                      STAGE_TONE[t.stage],
+                    )}
+                  >
+                    {STAGE_LABELS[t.stage]}
+                  </span>
+                </td>
+                <td className="px-3 py-2">
+                  <AssigneeChip owner={t.owner} />
+                </td>
+                <td className="px-3 py-2">
+                  <span
+                    className={cn(
+                      "rounded-full border px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-wider",
+                      PRIORITY_TONE[t.priority],
+                    )}
+                  >
+                    {t.priority}
+                  </span>
+                </td>
+                <td
                   className={cn(
-                    "rounded-full border px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-wider",
-                    STAGE_TONE[t.stage],
+                    "px-3 py-2",
+                    overdue && !t.publish_target
+                      ? "font-semibold text-haven-coral"
+                      : "text-muted-foreground",
                   )}
                 >
-                  {STAGE_LABELS[t.stage]}
-                </span>
-              </td>
-              <td className="px-3 py-2">
-                <span
+                  {t.due_date ? formatDate(t.due_date) : "—"}
+                </td>
+                <td
                   className={cn(
-                    "rounded-full border px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-wider",
-                    PRIORITY_TONE[t.priority],
+                    "px-3 py-2",
+                    overdue && t.publish_target
+                      ? "font-semibold text-haven-coral"
+                      : "text-muted-foreground",
                   )}
                 >
-                  {t.priority}
-                </span>
-              </td>
-              <td className="px-3 py-2 text-muted-foreground">
-                {t.due_date ? formatDate(t.due_date) : "—"}
-              </td>
-              <td className="px-3 py-2 text-muted-foreground">
-                {t.publish_target ? formatDate(t.publish_target) : "—"}
-              </td>
-              <td className="px-3 py-2">
-                <ScoreBadges
-                  seo={t.article?.seo_score ?? null}
-                  geo={t.article?.geo_score ?? null}
-                />
-              </td>
-              <td className="px-3 py-2 text-right">
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    aria-label={`Delete topic "${t.title}"`}
-                    title="Delete topic"
-                    onClick={() => onDelete(t)}
-                    className="hidden rounded p-1 text-muted-foreground transition-colors hover:bg-haven-coral/10 hover:text-haven-coral focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-haven-coral/40 group-hover:inline-flex"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                  <Link
-                    href={`/content/${t.id}` as never}
-                    className="inline-flex items-center gap-1 text-[12px] font-semibold text-haven-coral hover:underline"
-                  >
-                    Open
-                    <ArrowRight className="h-3 w-3" />
-                  </Link>
-                </div>
-              </td>
-            </tr>
-          ))}
+                  {t.publish_target ? formatDate(t.publish_target) : "—"}
+                </td>
+                <td className="px-3 py-2">
+                  <ScoreBadges
+                    seo={t.article?.seo_score ?? null}
+                    geo={t.article?.geo_score ?? null}
+                  />
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      aria-label={`Delete topic "${t.title}"`}
+                      title="Delete topic"
+                      onClick={() => onDelete(t)}
+                      className="hidden rounded p-1 text-muted-foreground transition-colors hover:bg-haven-coral/10 hover:text-haven-coral focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-haven-coral/40 group-hover:inline-flex"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                    <Link
+                      href={`/content/${t.id}` as never}
+                      className="inline-flex items-center gap-1 text-[12px] font-semibold text-haven-coral hover:underline"
+                    >
+                      Open
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -808,13 +1022,12 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         No topics yet
       </h3>
       <p className="max-w-md text-[13px] text-muted-foreground">
-        Tell the topic agent above what to write about, paste an existing
-        draft to import, or tap "Research ideas" to pull a fresh seasonal
-        list. The advanced form is here for full-control entry.
+        Add a topic to start the editorial pipeline. Drag cards across
+        Idea → In Progress → Draft → Complete as work moves through it.
       </p>
       <Button variant="outline" onClick={onCreate}>
         <Plus className="h-4 w-4" />
-        Advanced form
+        New topic
       </Button>
     </div>
   );
@@ -823,4 +1036,11 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function isPastDate(iso: string): boolean {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(iso + "T00:00:00");
+  return d < today;
 }

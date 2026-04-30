@@ -5,9 +5,9 @@ import { canAccessSales } from "@/lib/auth/permissions";
 import {
   getDefaultSpace,
   getWordPressEnvStatus,
+  listContentAssignees,
   listTopics,
 } from "@/lib/content/actions";
-import { isManagedAgentConfigured } from "@/lib/content/agent-prompt";
 import { TopicTracker } from "@/components/content/topic-tracker";
 
 export const dynamic = "force-dynamic";
@@ -35,9 +35,10 @@ export default async function ContentStudioPage() {
     );
   }
 
-  const [topics, wp] = await Promise.all([
+  const [topics, wp, assignees] = await Promise.all([
     listTopics(space.id),
     getWordPressEnvStatus(),
+    listContentAssignees(),
   ]);
 
   return (
@@ -49,9 +50,9 @@ export default async function ContentStudioPage() {
             {space.name}
           </h1>
           <p className="mt-1 max-w-3xl text-[13.5px] text-muted-foreground">
-            Native editorial workflow — topic tracker, research, drafts, SEO
-            and GEO scoring, agent chat, and a WordPress draft queue. The
-            workflow lives entirely inside Haven OS.
+            Editorial pipeline for the Haven Homeowner Blog. Track topics
+            from idea to publish, assign owners, watch deadlines, and push
+            drafts to WordPress.
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">
@@ -66,21 +67,11 @@ export default async function ContentStudioPage() {
                 {wp.configured ? "configured" : "not configured"}
               </span>
             </span>
-            <span>
-              Managed agent:{" "}
-              <span
-                className={
-                  isManagedAgentConfigured() ? "text-emerald-600" : "text-amber-600"
-                }
-              >
-                {isManagedAgentConfigured() ? "wired" : "local fallback"}
-              </span>
-            </span>
           </div>
         </div>
       </header>
 
-      <TopicTracker space={space} topics={topics} />
+      <TopicTracker space={space} topics={topics} assignees={assignees} />
     </div>
   );
 }
