@@ -1981,6 +1981,38 @@ export const TOOLS: ToolDef[] = [
       return { url, slug: survey.slug, status: survey.status };
     },
   },
+  {
+    name: "delete_hr_survey_response",
+    description:
+      "Soft-delete a single survey response. The row is hidden from list_hr_survey_responses, get_hr_survey_summary aggregates, and the dashboard counts, but is preserved in the database for audit. Use restore_hr_survey_response to undo. The caller must have access to the survey (Surveys module or per-survey grant).",
+    input_schema: {
+      type: "object",
+      properties: { response_id: { type: "string" } },
+      required: ["response_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      const res = await surveys.deleteResponse(s(input.response_id)!);
+      if (!res.ok) throw new Error(res.error);
+      return { ok: true };
+    },
+  },
+  {
+    name: "restore_hr_survey_response",
+    description:
+      "Restore a previously soft-deleted survey response so it shows up again in lists and summaries. Mirrors delete_hr_survey_response.",
+    input_schema: {
+      type: "object",
+      properties: { response_id: { type: "string" } },
+      required: ["response_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      const res = await surveys.restoreResponse(s(input.response_id)!);
+      if (!res.ok) throw new Error(res.error);
+      return { ok: true };
+    },
+  },
 
   // =========================================================================
   // ADMIN — users, roles, departments, HR grants (super admin only)
@@ -2878,8 +2910,8 @@ You have tools that give you live read + write access across the entire Haven OS
 - **Scorecard** — the Northstar weekly KPI tracker. You can read current + historical months, update cell values/targets/status (green/yellow/red), seed new months, and archive closed months.
 - **Lost Items (Operations)** — left-behind item cases. Use \`list_lost_items\`, \`get_lost_item\`, \`create_lost_item\` (when a guest reports something they left), \`update_lost_item\` (logistics/shipping/links), \`set_lost_item_status\` to move through the pipeline (Pending Pickup → Picked Up → Delivered → Completed; \`failed\` is the terminal state for unrecoverable cases), \`assign_lost_item\`, \`add_lost_item_comment\`, \`complete_lost_item\`, \`get_lost_item_stats\`. The pipeline tracks the cleaning company picking up the item and returning it to the guest. Optional fields: \`slack_thread_url\`, \`conversation_url\` for cross-linking.
 - **Onboarding** — property onboarding projects with templated tasks + checklists. Full control: create or delete projects; update every project field (status, owner info, target/actual open dates, slack channel, folder URL, notes); add / update / delete / restatus tasks; edit any task field (title, description, department, due date, assignee, key-date flag); add / toggle / delete checklist items. Use \`list_onboarding_projects_with_stats\` for rollup views (progress, blockers, next key date, overdue) and \`get_onboarding_tree\` when you need specific task_ids to update.
-- **HR** (permission-gated) — employees, performance reviews, issues/write-ups, roles, candidates, policy/procedure docs, and team surveys. Each call is row-level filtered by the caller's HR access grants.
-- **HR Surveys** — author flexible per-survey forms (short_text, long_text, single_choice, multi_choice, rating, yes_no), activate them to expose a public landing page at \`<site>/survey/<slug>\`, and read aggregated results (avg rating, choice counts, yes/no, text samples). Workflow: call \`create_hr_survey\` with a \`questions\` array (defaults to draft). To go live, set status='active' on creation or via \`set_hr_survey_status\`. Surface the share link via \`get_hr_survey_share_link\`. Use \`get_hr_survey_summary\` for "how's it going?" questions. Use \`add_hr_survey_question\` / \`update_hr_survey_question\` to iterate after creation — these are safe on live surveys. To retire a question on a live survey use \`archive_hr_survey_question\` (the public form hides it but historical answers stay intact); \`delete_hr_survey_question\` does this automatically when responses already exist.
+- **HR** (module-gated) — employees, performance reviews, issues/write-ups, roles, candidates, policy/procedure docs, and team surveys. HR access is split into modules (People, Hiring, Surveys, Policies, Procedures); each module is granted independently. Per-module calls are also row-level filtered by department/employee/per-survey grants. A user with only the Surveys module can manage surveys but cannot see employees or candidates.
+- **HR Surveys** — author flexible per-survey forms (short_text, long_text, single_choice, multi_choice, rating, yes_no), activate them to expose a public landing page at \`<site>/survey/<slug>\`, and read aggregated results (avg rating, choice counts, yes/no, text samples). Workflow: call \`create_hr_survey\` with a \`questions\` array (defaults to draft). To go live, set status='active' on creation or via \`set_hr_survey_status\`. Surface the share link via \`get_hr_survey_share_link\`. Use \`get_hr_survey_summary\` for "how's it going?" questions. Use \`add_hr_survey_question\` / \`update_hr_survey_question\` to iterate after creation — these are safe on live surveys. To retire a question on a live survey use \`archive_hr_survey_question\` (the public form hides it but historical answers stay intact); \`delete_hr_survey_question\` does this automatically when responses already exist. Use \`delete_hr_survey_response\` to soft-delete an individual submission (kept for audit, hidden from results) and \`restore_hr_survey_response\` to bring it back.
 - **Admin** (super-admin only) — list users; create users (default invite-by-email, optionally direct-create with password); change roles (user / admin / super_admin); delete users; grant or revoke HR access; manage departments. When the user asks to "add" or "invite" someone, default to invite mode (email-based) unless they say otherwise.
 - **Sales / Property Pitches** (admin or super_admin) — generate a personalized one-pager that gets sent to a prospective property owner, hosted at \`/pitch/<slug>\`. Workflow: when the user gives you a Zillow / Airbnb / VRBO / Booking link, call \`extract_listing_details\` first to auto-fill address, beds/baths/sleeps, and a hero photo. Then call \`create_sales_pitch\` with the owner's name and a projection range (annual gross revenue, low + high in USD). The pitch expires 30 days after creation; you can extend it via \`update_sales_pitch\` with a new \`expires_at\`. Use \`archive_sales_pitch\` to retire a pitch (the public URL flips to a friendly contact page); only use \`delete_sales_pitch\` when the user explicitly says delete. After creating, surface the public URL — it's \`<site>/pitch/<slug>\`.
 - **GTM / Lead Magnets** (admin or super_admin) — Haven-branded landing pages for guides, checklists, calculators, etc., hosted at \`/lead-magnet/<slug>\`. Create a page with \`create_lead_magnet\` (title is the only required field, status defaults to 'draft'); set status='active' on creation or call \`publish_lead_magnet\` to make the URL live. Edit copy / content / CTA via \`update_lead_magnet\` — the \`content\` field is a flexible array of sections (rich_text, bullets, stat_band, faq, cta_block) and \`cta\` controls the capture form (label + which fields to collect). Pages expire 90 days after creation by default; bump \`expires_at\` to extend. Use \`list_lead_magnet_submissions\` to read captured leads. Use \`archive_lead_magnet\` to retire a page; only use \`delete_lead_magnet\` when the user explicitly says delete (it also wipes captured submissions). Always surface the full public URL (\`<site>/lead-magnet/<slug>\`) back to the user.

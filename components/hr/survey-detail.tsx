@@ -16,8 +16,17 @@ import {
   ArchiveRestore,
   AlertTriangle,
   Save,
+  BarChart3,
+  Users,
+  CheckCircle2,
+  Clock,
+  Hash,
+  TrendingUp,
+  Sparkles,
+  RotateCcw,
+  X,
 } from "lucide-react";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +42,21 @@ import {
   archiveQuestion,
   unarchiveQuestion,
   reorderQuestions,
+  deleteResponse,
+  restoreResponse,
+  type SurveyAccessEntry,
 } from "@/lib/hr/surveys";
+import {
+  grantHrAccess,
+  revokeHrAccess,
+  revokeHrModule,
+  type AdminUser,
+} from "@/lib/admin/actions";
+import {
+  computeSummary,
+  computePerQuestionStats,
+  type PerQuestionStats,
+} from "@/lib/hr/survey-analytics";
 import {
   QUESTION_TYPES,
   QUESTION_TYPE_LABELS,
@@ -58,13 +81,25 @@ type Props = {
   survey: DbHrSurvey;
   questions: DbHrSurveyQuestion[];
   responses: SurveyResponseWithAnswers[];
+  deletedResponses?: SurveyResponseWithAnswers[];
+  access?: SurveyAccessEntry[];
+  users?: AdminUser[];
+  canManageAccess?: boolean;
 };
 
-export function SurveyDetail({ survey, questions, responses }: Props) {
+export function SurveyDetail({
+  survey,
+  questions,
+  responses,
+  deletedResponses = [],
+  access = [],
+  users = [],
+  canManageAccess = false,
+}: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [copied, setCopied] = useState(false);
-  const [tab, setTab] = useState<"overview" | "edit">("overview");
+  const [tab, setTab] = useState<"overview" | "edit" | "access">("overview");
 
   const status = (survey.status as SurveyStatus) ?? "draft";
   const tone = STATUS_TONE[status] ?? "neutral";
@@ -121,17 +156,6 @@ export function SurveyDetail({ survey, questions, responses }: Props) {
         m.set(a.question_id, (m.get(a.question_id) ?? 0) + 1);
       }
     return m;
-  }, [responses]);
-
-  const answersByQ = useMemo(() => {
-    const map = new Map<string, DbHrSurveyAnswer[]>();
-    for (const r of responses)
-      for (const a of r.answers) {
-        const cur = map.get(a.question_id) ?? [];
-        cur.push(a);
-        map.set(a.question_id, cur);
-      }
-    return map;
   }, [responses]);
 
   return (
@@ -203,22 +227,31 @@ export function SurveyDetail({ survey, questions, responses }: Props) {
         </div>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as "overview" | "edit")}>
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setTab(v as "overview" | "edit" | "access")}
+      >
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="edit">
             <Pencil className="h-3 w-3" />
             Edit
           </TabsTrigger>
+          {canManageAccess && (
+            <TabsTrigger value="access">
+              Access
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="overview">
-          <OverviewPanel
+          <DashboardPanel
+            survey={survey}
             liveQuestions={liveQuestions}
             archivedQuestions={questions.filter((q) => q.archived_at)}
-            answersByQ={answersByQ}
-            responses={responses}
             allQuestions={questions}
+            responses={responses}
+            deletedResponses={deletedResponses}
           />
         </TabsContent>
 
@@ -230,30 +263,120 @@ export function SurveyDetail({ survey, questions, responses }: Props) {
             isLive={status === "active"}
           />
         </TabsContent>
+
+        {canManageAccess && (
+          <TabsContent value="access">
+            <SurveyAccessPanel
+              survey={survey}
+              access={access}
+              users={users}
+            />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );
 }
 
-function OverviewPanel({
+function DashboardPanel({
+  survey,
   liveQuestions,
   archivedQuestions,
-  answersByQ,
-  responses,
   allQuestions,
+  responses,
+  deletedResponses,
 }: {
+  survey: DbHrSurvey;
   liveQuestions: DbHrSurveyQuestion[];
   archivedQuestions: DbHrSurveyQuestion[];
-  answersByQ: Map<string, DbHrSurveyAnswer[]>;
-  responses: SurveyResponseWithAnswers[];
   allQuestions: DbHrSurveyQuestion[];
+  responses: SurveyResponseWithAnswers[];
+  deletedResponses: SurveyResponseWithAnswers[];
 }) {
+  const requiredIds = useMemo(
+    () =>
+      liveQuestions.filter((q) => q.required).map((q) => q.id),
+    [liveQuestions],
+  );
+  const summary = useMemo(
+    () =>
+      computeSummary(responses, {
+        deletedCount: deletedResponses.length,
+        requiredQuestionIds: requiredIds,
+      }),
+    [responses, deletedResponses.length, requiredIds],
+  );
+  const stats = useMemo(
+    () => computePerQuestionStats(allQuestions, responses),
+    [allQuestions, responses],
+  );
+
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
+      {/* Summary cards */}
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <SummaryCard
+          icon={<Users className="h-4 w-4" />}
+          label="Responses"
+          value={summary.active_responses.toString()}
+          hint={
+            summary.deleted_responses > 0
+              ? `${summary.deleted_responses} deleted`
+              : survey.audience
+                ? `Audience: ${survey.audience}`
+                : "All-time"
+          }
+        />
+        <SummaryCard
+          icon={<Clock className="h-4 w-4" />}
+          label="Latest"
+          value={
+            summary.last_response_at
+              ? formatDistanceToNow(new Date(summary.last_response_at), {
+                  addSuffix: true,
+                })
+              : "—"
+          }
+          hint={
+            summary.last_response_at
+              ? format(new Date(summary.last_response_at), "MMM d, h:mm a")
+              : "No responses yet"
+          }
+        />
+        <SummaryCard
+          icon={<CheckCircle2 className="h-4 w-4" />}
+          label="Completion"
+          value={
+            summary.full_completion_rate !== null
+              ? `${summary.full_completion_rate}%`
+              : summary.completion_rate !== null
+                ? `${summary.completion_rate}%`
+                : "—"
+          }
+          hint={
+            requiredIds.length > 0
+              ? `${requiredIds.length} required question${requiredIds.length === 1 ? "" : "s"}`
+              : `${summary.active_responses} answered`
+          }
+        />
+        <SummaryCard
+          icon={<Hash className="h-4 w-4" />}
+          label="Identity"
+          value={
+            summary.active_responses === 0
+              ? "—"
+              : `${summary.identified_responses} / ${summary.anonymous_responses}`
+          }
+          hint="Identified · Anonymous"
+        />
+      </section>
+
+      {/* Per-question analytics */}
       <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-muted-foreground" />
           <h3 className="font-heading text-[15px] font-bold">
-            Questions ({liveQuestions.length})
+            Question results ({liveQuestions.length})
           </h3>
         </div>
         {liveQuestions.length === 0 ? (
@@ -261,15 +384,12 @@ function OverviewPanel({
             No questions yet. Switch to the Edit tab to add some.
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            {liveQuestions.map((q, i) => (
-              <QuestionSummary
-                key={q.id}
-                index={i}
-                question={q}
-                answers={answersByQ.get(q.id) ?? []}
-              />
-            ))}
+          <div className="flex flex-col gap-3">
+            {stats
+              .filter((s) => !s.question.archived_at)
+              .map((s, i) => (
+                <QuestionStatsCard key={s.question.id} index={i} stats={s} />
+              ))}
           </div>
         )}
       </section>
@@ -280,22 +400,24 @@ function OverviewPanel({
             Archived questions ({archivedQuestions.length})
           </h3>
           <div className="flex flex-col gap-2 opacity-70">
-            {archivedQuestions.map((q, i) => (
-              <QuestionSummary
-                key={q.id}
-                index={liveQuestions.length + i}
-                question={q}
-                answers={answersByQ.get(q.id) ?? []}
-                archived
-              />
-            ))}
+            {stats
+              .filter((s) => s.question.archived_at)
+              .map((s, i) => (
+                <QuestionStatsCard
+                  key={s.question.id}
+                  index={liveQuestions.length + i}
+                  stats={s}
+                  archived
+                />
+              ))}
           </div>
         </section>
       )}
 
+      {/* Raw responses (with delete) */}
       <section className="flex flex-col gap-3">
         <h3 className="font-heading text-[15px] font-bold">
-          Responses ({responses.length})
+          Individual responses ({responses.length})
         </h3>
         {responses.length === 0 ? (
           <div className="rounded-card border border-dashed border-border bg-surface-alt/30 p-6 text-center text-[13px] text-muted-foreground">
@@ -305,7 +427,485 @@ function OverviewPanel({
           <ResponsesTable responses={responses} questions={allQuestions} />
         )}
       </section>
+
+      {deletedResponses.length > 0 && (
+        <DeletedResponses responses={deletedResponses} />
+      )}
     </div>
+  );
+}
+
+function SummaryCard({
+  icon,
+  label,
+  value,
+  hint,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-card border border-border bg-surface p-4">
+      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span className="text-foreground/60">{icon}</span>
+        {label}
+      </div>
+      <div className="mt-1 truncate font-heading text-[20px] font-bold tracking-tight">
+        {value}
+      </div>
+      {hint && (
+        <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+          {hint}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuestionStatsCard({
+  index,
+  stats,
+  archived,
+}: {
+  index: number;
+  stats: PerQuestionStats;
+  archived?: boolean;
+}) {
+  const q = stats.question;
+  const t = q.question_type as QuestionType;
+
+  let body: React.ReactNode = null;
+  let headerExtra: React.ReactNode = null;
+
+  if (stats.type === "rating") {
+    headerExtra = (
+      <span className="inline-flex items-center gap-1 text-[12px] font-medium text-foreground/80">
+        <TrendingUp className="h-3 w-3 text-emerald-500" />
+        Avg{" "}
+        <span className="font-semibold text-foreground">
+          {stats.average === null ? "—" : stats.average.toFixed(2)}
+        </span>{" "}
+        / {stats.max}
+      </span>
+    );
+    body = (
+      <div className="flex flex-col gap-1.5">
+        {stats.distribution.map((d) => (
+          <div key={d.value} className="flex items-center gap-2 text-[12px]">
+            <div className="w-8 text-right tabular-nums text-muted-foreground">
+              {d.value}
+            </div>
+            <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-surface-alt">
+              <div
+                className="absolute inset-y-0 left-0 bg-emerald-500"
+                style={{ width: `${d.pct}%` }}
+              />
+            </div>
+            <div className="w-20 text-right tabular-nums text-muted-foreground">
+              {d.count} ({d.pct}%)
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  } else if (stats.type === "yes_no") {
+    headerExtra = (
+      <span className="text-[12px] text-muted-foreground">
+        {stats.answer_count} response{stats.answer_count === 1 ? "" : "s"}
+      </span>
+    );
+    body = (
+      <div className="flex flex-col gap-1.5">
+        <ChoiceBar label="Yes" count={stats.yes} pct={stats.yes_pct} tone="success" />
+        <ChoiceBar label="No" count={stats.no} pct={stats.no_pct} tone="warn" />
+      </div>
+    );
+  } else if (stats.type === "choice") {
+    headerExtra = (
+      <span className="text-[12px] text-muted-foreground">
+        {stats.answer_count} response{stats.answer_count === 1 ? "" : "s"}
+      </span>
+    );
+    body =
+      stats.counts.length === 0 ? (
+        <div className="text-[12px] text-muted-foreground">No answers yet.</div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {stats.counts.map((c) => (
+            <ChoiceBar
+              key={c.value}
+              label={c.value || "—"}
+              count={c.count}
+              pct={c.pct}
+            />
+          ))}
+        </div>
+      );
+  } else {
+    // text
+    headerExtra = (
+      <span className="text-[12px] text-muted-foreground">
+        {stats.answer_count} response{stats.answer_count === 1 ? "" : "s"}
+      </span>
+    );
+    body = (
+      <div className="flex flex-col gap-3">
+        {stats.themes.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <Sparkles className="h-3 w-3" />
+              Themes
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {stats.themes.map((th) => (
+                <span
+                  key={th.phrase}
+                  className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-alt px-2 py-0.5 text-[11px]"
+                  title={`Appears in ${th.count} response${th.count === 1 ? "" : "s"}`}
+                >
+                  <span className="font-medium">{th.phrase}</span>
+                  <span className="text-muted-foreground">·</span>
+                  <span className="text-muted-foreground tabular-nums">{th.count}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {stats.sample.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Recent answers
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {stats.sample.map((s, i) => (
+                <div
+                  key={i}
+                  className="rounded-md bg-surface-alt/40 p-2 text-[12px] text-foreground/80"
+                >
+                  &ldquo;{s.text}&rdquo;
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {stats.answer_count === 0 && (
+          <div className="text-[12px] text-muted-foreground">No answers yet.</div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-card border border-border bg-surface p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-muted-foreground">
+              Q{index + 1}
+            </span>
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              {QUESTION_TYPE_LABELS[t] ?? t}
+            </span>
+            {q.required && (
+              <span className="rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/20 dark:text-rose-300">
+                Required
+              </span>
+            )}
+            {archived && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <Archive className="h-2.5 w-2.5" />
+                Archived
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 font-heading text-[14px] font-bold">
+            {q.prompt}
+          </div>
+          {q.help_text && (
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              {q.help_text}
+            </div>
+          )}
+        </div>
+        {headerExtra}
+      </div>
+      <div className="mt-3">{body}</div>
+    </div>
+  );
+}
+
+function ChoiceBar({
+  label,
+  count,
+  pct,
+  tone,
+}: {
+  label: string;
+  count: number;
+  pct: number;
+  tone?: "success" | "warn";
+}) {
+  const barColour =
+    tone === "success"
+      ? "bg-emerald-500"
+      : tone === "warn"
+        ? "bg-rose-500"
+        : "bg-accent";
+  return (
+    <div className="flex items-center gap-2 text-[12px]">
+      <div className="w-32 truncate" title={label}>
+        {label}
+      </div>
+      <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-surface-alt">
+        <div
+          className={`absolute inset-y-0 left-0 ${barColour}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="w-20 text-right tabular-nums text-muted-foreground">
+        {count} ({pct}%)
+      </div>
+    </div>
+  );
+}
+
+function SurveyAccessPanel({
+  survey,
+  access,
+  users,
+}: {
+  survey: DbHrSurvey;
+  access: SurveyAccessEntry[];
+  users: AdminUser[];
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [pickUserId, setPickUserId] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+
+  const accessByUser = new Map(access.map((a) => [a.user_id, a]));
+  const candidates = users.filter(
+    (u) => !accessByUser.has(u.id) && u.role !== "super_admin",
+  );
+
+  const grantAccess = () => {
+    if (!pickUserId) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        await grantHrAccess({
+          grantee_id: pickUserId,
+          scope: "survey",
+          survey_id: survey.id,
+        });
+        setPickUserId("");
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    });
+  };
+
+  const revoke = (entry: SurveyAccessEntry) => {
+    if (!entry.grant_id) return;
+    if (entry.source === "module") {
+      if (
+        !confirm(
+          "Revoking the Surveys module will remove this user's access to every survey, not just this one. Continue?",
+        )
+      )
+        return;
+    }
+    setError(null);
+    startTransition(async () => {
+      try {
+        if (entry.source === "module") {
+          await revokeHrModule(entry.grant_id!);
+        } else {
+          await revokeHrAccess(entry.grant_id!);
+        }
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    });
+  };
+
+  return (
+    <div className="haven-card flex flex-col gap-3 p-5">
+      <div className="flex items-center gap-2">
+        <Users className="h-4 w-4 text-muted-foreground" />
+        <h3 className="font-heading text-[15px] font-bold">
+          Who can see this survey
+        </h3>
+      </div>
+      <p className="text-[12px] text-muted-foreground">
+        Super admins always have access. Anyone with the <strong>Surveys</strong>{" "}
+        module sees every survey. Per-survey grants below give access to this
+        survey only.
+      </p>
+
+      {error && (
+        <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12px] text-red-600 dark:text-red-400">
+          {error}
+        </div>
+      )}
+
+      {access.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">No one has access yet.</p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-border rounded-[6px] border border-border">
+          {access.map((a) => (
+            <li
+              key={`${a.user_id}-${a.source}`}
+              className="flex items-center justify-between gap-3 px-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-medium">
+                  {a.full_name ?? a.email ?? "—"}
+                </div>
+                <div className="truncate text-[11px] text-muted-foreground">
+                  {a.email}
+                </div>
+              </div>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${
+                  a.source === "super_admin"
+                    ? "bg-violet-50 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
+                    : a.source === "module"
+                      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                      : "bg-amber-50 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
+                }`}
+              >
+                {a.source === "super_admin"
+                  ? "Super admin"
+                  : a.source === "module"
+                    ? "Surveys module"
+                    : "Direct"}
+              </span>
+              {a.grant_id && a.source !== "super_admin" ? (
+                <button
+                  type="button"
+                  onClick={() => revoke(a)}
+                  disabled={pending}
+                  className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"
+                  aria-label="Revoke access"
+                  title="Revoke this grant"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              ) : (
+                <span className="h-6 w-6" aria-hidden />
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2 rounded-[6px] border border-dashed border-border bg-surface p-2">
+        <select
+          value={pickUserId}
+          onChange={(e) => setPickUserId(e.target.value)}
+          className="h-9 flex-1 min-w-[180px] rounded-md border border-border bg-surface px-2 text-[12px]"
+        >
+          <option value="">Add a user…</option>
+          {candidates.map((u) => (
+            <option key={u.id} value={u.id}>
+              {(u.full_name ?? u.email)} {u.role !== "user" ? `· ${u.role}` : ""}
+            </option>
+          ))}
+        </select>
+        <Button
+          size="sm"
+          variant="primary"
+          onClick={grantAccess}
+          disabled={pending || !pickUserId}
+        >
+          <Plus className="h-3.5 w-3.5 mr-1" />
+          Grant access
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function DeletedResponses({
+  responses,
+}: {
+  responses: SurveyResponseWithAnswers[];
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [open, setOpen] = useState(false);
+  const onRestore = (id: string) => {
+    startTransition(async () => {
+      const res = await restoreResponse(id);
+      if (!res.ok) {
+        alert(res.error);
+        return;
+      }
+      router.refresh();
+    });
+  };
+  return (
+    <section className="flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 self-start text-[12px] font-medium text-muted-foreground hover:text-foreground"
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        Deleted responses ({responses.length})
+      </button>
+      {open && (
+        <div className="haven-card overflow-hidden">
+          <table className="w-full text-left text-[12px]">
+            <thead className="border-b border-border bg-surface-alt/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2">Submitted</th>
+                <th className="px-3 py-2">Respondent</th>
+                <th className="px-3 py-2">Deleted</th>
+                <th className="px-3 py-2 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {responses.map((r) => (
+                <tr key={r.id} className="border-b border-border/40">
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {format(new Date(r.submitted_at), "MMM d, yyyy h:mm a")}
+                  </td>
+                  <td className="px-3 py-2">
+                    {r.is_anonymous ? (
+                      <span className="text-muted-foreground">Anonymous</span>
+                    ) : (
+                      r.respondent_name ?? r.respondent_email ?? "—"
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-muted-foreground">
+                    {r.deleted_at
+                      ? formatDistanceToNow(new Date(r.deleted_at), { addSuffix: true })
+                      : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onRestore(r.id)}
+                      disabled={pending}
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      Restore
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1219,155 +1819,6 @@ function Toggle({
   );
 }
 
-function QuestionSummary({
-  index,
-  question,
-  answers,
-  archived,
-}: {
-  index: number;
-  question: DbHrSurveyQuestion;
-  answers: DbHrSurveyAnswer[];
-  archived?: boolean;
-}) {
-  const t = question.question_type as QuestionType;
-
-  let body: React.ReactNode = null;
-
-  if (t === "rating") {
-    const nums = answers
-      .map((a) => a.value_number)
-      .filter((n): n is number => typeof n === "number");
-    const avg =
-      nums.length === 0 ? null : nums.reduce((s, n) => s + n, 0) / nums.length;
-    const min = question.config.scale_min ?? 1;
-    const max = question.config.scale_max ?? 5;
-    body = (
-      <div className="flex flex-wrap items-center gap-3 text-[12px] text-muted-foreground">
-        <span>
-          Avg{" "}
-          <span className="font-semibold text-foreground">
-            {avg === null ? "—" : avg.toFixed(2)}
-          </span>{" "}
-          / {max}
-        </span>
-        <span>
-          n = <span className="font-semibold text-foreground">{nums.length}</span>
-        </span>
-        <span>
-          scale {min}–{max}
-        </span>
-      </div>
-    );
-  } else if (t === "yes_no") {
-    let yes = 0;
-    let no = 0;
-    for (const a of answers) {
-      if (a.value_choice === "yes") yes += 1;
-      else if (a.value_choice === "no") no += 1;
-    }
-    body = (
-      <div className="flex gap-4 text-[12px]">
-        <span>
-          Yes <span className="font-semibold text-foreground">{yes}</span>
-        </span>
-        <span>
-          No <span className="font-semibold text-foreground">{no}</span>
-        </span>
-      </div>
-    );
-  } else if (t === "single_choice" || t === "multi_choice") {
-    const counts = new Map<string, number>();
-    for (const a of answers) {
-      const vals =
-        t === "multi_choice"
-          ? a.value_choices ?? []
-          : a.value_choice
-            ? [a.value_choice]
-            : [];
-      for (const v of vals) counts.set(v, (counts.get(v) ?? 0) + 1);
-    }
-    const rows = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-    const total = rows.reduce((s, [, n]) => s + n, 0);
-    body =
-      rows.length === 0 ? (
-        <div className="text-[12px] text-muted-foreground">No answers yet.</div>
-      ) : (
-        <div className="flex flex-col gap-1">
-          {rows.map(([value, count]) => {
-            const pct = total === 0 ? 0 : Math.round((count / total) * 100);
-            return (
-              <div key={value} className="flex items-center gap-2 text-[12px]">
-                <div className="w-32 truncate">{value || "—"}</div>
-                <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-surface-alt">
-                  <div
-                    className="absolute inset-y-0 left-0 bg-accent"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-                <div className="w-16 text-right font-semibold text-foreground">
-                  {count} ({pct}%)
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      );
-  } else {
-    const samples = answers
-      .map((a) => a.value_text)
-      .filter((s): s is string => !!s && s.trim().length > 0)
-      .slice(0, 3);
-    body =
-      samples.length === 0 ? (
-        <div className="text-[12px] text-muted-foreground">No answers yet.</div>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          {samples.map((s, i) => (
-            <div
-              key={i}
-              className="rounded-md bg-surface-alt/40 p-2 text-[12px] text-foreground/80"
-            >
-              “{s}”
-            </div>
-          ))}
-          {answers.length > samples.length && (
-            <div className="text-[11px] text-muted-foreground">
-              +{answers.length - samples.length} more in responses below.
-            </div>
-          )}
-        </div>
-      );
-  }
-
-  return (
-    <div className="rounded-card border border-border bg-surface p-4">
-      <div className="flex flex-wrap items-start gap-2">
-        <span className="text-[11px] font-semibold text-muted-foreground">
-          Q{index + 1}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="font-heading text-[14px] font-bold">
-            {question.prompt}
-            {question.required && <span className="text-rose-500"> *</span>}
-            {archived && (
-              <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                <Archive className="h-2.5 w-2.5" />
-                Archived
-              </span>
-            )}
-          </div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">
-            {QUESTION_TYPE_LABELS[t] ?? t}
-            {question.help_text ? ` · ${question.help_text}` : ""}
-          </div>
-        </div>
-      </div>
-      <div className="mt-2">{body}</div>
-    </div>
-  );
-}
-
 function ResponsesTable({
   responses,
   questions,
@@ -1375,8 +1826,34 @@ function ResponsesTable({
   responses: SurveyResponseWithAnswers[];
   questions: DbHrSurveyQuestion[];
 }) {
+  const router = useRouter();
   const [openId, setOpenId] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
   const qById = new Map(questions.map((q) => [q.id, q]));
+
+  const onDelete = (
+    e: React.MouseEvent,
+    r: SurveyResponseWithAnswers,
+  ) => {
+    e.stopPropagation();
+    const who = r.is_anonymous
+      ? "this anonymous response"
+      : `the response from ${r.respondent_name ?? r.respondent_email ?? "this respondent"}`;
+    if (
+      !confirm(
+        `Delete ${who}? It will be hidden from results but kept for audit. You can restore it from the Deleted Responses panel below.`,
+      )
+    )
+      return;
+    startTransition(async () => {
+      const res = await deleteResponse(r.id);
+      if (!res.ok) {
+        alert(res.error);
+        return;
+      }
+      router.refresh();
+    });
+  };
 
   return (
     <div className="haven-card overflow-hidden">
@@ -1389,6 +1866,7 @@ function ResponsesTable({
             <th className="px-3 py-2">Email</th>
             <th className="px-3 py-2">Department</th>
             <th className="px-3 py-2 text-right">Answers</th>
+            <th className="px-3 py-2 text-right" aria-label="Actions" />
           </tr>
         </thead>
         <tbody>
@@ -1422,10 +1900,22 @@ function ResponsesTable({
                   <td className="px-3 py-2 text-right text-muted-foreground">
                     {r.answers.length}
                   </td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      type="button"
+                      onClick={(e) => onDelete(e, r)}
+                      disabled={pending}
+                      title="Delete this response"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50 dark:hover:bg-rose-500/20 dark:hover:text-rose-300"
+                      aria-label="Delete response"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </td>
                 </tr>
                 {open && (
                   <tr className="border-b border-border/50 bg-surface-alt/20">
-                    <td colSpan={6} className="px-4 py-3">
+                    <td colSpan={7} className="px-4 py-3">
                       <div className="flex flex-col gap-2">
                         {r.answers.map((a, i) => {
                           const q = qById.get(a.question_id);

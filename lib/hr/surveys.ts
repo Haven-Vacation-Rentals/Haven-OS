@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getAdminClient } from "@/lib/supabase/admin";
-import { requireHrAccess } from "@/lib/auth/permissions";
+import {
+  getPermissions,
+  requireHrModule,
+  requireSurveyAccess,
+  visibleSurveyIds,
+} from "@/lib/auth/permissions";
 import type {
   DbHrSurvey,
   DbHrSurveyAnswer,
@@ -76,13 +81,24 @@ function isStatus(v: unknown): v is SurveyStatus {
 // ---------------------------------------------------------------------------
 
 export async function listSurveys(): Promise<SurveyListItem[]> {
-  await requireHrAccess();
+  // Anyone with surveys-module access OR any per-survey grant can list.
+  // visibleSurveyIds returns null for "see all" (super admin or module grant)
+  // and a concrete (possibly empty) array otherwise.
+  const perm = await getPermissions();
+  if (!perm.user_id) throw new Error("Not signed in");
+  const visibleIds = await visibleSurveyIds();
+
   const supabase = await db();
-  const { data: surveys } = await supabase
+  let query = supabase
     .from("hr_surveys")
     .select("*")
     .order("status", { ascending: true })
     .order("updated_at", { ascending: false });
+  if (visibleIds !== null) {
+    if (visibleIds.length === 0) return [];
+    query = query.in("id", visibleIds);
+  }
+  const { data: surveys } = await query;
   const list = (surveys ?? []) as DbHrSurvey[];
   if (list.length === 0) return [];
 
@@ -116,7 +132,7 @@ export async function listSurveys(): Promise<SurveyListItem[]> {
 }
 
 export async function getSurvey(id: string): Promise<DbHrSurvey | null> {
-  await requireHrAccess();
+  await requireSurveyAccess(id);
   const supabase = await db();
   const { data } = await supabase
     .from("hr_surveys")
@@ -130,7 +146,7 @@ export async function getSurveyQuestions(
   surveyId: string,
   options?: { includeArchived?: boolean },
 ): Promise<DbHrSurveyQuestion[]> {
-  await requireHrAccess();
+  await requireSurveyAccess(surveyId);
   const supabase = await db();
   let query = supabase
     .from("hr_survey_questions")
@@ -182,7 +198,7 @@ export type CreateSurveyInput = {
 };
 
 export async function createSurvey(input: CreateSurveyInput): Promise<DbHrSurvey> {
-  await requireHrAccess();
+  await requireHrModule("surveys");
   const supabase = await db();
   const title = input.title?.trim();
   if (!title) throw new Error("Title is required");
@@ -248,7 +264,7 @@ export async function updateSurvey(
   id: string,
   input: UpdateSurveyInput,
 ): Promise<void> {
-  await requireHrAccess();
+  await requireSurveyAccess(id);
   const supabase = await db();
   const patch: Record<string, unknown> = { ...input };
   await supabase.from("hr_surveys").update(patch).eq("id", id);
@@ -261,7 +277,7 @@ export async function setSurveyStatus(id: string, status: SurveyStatus): Promise
 }
 
 export async function deleteSurvey(id: string): Promise<void> {
-  await requireHrAccess();
+  await requireSurveyAccess(id);
   const supabase = await db();
   await supabase.from("hr_surveys").delete().eq("id", id);
   revalidateSurveys();
@@ -282,7 +298,7 @@ export type AddQuestionInput = {
 };
 
 export async function addQuestion(input: AddQuestionInput): Promise<DbHrSurveyQuestion> {
-  await requireHrAccess();
+  await requireSurveyAccess(input.survey_id);
   if (!isQuestionType(input.question_type)) throw new Error("Invalid question_type");
   if (!input.prompt?.trim()) throw new Error("Prompt is required");
   const supabase = await db();
@@ -329,7 +345,7 @@ export async function updateQuestion(
   }>,
   surveyId: string,
 ): Promise<void> {
-  await requireHrAccess();
+  await requireSurveyAccess(surveyId);
   const supabase = await db();
 
   // If responses already exist for this question, refuse the kinds of edits
@@ -393,7 +409,7 @@ function configRemovesChoices(
 }
 
 export async function deleteQuestion(id: string, surveyId: string): Promise<void> {
-  await requireHrAccess();
+  await requireSurveyAccess(surveyId);
   const supabase = await db();
   // If this question has any answers, soft-archive instead of hard-deleting,
   // so historical responses keep their question context.
@@ -413,7 +429,7 @@ export async function archiveQuestion(
   id: string,
   surveyId: string,
 ): Promise<void> {
-  await requireHrAccess();
+  await requireSurveyAccess(surveyId);
   const supabase = await db();
   await supabase
     .from("hr_survey_questions")
@@ -426,7 +442,7 @@ export async function unarchiveQuestion(
   id: string,
   surveyId: string,
 ): Promise<void> {
-  await requireHrAccess();
+  await requireSurveyAccess(surveyId);
   const supabase = await db();
   await supabase
     .from("hr_survey_questions")
@@ -439,7 +455,7 @@ export async function reorderQuestions(
   surveyId: string,
   orderedIds: string[],
 ): Promise<void> {
-  await requireHrAccess();
+  await requireSurveyAccess(surveyId);
   const supabase = await db();
   await Promise.all(
     orderedIds.map((id, i) =>
@@ -459,14 +475,17 @@ export async function reorderQuestions(
 
 export async function listResponses(
   surveyId: string,
+  options?: { includeDeleted?: boolean },
 ): Promise<SurveyResponseWithAnswers[]> {
-  await requireHrAccess();
+  await requireSurveyAccess(surveyId);
   const supabase = await db();
-  const { data: responses } = await supabase
+  let q = supabase
     .from("hr_survey_responses")
     .select("*")
     .eq("survey_id", surveyId)
     .order("submitted_at", { ascending: false });
+  if (!options?.includeDeleted) q = q.is("deleted_at", null);
+  const { data: responses } = await q;
   const list = (responses ?? []) as DbHrSurveyResponse[];
   if (list.length === 0) return [];
   const ids = list.map((r) => r.id);
@@ -486,7 +505,6 @@ export async function listResponses(
 export async function getResponse(
   responseId: string,
 ): Promise<SurveyResponseWithAnswers | null> {
-  await requireHrAccess();
   const supabase = await db();
   const { data: r } = await supabase
     .from("hr_survey_responses")
@@ -494,6 +512,7 @@ export async function getResponse(
     .eq("id", responseId)
     .maybeSingle();
   if (!r) return null;
+  await requireSurveyAccess((r as DbHrSurveyResponse).survey_id);
   const { data: answers } = await supabase
     .from("hr_survey_answers")
     .select("*")
@@ -519,7 +538,7 @@ export async function getSurveySummary(surveyId: string): Promise<{
     sample?: string[];
   }>;
 }> {
-  await requireHrAccess();
+  await requireSurveyAccess(surveyId);
   const supabase = await db();
   const survey = await getSurvey(surveyId);
   if (!survey) throw new Error("Survey not found");
@@ -589,6 +608,186 @@ export async function getSurveySummary(surveyId: string): Promise<{
     last_response_at,
     per_question,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Response moderation — soft-delete + restore
+// ---------------------------------------------------------------------------
+
+export type DeleteResponseResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Soft-delete a survey response. The row stays in the database (so we keep
+ * an audit trail) but is hidden from listResponses, summaries, and the
+ * dashboard counts.
+ */
+export async function deleteResponse(
+  responseId: string,
+): Promise<DeleteResponseResult> {
+  try {
+    const supabase = await db();
+    const { data: row } = await supabase
+      .from("hr_survey_responses")
+      .select("survey_id")
+      .eq("id", responseId)
+      .maybeSingle();
+    if (!row) return { ok: false, error: "Response not found" };
+    const surveyId = (row as { survey_id: string }).survey_id;
+    await requireSurveyAccess(surveyId);
+    const perm = await getPermissions();
+    const { error } = await supabase
+      .from("hr_survey_responses")
+      .update({
+        deleted_at: new Date().toISOString(),
+        deleted_by: perm.user_id,
+      })
+      .eq("id", responseId);
+    if (error) return { ok: false, error: error.message };
+    revalidateSurveys(surveyId);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to delete response",
+    };
+  }
+}
+
+export async function restoreResponse(
+  responseId: string,
+): Promise<DeleteResponseResult> {
+  try {
+    const supabase = await db();
+    const { data: row } = await supabase
+      .from("hr_survey_responses")
+      .select("survey_id")
+      .eq("id", responseId)
+      .maybeSingle();
+    if (!row) return { ok: false, error: "Response not found" };
+    const surveyId = (row as { survey_id: string }).survey_id;
+    await requireSurveyAccess(surveyId);
+    const { error } = await supabase
+      .from("hr_survey_responses")
+      .update({ deleted_at: null, deleted_by: null })
+      .eq("id", responseId);
+    if (error) return { ok: false, error: error.message };
+    revalidateSurveys(surveyId);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to restore response",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Per-survey access view (for the Survey detail "Access" panel)
+// ---------------------------------------------------------------------------
+
+export type SurveyAccessSource = "super_admin" | "module" | "survey";
+
+export type SurveyAccessEntry = {
+  user_id: string;
+  email: string | null;
+  full_name: string | null;
+  role: string;
+  source: SurveyAccessSource;
+  // For 'survey' source, the grant id we can revoke. Null otherwise.
+  grant_id: string | null;
+};
+
+export async function listSurveyAccess(
+  surveyId: string,
+): Promise<SurveyAccessEntry[]> {
+  await requireSurveyAccess(surveyId);
+  const supabase = await db();
+
+  const [supersRes, moduleRes, perSurveyRes] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, email, full_name, role")
+      .eq("role", "super_admin"),
+    supabase
+      .from("hr_module_grants")
+      .select(
+        "id, module, grantee:profiles!hr_module_grants_grantee_id_fkey(id, email, full_name, role)",
+      )
+      .eq("module", "surveys"),
+    supabase
+      .from("hr_access_grants")
+      .select(
+        "id, scope, survey_id, grantee:profiles!hr_access_grants_grantee_id_fkey(id, email, full_name, role)",
+      )
+      .eq("scope", "survey")
+      .eq("survey_id", surveyId),
+  ]);
+
+  type GranteeShape = {
+    id: string;
+    email: string | null;
+    full_name: string | null;
+    role: string;
+  };
+  const out: SurveyAccessEntry[] = [];
+  for (const s of (supersRes.data ?? []) as Array<GranteeShape>) {
+    out.push({
+      user_id: s.id,
+      email: s.email,
+      full_name: s.full_name,
+      role: s.role,
+      source: "super_admin",
+      grant_id: null,
+    });
+  }
+  for (const g of (moduleRes.data ?? []) as unknown as Array<{
+    id: string;
+    grantee: GranteeShape | null;
+  }>) {
+    if (!g.grantee) continue;
+    out.push({
+      user_id: g.grantee.id,
+      email: g.grantee.email,
+      full_name: g.grantee.full_name,
+      role: g.grantee.role,
+      source: "module",
+      grant_id: g.id,
+    });
+  }
+  for (const g of (perSurveyRes.data ?? []) as unknown as Array<{
+    id: string;
+    grantee: GranteeShape | null;
+  }>) {
+    if (!g.grantee) continue;
+    out.push({
+      user_id: g.grantee.id,
+      email: g.grantee.email,
+      full_name: g.grantee.full_name,
+      role: g.grantee.role,
+      source: "survey",
+      grant_id: g.id,
+    });
+  }
+  // Dedupe by user, keep most authoritative.
+  const order: Record<SurveyAccessSource, number> = {
+    super_admin: 0,
+    module: 1,
+    survey: 2,
+  };
+  const byUser = new Map<string, SurveyAccessEntry>();
+  for (const e of out) {
+    const existing = byUser.get(e.user_id);
+    if (!existing || order[e.source] < order[existing.source]) {
+      byUser.set(e.user_id, e);
+    }
+  }
+  return Array.from(byUser.values()).sort((a, b) => {
+    const r = order[a.source] - order[b.source];
+    if (r !== 0) return r;
+    const an = (a.full_name ?? a.email ?? "").toLowerCase();
+    const bn = (b.full_name ?? b.email ?? "").toLowerCase();
+    return an.localeCompare(bn);
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,10 @@ import {
   getSurvey,
   getSurveyQuestions,
   listResponses,
+  listSurveyAccess,
 } from "@/lib/hr/surveys";
+import { getPermissions } from "@/lib/auth/permissions";
+import { listUsers } from "@/lib/admin/actions";
 import { SurveyDetail } from "@/components/hr/survey-detail";
 
 export const dynamic = "force-dynamic";
@@ -19,10 +22,17 @@ export default async function SurveyDetailPage({
   const survey = await getSurvey(id);
   if (!survey) notFound();
 
-  const [questions, responses] = await Promise.all([
+  const perm = await getPermissions();
+  const canManageAccess = perm.is_super_admin;
+
+  const [questions, responses, allResponses, access, users] = await Promise.all([
     getSurveyQuestions(id, { includeArchived: true }),
     listResponses(id),
+    listResponses(id, { includeDeleted: true }),
+    listSurveyAccess(id),
+    canManageAccess ? listUsers() : Promise.resolve([]),
   ]);
+  const deletedResponses = allResponses.filter((r) => r.deleted_at !== null);
 
   return (
     <div className="flex flex-col gap-4">
@@ -37,6 +47,10 @@ export default async function SurveyDetailPage({
         survey={survey}
         questions={questions}
         responses={responses}
+        deletedResponses={deletedResponses}
+        access={access}
+        users={users}
+        canManageAccess={canManageAccess}
       />
     </div>
   );

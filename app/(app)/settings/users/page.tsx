@@ -2,7 +2,13 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth/user";
 import { getPermissions } from "@/lib/auth/permissions";
-import { listUsers, listDepartments, listHrAccessGrants } from "@/lib/admin/actions";
+import {
+  listUsers,
+  listDepartments,
+  listHrAccessGrants,
+  listHrModuleGrants,
+  listSurveysForAdmin,
+} from "@/lib/admin/actions";
 import { listEmployees } from "@/lib/hr/actions";
 import { UserPermissionsTable } from "@/components/settings/user-permissions-table";
 
@@ -16,12 +22,15 @@ export default async function UsersSettingsPage() {
   const perm = await getPermissions();
   if (!perm.is_super_admin) redirect("/settings" as never);
 
-  const [users, departments, grants, employees] = await Promise.all([
-    listUsers(),
-    listDepartments(true),
-    listHrAccessGrants(),
-    listEmployees(),
-  ]);
+  const [users, departments, grants, moduleGrants, employees, surveys] =
+    await Promise.all([
+      listUsers(),
+      listDepartments(true),
+      listHrAccessGrants(),
+      listHrModuleGrants(),
+      listEmployees(),
+      listSurveysForAdmin(),
+    ]);
 
   return (
     <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6">
@@ -37,6 +46,8 @@ export default async function UsersSettingsPage() {
         users={users}
         departments={departments}
         grants={grants}
+        moduleGrants={moduleGrants}
+        surveys={surveys}
         employees={employees}
         currentUserId={perm.user_id ?? ""}
       />

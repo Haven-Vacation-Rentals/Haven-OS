@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   grantHrAccess,
   revokeHrAccess,
+  revokeHrModule,
   type AdminUser,
 } from "@/lib/admin/actions";
 import type { EmployeeAccessEntry } from "@/lib/hr/actions";
@@ -86,7 +87,11 @@ export function EmployeeAccessManager({
 
   const revoke = (entry: EmployeeAccessEntry) => {
     if (!entry.grant_id || entry.grant_id === "__new__") return;
-    if (entry.source === "all") {
+    if (entry.source === "module") {
+      if (!confirm(
+        `Revoking this user's People module grant will remove their access to every employee, not just ${employeeName}. Continue?`,
+      )) return;
+    } else if (entry.source === "all") {
       if (!confirm(
         `Revoking this user's "all HR" grant will remove their access to every employee, not just ${employeeName}. Continue?`,
       )) return;
@@ -100,7 +105,11 @@ export function EmployeeAccessManager({
     setError(null);
     startTransition(async () => {
       try {
-        await revokeHrAccess(entry.grant_id!);
+        if (entry.source === "module") {
+          await revokeHrModule(entry.grant_id!);
+        } else {
+          await revokeHrAccess(entry.grant_id!);
+        }
         setAccess((prev) => prev.filter((e) => e.grant_id !== entry.grant_id));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -200,6 +209,13 @@ function SourceBadge({ entry }: { entry: EmployeeAccessEntry }) {
         <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-700">
           <ShieldCheck className="h-3 w-3" />
           Super admin
+        </span>
+      );
+    case "module":
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700 dark:bg-sky-500/20 dark:text-sky-300">
+          <ShieldCheck className="h-3 w-3" />
+          People module
         </span>
       );
     case "all":

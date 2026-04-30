@@ -1,19 +1,42 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth/user";
-import { canAccessHrModule } from "@/lib/auth/permissions";
+import {
+  canAccessHrModule,
+  userHrModules,
+  visibleSurveyIds,
+  visibleEmployeeIds,
+} from "@/lib/auth/permissions";
+import type { HrModule } from "@/lib/auth/hr-modules";
 import { Users, Briefcase, FileText, ClipboardList, Lock, MessageSquare } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
 /**
  * /hr is gated to HR admins only. Anyone not on the whitelist is
- * bounced to /dashboard.
+ * bounced to /dashboard. Tabs shown match the modules the user has been
+ * granted (super_admin sees everything).
  */
 export default async function HrLayout({ children }: { children: React.ReactNode }) {
   await requireUser();
   const ok = await canAccessHrModule();
   if (!ok) redirect("/dashboard");
+
+  const [modules, surveyIds, employeeIds] = await Promise.all([
+    userHrModules(),
+    visibleSurveyIds(),
+    visibleEmployeeIds(),
+  ]);
+  const moduleSet = new Set<HrModule>(modules);
+  // Even without the people module, scoped employee grants let the user
+  // see specific employee files; same for per-survey grants.
+  const hasPeople =
+    moduleSet.has("people") || (employeeIds !== null && employeeIds.length > 0);
+  const hasHiring = moduleSet.has("hiring");
+  const hasSurveys =
+    moduleSet.has("surveys") || (surveyIds !== null && surveyIds.length > 0);
+  const hasPolicies = moduleSet.has("policies");
+  const hasProcedures = moduleSet.has("procedures");
 
   return (
     <div className="mx-auto flex max-w-[1400px] flex-col gap-6">
@@ -31,11 +54,15 @@ export default async function HrLayout({ children }: { children: React.ReactNode
       </header>
 
       <nav className="flex flex-wrap gap-1 rounded-lg border border-border bg-surface-alt/50 p-1">
-        <HrTab href="/hr" label="People" icon={Users} />
-        <HrTab href="/hr/hiring" label="Hiring" icon={Briefcase} />
-        <HrTab href="/hr/surveys" label="Surveys" icon={MessageSquare} />
-        <HrTab href="/hr/policies" label="Policies" icon={FileText} />
-        <HrTab href="/hr/procedures" label="Procedures" icon={ClipboardList} />
+        {hasPeople && <HrTab href="/hr" label="People" icon={Users} />}
+        {hasHiring && <HrTab href="/hr/hiring" label="Hiring" icon={Briefcase} />}
+        {hasSurveys && (
+          <HrTab href="/hr/surveys" label="Surveys" icon={MessageSquare} />
+        )}
+        {hasPolicies && <HrTab href="/hr/policies" label="Policies" icon={FileText} />}
+        {hasProcedures && (
+          <HrTab href="/hr/procedures" label="Procedures" icon={ClipboardList} />
+        )}
       </nav>
 
       <div>{children}</div>

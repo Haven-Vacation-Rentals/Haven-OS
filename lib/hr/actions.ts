@@ -6,6 +6,8 @@ import {
   getPermissions,
   visibleEmployeeIds,
   requireEmployeeAccess,
+  requireHrModule,
+  canAccessHrModuleByName,
 } from "@/lib/auth/permissions";
 import type {
   DbCandidate,
@@ -129,9 +131,25 @@ export async function removeHrAdmin(email: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function listEmployees(): Promise<DbEmployee[]> {
-  await requireHrAdmin();
-  const supabase = await db();
+  // People module gates the directory; row-level grants
+  // (department/employee scope) further narrow what's returned.
+  // For backwards compatibility, a user with department/employee scoped
+  // grants but no explicit people-module grant still sees their scoped
+  // people. Migration 0032 backfills modules for everyone with grants
+  // pre-existing, so this is the rare case where someone has only
+  // scope grants from the API.
+  const perm = await getPermissions();
+  if (!perm.user_id) throw new Error("Not signed in");
   const visible = await visibleEmployeeIds();
+  if (!perm.is_super_admin) {
+    const hasPeople = await canAccessHrModuleByName("people");
+    if (!hasPeople && (visible === null || visible.length === 0)) {
+      throw new Error(
+        "HR People access required — ask a super admin to grant you the People module.",
+      );
+    }
+  }
+  const supabase = await db();
   let q = supabase
     .from("hr_employees")
     .select("*")
@@ -167,7 +185,7 @@ export async function createEmployee(input: {
   status?: string;
   notes?: string;
 }): Promise<DbEmployee> {
-  await requireHrAdmin();
+  await requireHrModule("people");
   const supabase = await db();
   if (!input.full_name.trim()) throw new Error("Name is required");
   const { data, error } = await supabase
@@ -264,7 +282,12 @@ export async function setEmployeeDepartment(
 // Per-employee access view
 // ---------------------------------------------------------------------------
 
-export type EmployeeAccessGrantSource = "super_admin" | "all" | "department" | "employee";
+export type EmployeeAccessGrantSource =
+  | "super_admin"
+  | "module"
+  | "all"
+  | "department"
+  | "employee";
 
 export type EmployeeAccessEntry = {
   user_id: string;
@@ -302,34 +325,41 @@ export async function listEmployeeAccess(
     .maybeSingle();
   const deptId = emp?.department_id ?? null;
 
-  const [supersRes, allGrantsRes, deptGrantsRes, empGrantsRes] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select("id, email, full_name, role")
-      .eq("role", "super_admin"),
-    supabase
-      .from("hr_access_grants")
-      .select(
-        "id, scope, grantee:profiles!hr_access_grants_grantee_id_fkey(id, email, full_name, role)",
-      )
-      .eq("scope", "all"),
-    deptId
-      ? supabase
-          .from("hr_access_grants")
-          .select(
-            "id, scope, department_id, grantee:profiles!hr_access_grants_grantee_id_fkey(id, email, full_name, role), department:departments(id, name)",
-          )
-          .eq("scope", "department")
-          .eq("department_id", deptId)
-      : Promise.resolve({ data: [] as unknown[] }),
-    supabase
-      .from("hr_access_grants")
-      .select(
-        "id, scope, employee_id, grantee:profiles!hr_access_grants_grantee_id_fkey(id, email, full_name, role)",
-      )
-      .eq("scope", "employee")
-      .eq("employee_id", employeeId),
-  ]);
+  const [supersRes, moduleGrantsRes, allGrantsRes, deptGrantsRes, empGrantsRes] =
+    await Promise.all([
+      supabase
+        .from("profiles")
+        .select("id, email, full_name, role")
+        .eq("role", "super_admin"),
+      supabase
+        .from("hr_module_grants")
+        .select(
+          "id, module, grantee:profiles!hr_module_grants_grantee_id_fkey(id, email, full_name, role)",
+        )
+        .eq("module", "people"),
+      supabase
+        .from("hr_access_grants")
+        .select(
+          "id, scope, grantee:profiles!hr_access_grants_grantee_id_fkey(id, email, full_name, role)",
+        )
+        .eq("scope", "all"),
+      deptId
+        ? supabase
+            .from("hr_access_grants")
+            .select(
+              "id, scope, department_id, grantee:profiles!hr_access_grants_grantee_id_fkey(id, email, full_name, role), department:departments(id, name)",
+            )
+            .eq("scope", "department")
+            .eq("department_id", deptId)
+        : Promise.resolve({ data: [] as unknown[] }),
+      supabase
+        .from("hr_access_grants")
+        .select(
+          "id, scope, employee_id, grantee:profiles!hr_access_grants_grantee_id_fkey(id, email, full_name, role)",
+        )
+        .eq("scope", "employee")
+        .eq("employee_id", employeeId),
+    ]);
 
   const out: EmployeeAccessEntry[] = [];
 
@@ -356,6 +386,22 @@ export async function listEmployeeAccess(
     full_name: string | null;
     role: string;
   };
+
+  for (const g of (moduleGrantsRes.data ?? []) as unknown as Array<{
+    id: string;
+    grantee: GranteeShape | null;
+  }>) {
+    if (!g.grantee) continue;
+    out.push({
+      user_id: g.grantee.id,
+      email: g.grantee.email,
+      full_name: g.grantee.full_name,
+      role: g.grantee.role,
+      source: "module",
+      grant_id: g.id,
+      department_name: null,
+    });
+  }
 
   for (const g of (allGrantsRes.data ?? []) as unknown as Array<{
     id: string;
@@ -411,9 +457,10 @@ export async function listEmployeeAccess(
   // source order: super_admin → all → department → employee.
   const order: Record<EmployeeAccessGrantSource, number> = {
     super_admin: 0,
-    all: 1,
-    department: 2,
-    employee: 3,
+    module: 1,
+    all: 2,
+    department: 3,
+    employee: 4,
   };
   const byUser = new Map<string, EmployeeAccessEntry>();
   for (const e of out) {
@@ -439,7 +486,7 @@ export async function listEmployeeAccess(
 export async function listLinkableProfiles(): Promise<
   Array<{ id: string; email: string; full_name: string | null }>
 > {
-  await requireHrAdmin();
+  await requireHrModule("people");
   const supabase = await db();
   const { data } = await supabase
     .from("profiles")
@@ -475,7 +522,7 @@ export async function createReview(input: {
   goals?: string;
 }): Promise<void> {
   await requireEmployeeAccess(input.employee_id);
-  const email = await requireHrAdmin();
+  const email = (await currentEmail()) ?? "";
   const supabase = await db();
   await supabase.from("hr_performance_reviews").insert({
     employee_id: input.employee_id,
@@ -531,7 +578,7 @@ export async function createIssue(input: {
   reported_date?: string;
 }): Promise<void> {
   await requireEmployeeAccess(input.employee_id);
-  const email = await requireHrAdmin();
+  const email = (await currentEmail()) ?? "";
   const supabase = await db();
   if (!input.title.trim()) throw new Error("Title is required");
   await supabase.from("hr_issues").insert({
@@ -578,7 +625,7 @@ export async function deleteIssue(id: string, employeeId: string): Promise<void>
 // ---------------------------------------------------------------------------
 
 export async function listRoles(): Promise<DbRole[]> {
-  await requireHrAdmin();
+  await requireHrModule("hiring");
   const supabase = await db();
   const { data } = await supabase
     .from("hr_roles")
@@ -589,7 +636,7 @@ export async function listRoles(): Promise<DbRole[]> {
 }
 
 export async function getRole(id: string): Promise<DbRole | null> {
-  await requireHrAdmin();
+  await requireHrModule("hiring");
   const supabase = await db();
   const { data } = await supabase
     .from("hr_roles")
@@ -625,7 +672,7 @@ export async function createRole(input: {
   perks?: string;
   status?: string;
 }): Promise<DbRole> {
-  await requireHrAdmin();
+  await requireHrModule("hiring");
   const supabase = await db();
   if (!input.title.trim()) throw new Error("Title is required");
   const baseSlug = slugify(input.title) || "role";
@@ -665,7 +712,7 @@ export async function updateRole(
     slug: string;
   }>,
 ): Promise<void> {
-  await requireHrAdmin();
+  await requireHrModule("hiring");
   const supabase = await db();
   const payload = { ...input };
   // If slug was provided, ensure uniqueness
@@ -679,7 +726,7 @@ export async function updateRole(
 }
 
 export async function deleteRole(id: string): Promise<void> {
-  await requireHrAdmin();
+  await requireHrModule("hiring");
   const supabase = await db();
   await supabase.from("hr_roles").delete().eq("id", id);
   revalidateHr();
@@ -691,7 +738,7 @@ export async function deleteRole(id: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function listCandidates(roleId: string): Promise<DbCandidate[]> {
-  await requireHrAdmin();
+  await requireHrModule("hiring");
   const supabase = await db();
   const { data } = await supabase
     .from("hr_candidates")
@@ -712,7 +759,7 @@ export async function createCandidate(input: {
   stage?: string;
   notes?: string;
 }): Promise<void> {
-  await requireHrAdmin();
+  await requireHrModule("hiring");
   const supabase = await db();
   if (!input.name.trim()) throw new Error("Name is required");
   await supabase.from("hr_candidates").insert({
@@ -734,7 +781,7 @@ export async function updateCandidateStage(
   stage: string,
   roleId: string,
 ): Promise<void> {
-  await requireHrAdmin();
+  await requireHrModule("hiring");
   const supabase = await db();
   await supabase.from("hr_candidates").update({ stage }).eq("id", id);
   revalidatePath(`/hr/hiring/${roleId}`);
@@ -763,7 +810,7 @@ export async function setCandidateStage(
 }
 
 export async function getCandidate(id: string): Promise<DbCandidate | null> {
-  await requireHrAdmin();
+  await requireHrModule("hiring");
   const supabase = await db();
   const { data } = await supabase
     .from("hr_candidates")
@@ -786,14 +833,14 @@ export async function updateCandidate(
   }>,
   roleId: string,
 ): Promise<void> {
-  await requireHrAdmin();
+  await requireHrModule("hiring");
   const supabase = await db();
   await supabase.from("hr_candidates").update(input).eq("id", id);
   revalidatePath(`/hr/hiring/${roleId}`);
 }
 
 export async function deleteCandidate(id: string, roleId: string): Promise<void> {
-  await requireHrAdmin();
+  await requireHrModule("hiring");
   const supabase = await db();
   await supabase.from("hr_candidates").delete().eq("id", id);
   revalidatePath(`/hr/hiring/${roleId}`);
@@ -806,7 +853,7 @@ export async function deleteCandidate(id: string, roleId: string): Promise<void>
 export async function listCandidateNotes(
   candidateId: string,
 ): Promise<DbCandidateNote[]> {
-  await requireHrAdmin();
+  await requireHrModule("hiring");
   const supabase = await db();
   const { data } = await supabase
     .from("hr_candidate_notes")
@@ -825,7 +872,7 @@ export async function addCandidateNote(input: {
   | { ok: false; error: string }
 > {
   try {
-    await requireHrAdmin();
+    await requireHrModule("hiring");
     const body = (input.body ?? "").trim();
     if (!body) return { ok: false, error: "Note cannot be empty" };
 
@@ -876,7 +923,7 @@ export async function deleteCandidateNote(
   roleId?: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    await requireHrAdmin();
+    await requireHrModule("hiring");
     const supabase = await db();
     const { error } = await supabase
       .from("hr_candidate_notes")
@@ -900,7 +947,7 @@ export async function deleteCandidateNote(
 // ---------------------------------------------------------------------------
 
 export async function listDocs(kind: "policy" | "procedure"): Promise<DbHrDoc[]> {
-  await requireHrAdmin();
+  await requireHrModule(kind === "policy" ? "policies" : "procedures");
   const supabase = await db();
   const { data } = await supabase
     .from("hr_docs")
@@ -915,7 +962,8 @@ export async function createDoc(input: {
   title: string;
   body?: string;
 }): Promise<void> {
-  const email = await requireHrAdmin();
+  await requireHrModule(input.kind === "policy" ? "policies" : "procedures");
+  const email = (await currentEmail()) ?? "";
   const supabase = await db();
   if (!input.title.trim()) throw new Error("Title is required");
   await supabase.from("hr_docs").insert({
@@ -932,14 +980,14 @@ export async function updateDoc(
   input: { title: string; body: string },
   kind: "policy" | "procedure",
 ): Promise<void> {
-  await requireHrAdmin();
+  await requireHrModule(kind === "policy" ? "policies" : "procedures");
   const supabase = await db();
   await supabase.from("hr_docs").update(input).eq("id", id);
   revalidatePath(`/hr/${kind === "policy" ? "policies" : "procedures"}`);
 }
 
 export async function deleteDoc(id: string, kind: "policy" | "procedure"): Promise<void> {
-  await requireHrAdmin();
+  await requireHrModule(kind === "policy" ? "policies" : "procedures");
   const supabase = await db();
   await supabase.from("hr_docs").delete().eq("id", id);
   revalidatePath(`/hr/${kind === "policy" ? "policies" : "procedures"}`);

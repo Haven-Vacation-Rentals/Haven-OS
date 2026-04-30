@@ -15,6 +15,7 @@ import {
   getPermissions,
   type HavenUserRole,
 } from "@/lib/auth/permissions";
+import { HR_MODULES, type HrModule } from "@/lib/auth/hr-modules";
 
 async function db() {
   const supabase = await createClient();
@@ -354,7 +355,7 @@ export async function deleteDepartment(id: string): Promise<void> {
 // HR ACCESS GRANTS
 // ---------------------------------------------------------------------------
 
-export type HrGrantScope = "all" | "department" | "employee";
+export type HrGrantScope = "all" | "department" | "employee" | "survey";
 
 export type HrAccessGrant = {
   id: string;
@@ -366,6 +367,18 @@ export type HrAccessGrant = {
   department_name: string | null;
   employee_id: string | null;
   employee_name: string | null;
+  survey_id: string | null;
+  survey_title: string | null;
+  note: string | null;
+  created_at: string;
+};
+
+export type HrModuleGrant = {
+  id: string;
+  grantee_id: string;
+  grantee_email: string | null;
+  grantee_name: string | null;
+  module: HrModule;
   note: string | null;
   created_at: string;
 };
@@ -379,10 +392,11 @@ export async function listHrAccessGrants(
     .from("hr_access_grants")
     .select(
       `
-      id, scope, department_id, employee_id, note, created_at,
+      id, scope, department_id, employee_id, survey_id, note, created_at,
       grantee:profiles!hr_access_grants_grantee_id_fkey ( id, email, full_name ),
       department:departments ( id, name ),
-      employee:hr_employees ( id, full_name )
+      employee:hr_employees ( id, full_name ),
+      survey:hr_surveys ( id, title )
       `,
     )
     .order("created_at", { ascending: false });
@@ -400,6 +414,8 @@ export async function listHrAccessGrants(
     department_name: r.department?.name ?? null,
     employee_id: r.employee?.id ?? null,
     employee_name: r.employee?.full_name ?? null,
+    survey_id: r.survey?.id ?? null,
+    survey_title: r.survey?.title ?? null,
     note: r.note,
     created_at: r.created_at,
   }));
@@ -410,6 +426,7 @@ export async function grantHrAccess(input: {
   scope: HrGrantScope;
   department_id?: string;
   employee_id?: string;
+  survey_id?: string;
   note?: string;
 }): Promise<void> {
   const superId = await requireSuperAdmin();
@@ -417,12 +434,15 @@ export async function grantHrAccess(input: {
     throw new Error("department_id is required for department scope");
   if (input.scope === "employee" && !input.employee_id)
     throw new Error("employee_id is required for employee scope");
+  if (input.scope === "survey" && !input.survey_id)
+    throw new Error("survey_id is required for survey scope");
   const supabase = await db();
   const { error } = await supabase.from("hr_access_grants").insert({
     grantee_id: input.grantee_id,
     scope: input.scope,
     department_id: input.scope === "department" ? input.department_id : null,
     employee_id: input.scope === "employee" ? input.employee_id : null,
+    survey_id: input.scope === "survey" ? input.survey_id : null,
     granted_by: superId,
     note: input.note?.trim() || null,
   });
@@ -441,4 +461,155 @@ export async function revokeHrAccess(grantId: string): Promise<void> {
   if (error) throw error;
   revalidatePath("/settings/users");
   revalidatePath("/settings/hr-access");
+}
+
+// ---------------------------------------------------------------------------
+// HR MODULE GRANTS
+// ---------------------------------------------------------------------------
+
+export async function listHrModuleGrants(
+  opts?: { grantee_id?: string },
+): Promise<HrModuleGrant[]> {
+  await requireSuperAdmin();
+  const supabase = await db();
+  let q = supabase
+    .from("hr_module_grants")
+    .select(
+      `
+      id, module, note, created_at,
+      grantee:profiles!hr_module_grants_grantee_id_fkey ( id, email, full_name )
+      `,
+    )
+    .order("module", { ascending: true });
+  if (opts?.grantee_id) q = q.eq("grantee_id", opts.grantee_id);
+  const { data, error } = await q;
+  if (error) throw error;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((data ?? []) as any[]).map((r) => ({
+    id: r.id,
+    grantee_id: r.grantee?.id ?? null,
+    grantee_email: r.grantee?.email ?? null,
+    grantee_name: r.grantee?.full_name ?? null,
+    module: r.module,
+    note: r.note,
+    created_at: r.created_at,
+  }));
+}
+
+export async function grantHrModule(input: {
+  grantee_id: string;
+  module: HrModule;
+  note?: string;
+}): Promise<void> {
+  const superId = await requireSuperAdmin();
+  if (!(HR_MODULES as readonly string[]).includes(input.module)) {
+    throw new Error(`Unknown HR module: ${input.module}`);
+  }
+  const supabase = await db();
+  // Idempotent — unique (grantee_id, module).
+  const { error } = await supabase.from("hr_module_grants").upsert(
+    {
+      grantee_id: input.grantee_id,
+      module: input.module,
+      granted_by: superId,
+      note: input.note?.trim() || null,
+    },
+    { onConflict: "grantee_id,module" },
+  );
+  if (error) throw error;
+  revalidatePath("/settings/users");
+  revalidatePath("/settings/hr-access");
+}
+
+export async function revokeHrModule(grantId: string): Promise<void> {
+  await requireSuperAdmin();
+  const supabase = await db();
+  const { error } = await supabase
+    .from("hr_module_grants")
+    .delete()
+    .eq("id", grantId);
+  if (error) throw error;
+  revalidatePath("/settings/users");
+  revalidatePath("/settings/hr-access");
+}
+
+/**
+ * Bulk set the modules a user should have access to. Inserts missing
+ * modules and removes ones not in the list. No-op for super_admins
+ * (they always have everything).
+ */
+export async function setHrModulesForUser(input: {
+  grantee_id: string;
+  modules: HrModule[];
+}): Promise<void> {
+  const superId = await requireSuperAdmin();
+  const supabase = await db();
+  const wanted = new Set<HrModule>(input.modules);
+  for (const m of wanted) {
+    if (!(HR_MODULES as readonly string[]).includes(m)) {
+      throw new Error(`Unknown HR module: ${m}`);
+    }
+  }
+  const { data: existing } = await supabase
+    .from("hr_module_grants")
+    .select("id, module")
+    .eq("grantee_id", input.grantee_id);
+  const existingMods = new Set<string>();
+  const idByModule = new Map<string, string>();
+  for (const r of (existing ?? []) as { id: string; module: string }[]) {
+    existingMods.add(r.module);
+    idByModule.set(r.module, r.id);
+  }
+
+  const toInsert = Array.from(wanted)
+    .filter((m) => !existingMods.has(m))
+    .map((m) => ({
+      grantee_id: input.grantee_id,
+      module: m,
+      granted_by: superId,
+    }));
+  const toDeleteIds: string[] = [];
+  for (const m of existingMods) {
+    if (!wanted.has(m as HrModule)) {
+      const id = idByModule.get(m);
+      if (id) toDeleteIds.push(id);
+    }
+  }
+
+  if (toInsert.length > 0) {
+    const { error } = await supabase.from("hr_module_grants").insert(toInsert);
+    if (error) throw error;
+  }
+  if (toDeleteIds.length > 0) {
+    const { error } = await supabase
+      .from("hr_module_grants")
+      .delete()
+      .in("id", toDeleteIds);
+    if (error) throw error;
+  }
+  revalidatePath("/settings/users");
+  revalidatePath("/settings/hr-access");
+}
+
+// ---------------------------------------------------------------------------
+// Surveys (slim list for the grant editor)
+// ---------------------------------------------------------------------------
+
+export type AdminSurveyOption = {
+  id: string;
+  title: string;
+  status: string;
+  slug: string;
+};
+
+export async function listSurveysForAdmin(): Promise<AdminSurveyOption[]> {
+  await requireSuperAdmin();
+  const supabase = await db();
+  const { data, error } = await supabase
+    .from("hr_surveys")
+    .select("id, title, status, slug")
+    .order("status", { ascending: true })
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as AdminSurveyOption[];
 }

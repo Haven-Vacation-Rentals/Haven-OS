@@ -20,6 +20,8 @@ import { createClient } from "@/lib/supabase/server";
 
 export type HavenUserRole = "user" | "admin" | "super_admin";
 
+import { HR_MODULES, type HrModule, HR_MODULE_LABELS } from "./hr-modules";
+
 export type CurrentPermissions = {
   user_id: string | null;
   email: string | null;
@@ -68,14 +70,23 @@ export const getPermissions = cache(async (): Promise<CurrentPermissions> => {
     (profile?.role as HavenUserRole | undefined) ?? "user";
 
   // Do we have any HR grants? (Super admins short-circuit.)
+  // A user counts as "has HR access" if they have any access grant
+  // (department/employee/survey scope) OR any module grant.
   let hasHr = role === "super_admin";
   if (!hasHr) {
-    const { data: grants } = await supabase
-      .from("hr_access_grants")
-      .select("id")
-      .eq("grantee_id", user.id)
-      .limit(1);
-    hasHr = (grants?.length ?? 0) > 0;
+    const [{ data: grants }, { data: modules }] = await Promise.all([
+      supabase
+        .from("hr_access_grants")
+        .select("id")
+        .eq("grantee_id", user.id)
+        .limit(1),
+      supabase
+        .from("hr_module_grants")
+        .select("id")
+        .eq("grantee_id", user.id)
+        .limit(1),
+    ]);
+    hasHr = (grants?.length ?? 0) > 0 || (modules?.length ?? 0) > 0;
   }
 
   return {
@@ -234,6 +245,108 @@ export async function requireEmployeeAccess(
   if (!ok)
     throw new Error(
       "You don't have access to this employee's HR record",
+    );
+  return userId;
+}
+
+// ---------------------------------------------------------------------------
+// HR module / per-survey access
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the set of HR modules the current user can access.
+ * Super admins always get every module.
+ */
+export async function userHrModules(): Promise<HrModule[]> {
+  const perm = await getPermissions();
+  if (!perm.user_id) return [];
+  if (perm.is_super_admin) return [...HR_MODULES];
+  const supabase = await db();
+  const { data } = await supabase
+    .from("hr_module_grants")
+    .select("module")
+    .eq("grantee_id", perm.user_id);
+  const set = new Set<HrModule>();
+  for (const r of (data ?? []) as { module: string }[]) {
+    if ((HR_MODULES as readonly string[]).includes(r.module)) {
+      set.add(r.module as HrModule);
+    }
+  }
+  return Array.from(set);
+}
+
+export async function canAccessHrModuleByName(
+  module: HrModule,
+): Promise<boolean> {
+  const perm = await getPermissions();
+  if (!perm.user_id) return false;
+  if (perm.is_super_admin) return true;
+  const supabase = await db();
+  const { data } = await supabase.rpc("user_has_hr_module_access", {
+    p_user_id: perm.user_id,
+    p_module: module,
+  });
+  return !!data;
+}
+
+export async function requireHrModule(module: HrModule): Promise<string> {
+  const userId = await requireSignedIn();
+  const ok = await canAccessHrModuleByName(module);
+  if (!ok)
+    throw new Error(
+      `HR ${HR_MODULE_LABELS[module]} access required — ask a super admin to grant you the ${HR_MODULE_LABELS[module]} module.`,
+    );
+  return userId;
+}
+
+/**
+ * Return the set of survey ids the current user can read/manage.
+ * Returns `null` to mean "no filter / all surveys" (super admin or
+ * surveys-module grant). An empty array means no access at all.
+ */
+export async function visibleSurveyIds(): Promise<string[] | null> {
+  const perm = await getPermissions();
+  if (!perm.user_id) return [];
+  if (perm.is_super_admin) return null;
+  const supabase = await db();
+  // Module grant gives access to every survey.
+  const { data: mg } = await supabase
+    .from("hr_module_grants")
+    .select("module")
+    .eq("grantee_id", perm.user_id)
+    .eq("module", "surveys")
+    .limit(1);
+  if ((mg?.length ?? 0) > 0) return null;
+  const { data: g } = await supabase
+    .from("hr_access_grants")
+    .select("survey_id")
+    .eq("grantee_id", perm.user_id)
+    .eq("scope", "survey");
+  const ids = new Set<string>();
+  for (const r of (g ?? []) as { survey_id: string | null }[]) {
+    if (r.survey_id) ids.add(r.survey_id);
+  }
+  return Array.from(ids);
+}
+
+export async function canAccessSurvey(surveyId: string): Promise<boolean> {
+  const perm = await getPermissions();
+  if (!perm.user_id) return false;
+  if (perm.is_super_admin) return true;
+  const supabase = await db();
+  const { data } = await supabase.rpc("user_has_hr_survey_access", {
+    p_user_id: perm.user_id,
+    p_survey_id: surveyId,
+  });
+  return !!data;
+}
+
+export async function requireSurveyAccess(surveyId: string): Promise<string> {
+  const userId = await requireSignedIn();
+  const ok = await canAccessSurvey(surveyId);
+  if (!ok)
+    throw new Error(
+      "You don't have access to this survey",
     );
   return userId;
 }
