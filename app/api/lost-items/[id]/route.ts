@@ -86,7 +86,21 @@ export async function GET(
   if (error || !data) {
     return NextResponse.json({ error: "Case not found" }, { status: 404 });
   }
-  return NextResponse.json({ case: data });
+
+  // Embed the event timeline so external partners (e.g. Tendwell) can render
+  // comments without exposing the full `lost_item_events` table publicly.
+  // Capped at 500 to keep the payload bounded; ordered oldest-first to match
+  // chat conventions.
+  const { data: events } = await supabase
+    .from("lost_item_events")
+    .select(
+      "id, case_id, event_type, body, from_value, to_value, actor_label, created_at",
+    )
+    .eq("case_id", realId)
+    .order("created_at", { ascending: true })
+    .limit(500);
+
+  return NextResponse.json({ case: { ...data, events: events ?? [] } });
 }
 
 type PatchBody = {
