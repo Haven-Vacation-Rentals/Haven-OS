@@ -42,8 +42,12 @@ import {
   GripVertical,
   Slack,
   MessageCircle,
+  Link2,
+  Check,
+  ExternalLink,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { canonicalUrl } from "@/lib/canonical-url";
 import {
   Dialog,
   DialogContent,
@@ -208,6 +212,7 @@ export function LostItemsDirectory({
             ]}
           />
           <ViewToggle value={view} onChange={setView} />
+          <SharePublicLinkButton />
           <button
             type="button"
             onClick={() => setShowForm(true)}
@@ -272,6 +277,51 @@ export function LostItemsDirectory({
           />
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Share public intake link
+// ---------------------------------------------------------------------------
+
+function SharePublicLinkButton() {
+  const [copied, setCopied] = useState(false);
+  const publicUrl = useMemo(() => canonicalUrl("/lost-items/intake"), []);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      setCopied(true);
+      toast.success("Public intake link copied");
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      toast.error("Couldn't copy. Try again.");
+    }
+  };
+  return (
+    <div className="inline-flex items-center rounded-md border border-border bg-surface text-xs">
+      <button
+        type="button"
+        onClick={copy}
+        title={publicUrl}
+        className="inline-flex items-center gap-1.5 px-2.5 py-2 font-medium text-foreground hover:bg-surface-alt/50"
+      >
+        {copied ? (
+          <Check className="h-3.5 w-3.5 text-emerald-600" />
+        ) : (
+          <Link2 className="h-3.5 w-3.5" />
+        )}
+        {copied ? "Copied" : "Copy public form link"}
+      </button>
+      <Link
+        href={"/lost-items/intake" as never}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="border-l border-border px-2 py-2 text-muted-foreground hover:text-foreground"
+        title="Open public intake form in a new tab"
+      >
+        <ExternalLink className="h-3.5 w-3.5" />
+      </Link>
     </div>
   );
 }

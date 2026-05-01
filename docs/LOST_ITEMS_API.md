@@ -125,3 +125,30 @@ Cases expose two stable IDs:
 For future bi-directional sync, partners should also store
 `(external_source, external_id, external_url)` — Haven uses these to
 resolve their identifiers back to our cases.
+
+## Public intake form (no API key)
+
+For Haven team members and trusted partners who don't have OS access,
+there's a branded public form at:
+
+```
+https://www.havenvros.com/lost-items/intake
+```
+
+(or the equivalent path on whatever `NEXT_PUBLIC_APP_URL` resolves to).
+
+- No authentication. Inherits the marketing layout — no sidebar, no
+  app shell.
+- Backed by `POST /api/public/lost-items/intake`. Submissions create a
+  case with `status = "pending_pickup"`, `source = "internal_form"`,
+  and `external_source = "public_intake"` for audit.
+- Property selection uses `/api/public/lost-items/properties?q=…`,
+  capped at 12 results, returning `id` + `name` only — no addresses or
+  operational fields. Free-text property names are also accepted.
+- Abuse mitigations: honeypot field (`website`), per-IP sliding-window
+  rate limit on both endpoints. No CAPTCHA.
+- Operations > Lost Items has a **Copy public form link** button in
+  the toolbar so the team can share the URL.
+
+The legacy `POST /api/lost-items` API-key endpoint and the in-app
+**New case** modal are unchanged.

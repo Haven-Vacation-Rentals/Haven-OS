@@ -87,6 +87,7 @@ Guest lost-and-found tracker at `/operations/lost-items`. Kanban built on `@dnd-
 - **Linked context:** Slack thread URL + Conversation URL fields per case.
 - **First-class comments** on each case.
 - **External API:** `/api/lost-items` endpoints, protected by `HAVEN_LOST_ITEMS_API_KEY` (header `x-haven-api-key: <key>`). Used by cleaning vendors and third-party trackers to create/update cases.
+- **Public intake form:** branded, no-login form at `/lost-items/intake` (custom domain, e.g. `https://www.havenvros.com/lost-items/intake`) for team members and trusted partners. Posts to `/api/public/lost-items/intake` (honeypot + per-IP rate limit). Cases land as `pending_pickup` and are tagged `external_source = "public_intake"`. Operations > Lost Items has a "Copy public form link" button in the toolbar.
 - See [`docs/LOST_ITEMS_API.md`](docs/LOST_ITEMS_API.md).
 
 ---
