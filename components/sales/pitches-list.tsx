@@ -21,6 +21,8 @@ import {
   Check,
   Megaphone,
   ImageIcon,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -29,6 +31,7 @@ import {
   archivePitch,
   restorePitch,
   deletePitch,
+  refreshPitchPhotos,
   type SalesPitch,
 } from "@/lib/sales/actions";
 import { CreatePitchDialog } from "@/components/sales/create-pitch-dialog";
@@ -209,11 +212,49 @@ function PitchRow({
     });
   };
 
+  const handleRefreshPhotos = () => {
+    startTransition(async () => {
+      const r = await refreshPitchPhotos(pitch.id);
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success("Photos refreshed from listing");
+      onChanged();
+    });
+  };
+
+  // A pitch "needs photos" when nothing in the DB looks like a real
+  // listing photo — i.e. it'll fall back to a generic Haven cabin shot
+  // on the public page. The exact same sanity check the public template
+  // uses, kept in sync below.
+  const realHero = pitchHasUsablePhoto(pitch.hero_image_url);
+  const realGalleryCount = (pitch.gallery ?? []).filter((g) =>
+    pitchHasUsablePhoto(g.url),
+  ).length;
+  const needsPhotos = !realHero && realGalleryCount === 0;
+
   return (
     <tr className="border-t border-border hover:bg-surface-alt/30">
       <td className="px-4 py-3">
-        <div className="font-semibold text-foreground">{pitch.owner_name}</div>
-        <div className="truncate text-[12px] text-muted-foreground" title={pitch.property_address}>
+        <div className="flex items-center gap-2">
+          <span className="font-semibold text-foreground">
+            {pitch.owner_name}
+          </span>
+          {needsPhotos ? (
+            <span
+              title="No real listing photos on this pitch — public page is using generic Smoky Mountain fallbacks. Refresh from listing or paste photo URLs."
+              className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700"
+            >
+              <AlertTriangle className="h-3 w-3" />
+              Needs photos
+            </span>
+          ) : null}
+        </div>
+        <div
+          className="truncate text-[12px] text-muted-foreground"
+          title={pitch.property_address}
+        >
           {pitch.property_address}
         </div>
       </td>
@@ -264,6 +305,15 @@ function PitchRow({
           >
             <ImageIcon className="h-3.5 w-3.5" />
           </IconAction>
+          {pitch.listing_url ? (
+            <IconAction
+              title="Refresh photos from listing"
+              onClick={handleRefreshPhotos}
+              disabled={pending}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </IconAction>
+          ) : null}
           <a
             href={publicUrl}
             target="_blank"
@@ -332,6 +382,49 @@ function IconAction({
       {children}
     </button>
   );
+}
+
+/**
+ * Mirror of pitch-template's `looksLikePropertyPhoto` so the admin row
+ * can warn when a pitch will fall back to generic Smoky Mountain photos
+ * on the public page. Keep this in sync with that helper.
+ */
+function pitchHasUsablePhoto(u: string | null | undefined): boolean {
+  if (!u) return false;
+  const url = u.toLowerCase();
+  if (!/^https?:\/\//.test(url)) return false;
+  if (url.includes("havenvacationrentals.com")) return true;
+  const REJECT = [
+    "images.unsplash.com",
+    "unsplash.com",
+    "pixabay.com",
+    "pexels.com",
+    "gettyimages.com",
+    "shutterstock.com",
+    "istockphoto.com",
+    "airbnbplatformassets",
+    "airbnb-platform-assets",
+    "/avatar",
+    "/avatars/",
+    "/profile",
+    "/og-default",
+    "/og_default",
+    "/social-share",
+    "/social_share",
+    "/category-",
+    "/categories/",
+    "/people-",
+  ];
+  for (const t of REJECT) if (url.includes(t)) return false;
+  if (url.includes("a0.muscache.com/im/pictures/")) {
+    return (
+      /\/prohost-api\/hosting-/.test(url) ||
+      /\/miso\/hosting-/.test(url) ||
+      /\/hosting-\d/.test(url) ||
+      /\/hosting\//.test(url)
+    );
+  }
+  return true;
 }
 
 function EmptyState({

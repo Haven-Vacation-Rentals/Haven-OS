@@ -139,15 +139,7 @@ export async function extractListing(url: string): Promise<ExtractedListing> {
     if (!raw) continue;
     const u = stripParams(raw);
     if (merged.has(u)) continue;
-    // Filter out obvious non-property photos (Airbnb UI, review icons, etc).
-    // Other platform CDN URLs are kept as-is — it's better to show them
-    // than fall back to a generic Smoky Mountain photo.
-    if (
-      /a0\.muscache\.com\/im\/pictures\//i.test(u) &&
-      !isAirbnbPropertyPhoto(u)
-    ) {
-      continue;
-    }
+    if (!isLikelyPropertyPhoto(u, source)) continue;
     if (out.hero_image_url && u === stripParams(out.hero_image_url)) continue;
     merged.add(u);
     galleryFinal.push(u);
@@ -155,9 +147,12 @@ export async function extractListing(url: string): Promise<ExtractedListing> {
   }
   out.gallery = galleryFinal;
 
-  // If the hero we picked was a platform asset rather than a real property
-  // photo, swap it for the first real gallery photo.
-  if (out.hero_image_url && isAirbnbPlatformAsset(out.hero_image_url)) {
+  // If the hero we picked is anything but a real property photo (platform
+  // asset, social-share generic, "Find a place" Airbnb category cover,
+  // unsplash stock, etc.), swap it for the first real gallery photo. If
+  // there's nothing real either, blank it out so the public page falls
+  // back to a Haven cabin shot rather than showing a stranger's face.
+  if (out.hero_image_url && !isLikelyPropertyPhoto(out.hero_image_url, source)) {
     out.hero_image_url = galleryFinal[0] ?? undefined;
   }
 
@@ -282,6 +277,92 @@ function isAirbnbPropertyPhoto(u: string): boolean {
     /\/Hosting-\d/i.test(u) ||
     /\/hosting\//i.test(u)
   );
+}
+
+/**
+ * Stricter "is this a real property photo?" check, applied to anything we
+ * pull off a listing page (not just Airbnb muscache URLs). Filters out
+ * stock photos, social-share covers, avatars, OG defaults, and other
+ * "person/lifestyle" hero rectangles that have shown up as Airbnb
+ * og:image fallbacks in the past.
+ *
+ * Rule of thumb: if we can't confidently say this *is* a listing photo,
+ * we drop it and fall back to a curated Haven cabin shot.
+ */
+export function isLikelyPropertyPhoto(
+  u: string,
+  source: ListingSource,
+): boolean {
+  if (!u || typeof u !== "string") return false;
+  const url = stripQuery(u).toLowerCase();
+  if (!/^https?:\/\//.test(url)) return false;
+
+  // Hard-rejects: obvious stock / non-property imagery anywhere it shows up.
+  const REJECT_HOSTS = [
+    "images.unsplash.com",
+    "unsplash.com",
+    "pixabay.com",
+    "pexels.com",
+    "gettyimages.com",
+    "shutterstock.com",
+    "istockphoto.com",
+  ];
+  for (const h of REJECT_HOSTS) if (url.includes(h)) return false;
+
+  // Hard-reject obvious non-listing keywords in the URL path itself.
+  const REJECT_TOKENS = [
+    "/avatar",
+    "/avatars/",
+    "/user/",
+    "/users/",
+    "/profile",
+    "/icon",
+    "/logo",
+    "/sprite",
+    "/og-default",
+    "/og_default",
+    "/default-",
+    "/social-share",
+    "/social_share",
+    "airbnbplatformassets",
+    "airbnb-platform-assets",
+    "/category-",
+    "/categories/",
+    "/people-",
+    "/host-",
+  ];
+  for (const t of REJECT_TOKENS) if (url.includes(t)) return false;
+
+  // Source-specific allow-lists. If a URL looks like a real property photo
+  // for the source, accept it.
+  if (source === "airbnb") {
+    if (/a0\.muscache\.com\/im\/pictures\//.test(url)) {
+      return isAirbnbPropertyPhoto(u);
+    }
+    // Anything off-platform from an Airbnb page is almost certainly
+    // generic — drop it.
+    return false;
+  }
+  if (source === "vrbo") {
+    return (
+      /\/odis\.homeaway\.com\//.test(url) ||
+      /\/vrbo\.com\/.*\.(?:jpe?g|png|webp)/i.test(url) ||
+      /\/expedia/.test(url)
+    );
+  }
+  if (source === "booking") {
+    return (
+      /cf\.bstatic\.com\/xdata/.test(url) ||
+      /booking\.com\/.+\/(?:hotel|property)/.test(url)
+    );
+  }
+  if (source === "zillow") {
+    return /photos\.zillowstatic\.com|p\.zhcdn|zillowstatic\.com/.test(url);
+  }
+
+  // Generic ('other') sources: accept anything that survived the rejects
+  // and looks like a normal image URL on a property-style host.
+  return /\.(?:jpe?g|png|webp|avif)(?:$|[/?#])/.test(url);
 }
 
 function isAirbnbPlatformAsset(u: string): boolean {

@@ -394,6 +394,63 @@ export async function updatePitchOrThrow(
 }
 
 // ---------------------------------------------------------------------------
+// REFRESH PHOTOS — re-run the extractor for an existing pitch
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-run the listing extractor for a pitch and overwrite its hero/gallery
+ * with whatever the page returns now. Useful when the original create-time
+ * fetch failed (Airbnb 403, etc.) or when the listing has been updated
+ * with new photos. No-op if the pitch has no listing_url on file.
+ *
+ * Returns ok with the updated pitch on success, or ok:false with a
+ * human-readable reason. Does not throw — always returns Result<...>.
+ */
+export async function refreshPitchPhotos(
+  id: string,
+): Promise<Result<SalesPitch>> {
+  try {
+    await requireAdminOrAbove();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  if (!id) return { ok: false, error: "Pitch id is required." };
+
+  const supabase = await db();
+  const { data: row, error: readErr } = await supabase
+    .from("sales_pitches")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (readErr || !row) {
+    return { ok: false, error: readErr?.message ?? "Pitch not found." };
+  }
+  const listingUrl = (row.listing_url as string | null)?.trim();
+  if (!listingUrl) {
+    return {
+      ok: false,
+      error:
+        "No listing URL on file. Use Edit photos to paste hero/gallery URLs manually.",
+    };
+  }
+
+  const extracted = await extractListing(listingUrl);
+  if (!extracted.hero_image_url && (extracted.gallery ?? []).length === 0) {
+    return {
+      ok: false,
+      error:
+        extracted.reason ??
+        "Couldn't pull any photos from that listing right now (Airbnb often blocks bots). Try again later or paste photo URLs manually.",
+    };
+  }
+
+  return updatePitchImpl(id, {
+    hero_image_url: extracted.hero_image_url,
+    gallery: (extracted.gallery ?? []).map((url) => ({ url })),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // ARCHIVE / RESTORE
 // ---------------------------------------------------------------------------
 

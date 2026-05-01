@@ -56,6 +56,61 @@ function pickFallbackHero(slug: string): string {
   return HAVEN_HERO_FALLBACKS[h % HAVEN_HERO_FALLBACKS.length];
 }
 
+/**
+ * Last line of defense against a pitch row that has a "stock person /
+ * lifestyle / Airbnb category cover" URL stored as its hero. Mirrors the
+ * server-side extractor allow/deny list but works without source context,
+ * since by the time we hit the public template we no longer have the
+ * source-detection signal.
+ *
+ * Returns false for: known stock CDNs, Airbnb platform assets, host
+ * avatars, OG defaults. Returns true for: Haven cabin URLs, real Airbnb
+ * listing CDN paths, generic image URLs that don't trip a reject.
+ */
+function looksLikePropertyPhoto(u: string): boolean {
+  if (!u) return false;
+  const url = u.toLowerCase();
+  if (!/^https?:\/\//.test(url)) return false;
+
+  // Always trust Haven's own CDN.
+  if (url.includes("havenvacationrentals.com")) return true;
+
+  const REJECT = [
+    "images.unsplash.com",
+    "unsplash.com",
+    "pixabay.com",
+    "pexels.com",
+    "gettyimages.com",
+    "shutterstock.com",
+    "istockphoto.com",
+    "airbnbplatformassets",
+    "airbnb-platform-assets",
+    "/avatar",
+    "/avatars/",
+    "/profile",
+    "/og-default",
+    "/og_default",
+    "/social-share",
+    "/social_share",
+    "/category-",
+    "/categories/",
+    "/people-",
+  ];
+  for (const t of REJECT) if (url.includes(t)) return false;
+
+  // Airbnb muscache: only accept if it's on the real listing-photo path.
+  if (url.includes("a0.muscache.com/im/pictures/")) {
+    return (
+      /\/prohost-api\/hosting-/.test(url) ||
+      /\/miso\/hosting-/.test(url) ||
+      /\/hosting-\d/.test(url) ||
+      /\/hosting\//.test(url)
+    );
+  }
+
+  return true;
+}
+
 // 3 most-on-brand blog posts — Haven Standard always first.
 const BLOG_LINKS: { url: string; title: string; eyebrow: string }[] = [
   {
@@ -78,7 +133,25 @@ const BLOG_LINKS: { url: string; title: string; eyebrow: string }[] = [
 export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
   const ownerFirstName = pitch.owner_name.split(" ")[0] || pitch.owner_name;
   const fallbackHero = pickFallbackHero(pitch.slug);
-  const heroImage = pitch.hero_image_url || fallbackHero;
+
+  // Sanitize whatever's in the DB. A pitch may have been created before the
+  // extractor was hardened against non-property OG fallbacks (Airbnb
+  // category covers, lifestyle stock, etc.), so we defensively re-filter
+  // here. If a hero/gallery URL doesn't look like a real property photo,
+  // we treat it as if it weren't there and fall back to Haven cabin shots.
+  const storedHero =
+    pitch.hero_image_url && looksLikePropertyPhoto(pitch.hero_image_url)
+      ? pitch.hero_image_url
+      : null;
+  const galleryUrls = (pitch.gallery ?? [])
+    .map((g) => g.url)
+    .filter(
+      (u): u is string =>
+        typeof u === "string" && u.length > 0 && looksLikePropertyPhoto(u),
+    );
+
+  const hasListingPhotos = Boolean(storedHero) || galleryUrls.length > 0;
+  const heroImage = storedHero || fallbackHero;
 
   // Build the "Your Property" photo set.
   //
@@ -88,12 +161,6 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
   //      cabin in next to the owner's real property — that looks fake.
   //   2. If the pitch has nothing from a listing, fall back to a curated
   //      Smoky Mountain set so the page still feels alive instead of grey.
-  const galleryUrls = (pitch.gallery ?? [])
-    .map((g) => g.url)
-    .filter((u): u is string => typeof u === "string" && u.length > 0);
-  const hasListingPhotos =
-    Boolean(pitch.hero_image_url) || galleryUrls.length > 0;
-
   const propertyPhotos: string[] = (() => {
     const seen = new Set<string>();
     const photos: string[] = [];
@@ -105,7 +172,7 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
 
     if (hasListingPhotos) {
       // Only listing-derived photos. Hero first, then the gallery.
-      if (pitch.hero_image_url) push(pitch.hero_image_url);
+      if (storedHero) push(storedHero);
       for (const u of galleryUrls) {
         if (photos.length >= 4) break;
         push(u);
