@@ -15,6 +15,7 @@ import { CheckCircle2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 type PropertyOption = { id: string; name: string };
+type AssigneeOption = { id: string; name: string };
 
 type Submitted = {
   case_number: string;
@@ -41,11 +42,32 @@ export function LostItemPublicIntakeForm() {
   const [slackThreadUrl, setSlackThreadUrl] = useState("");
   const [conversationUrl, setConversationUrl] = useState("");
   const [followUpDate, setFollowUpDate] = useState("");
+  const [assignedTo, setAssignedTo] = useState("");
+  const [assigneeOptions, setAssigneeOptions] = useState<AssigneeOption[]>([]);
   const [cleaningVendor, setCleaningVendor] = useState("");
   const [notes, setNotes] = useState("");
   const [website, setWebsite] = useState("");
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/public/lost-items/assignees", {
+          method: "GET",
+        });
+        if (!res.ok) return;
+        const json = (await res.json()) as { assignees?: AssigneeOption[] };
+        if (!cancelled) setAssigneeOptions(json.assignees ?? []);
+      } catch {
+        // Silent — assignee picker is optional.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -97,6 +119,7 @@ export function LostItemPublicIntakeForm() {
             slack_thread_url: slackThreadUrl.trim() || null,
             conversation_url: conversationUrl.trim() || null,
             follow_up_date: followUpDate || null,
+            assigned_to: assignedTo || null,
             cleaning_vendor: cleaningVendor.trim() || null,
             notes: notes.trim() || null,
             website,
@@ -146,6 +169,7 @@ export function LostItemPublicIntakeForm() {
             setSlackThreadUrl("");
             setConversationUrl("");
             setFollowUpDate("");
+            setAssignedTo("");
             setCleaningVendor("");
             setNotes("");
           }}
@@ -283,13 +307,27 @@ export function LostItemPublicIntakeForm() {
         </Field>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-3">
         <Field label="Follow-up date">
           <Input
             type="date"
             value={followUpDate}
             onChange={(e) => setFollowUpDate(e.target.value)}
           />
+        </Field>
+        <Field label="Assign to">
+          <select
+            value={assignedTo}
+            onChange={(e) => setAssignedTo(e.target.value)}
+            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm focus:outline-none focus:shadow-ring"
+          >
+            <option value="">Unassigned</option>
+            {assigneeOptions.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
         </Field>
         <Field label="Cleaning vendor">
           <Input

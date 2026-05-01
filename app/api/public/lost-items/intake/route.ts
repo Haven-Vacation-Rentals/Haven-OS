@@ -41,6 +41,8 @@ type IntakeBody = {
   website?: string;
   /** Optional reporter context, recorded in notes for audit. */
   reporter_name?: string;
+  /** Optional assignee (profile id). Validated against profiles before use. */
+  assigned_to?: string | null;
 };
 
 const MAX_TEXT = 2000;
@@ -156,6 +158,25 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Validate optional assignee against the profiles table so this
+  // endpoint cannot be used to set arbitrary IDs.
+  let assignedTo: string | null = null;
+  const requestedAssignee = trimOrNull(body.assigned_to, MAX_SHORT);
+  if (requestedAssignee) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", requestedAssignee)
+      .maybeSingle();
+    if (!profile) {
+      return NextResponse.json(
+        { error: "Selected assignee is not valid" },
+        { status: 400 },
+      );
+    }
+    assignedTo = profile.id as string;
+  }
+
   const result = await createCaseRaw(
     {
       item_description: description,
@@ -169,6 +190,7 @@ export async function POST(req: NextRequest) {
       conversation_url: convoUrl,
       cleaning_vendor: trimOrNull(body.cleaning_vendor, MAX_SHORT),
       follow_up_date: followUp,
+      assigned_to: assignedTo,
       status: "pending_pickup",
       source: "internal_form",
       external_source: "public_intake",
