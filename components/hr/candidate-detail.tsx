@@ -10,6 +10,7 @@ import {
   Pencil,
   Trash2,
   MessageSquare,
+  Video,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,10 +26,13 @@ import {
   CANDIDATE_STAGE_LABELS,
   EMPLOYMENT_TYPE_LABELS,
   ROLE_STATUS_LABELS,
+  type ApplicationQuestionType,
   type CandidateStage,
   type DbCandidate,
+  type DbCandidateAnswer,
   type DbCandidateNote,
   type DbRole,
+  type DbRoleQuestion,
   type EmploymentType,
   type RoleStatus,
 } from "@/lib/hr/types";
@@ -49,10 +53,14 @@ export function CandidateDetail({
   candidate,
   role,
   notes,
+  questions = [],
+  answers = [],
 }: {
   candidate: DbCandidate;
   role: DbRole;
   notes: DbCandidateNote[];
+  questions?: DbRoleQuestion[];
+  answers?: DbCandidateAnswer[];
 }) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
@@ -161,6 +169,17 @@ export function CandidateDetail({
                 Resume
               </a>
             )}
+            {candidate.loom_url && (
+              <a
+                href={candidate.loom_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-accent hover:brightness-90"
+              >
+                <Video className="h-3.5 w-3.5" />
+                Video intro
+              </a>
+            )}
           </div>
 
           {/* Timestamps */}
@@ -197,6 +216,9 @@ export function CandidateDetail({
             )}
           </div>
         )}
+
+        {/* Application question answers */}
+        <ApplicationAnswers questions={questions} answers={answers} />
 
         {/* Notes thread */}
         <NotesThread
@@ -388,6 +410,132 @@ function NotesThread({
           </Button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function ApplicationAnswers({
+  questions,
+  answers,
+}: {
+  questions: DbRoleQuestion[];
+  answers: DbCandidateAnswer[];
+}) {
+  if (!questions.length && !answers.length) return null;
+
+  // Build a map of question_id -> answer for fast lookup, then walk
+  // questions in defined order. Include any answers whose question is gone
+  // (defensive — shouldn't happen with the cascade).
+  const byQ = new Map(answers.map((a) => [a.question_id, a]));
+  const orphaned = answers.filter(
+    (a) => !questions.some((q) => q.id === a.question_id),
+  );
+
+  const rows = questions
+    .map((q) => ({ question: q, answer: byQ.get(q.id) }))
+    .filter((r) => r.answer || !r.question.archived_at);
+
+  if (rows.length === 0 && orphaned.length === 0) return null;
+
+  return (
+    <div className="haven-card flex flex-col gap-3 p-5">
+      <div>
+        <h3 className="font-heading text-[14px] font-bold">Application answers</h3>
+        <p className="text-[12px] text-muted-foreground">
+          Custom questions submitted with this application.
+        </p>
+      </div>
+      <div className="flex flex-col gap-3">
+        {rows.map(({ question, answer }, i) => (
+          <AnswerRow key={question.id} index={i} question={question} answer={answer} />
+        ))}
+        {orphaned.map((a, i) => (
+          <div key={a.id} className="text-[12px] text-muted-foreground">
+            <span className="font-semibold">Q{rows.length + i + 1}:</span>{" "}
+            (question removed) —{" "}
+            {a.value_text ??
+              a.value_choice ??
+              a.value_choices?.join(", ") ??
+              (a.value_number !== null ? String(a.value_number) : "—")}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AnswerRow({
+  index,
+  question,
+  answer,
+}: {
+  index: number;
+  question: DbRoleQuestion;
+  answer: DbCandidateAnswer | undefined;
+}) {
+  const t = question.question_type as ApplicationQuestionType;
+  const archived = !!question.archived_at;
+
+  const renderValue = () => {
+    if (!answer) return <span className="text-muted-foreground">— No response</span>;
+    if (t === "url") {
+      const v = answer.value_text;
+      if (!v) return <span className="text-muted-foreground">—</span>;
+      return (
+        <a
+          href={v}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="break-all text-accent hover:brightness-90"
+        >
+          {v}
+        </a>
+      );
+    }
+    if (t === "short_text" || t === "long_text") {
+      const v = answer.value_text;
+      if (!v) return <span className="text-muted-foreground">—</span>;
+      return <span className="whitespace-pre-wrap">{v}</span>;
+    }
+    if (t === "single_choice" || t === "yes_no") {
+      const v = answer.value_choice;
+      if (!v) return <span className="text-muted-foreground">—</span>;
+      return <span className="capitalize">{v}</span>;
+    }
+    if (t === "multi_choice") {
+      const v = answer.value_choices;
+      if (!v || v.length === 0) return <span className="text-muted-foreground">—</span>;
+      return <span>{v.join(", ")}</span>;
+    }
+    if (t === "rating") {
+      const n = answer.value_number;
+      if (n === null || n === undefined) return <span className="text-muted-foreground">—</span>;
+      const min = question.config.scale_min ?? 1;
+      const max = question.config.scale_max ?? 5;
+      return (
+        <span>
+          {n} <span className="text-muted-foreground">/ {max}</span>{" "}
+          <span className="text-[11px] text-muted-foreground">(scale {min}–{max})</span>
+        </span>
+      );
+    }
+    return <span className="text-muted-foreground">—</span>;
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-semibold text-muted-foreground">
+          Q{index + 1}
+        </span>
+        <span className="font-semibold text-[13px]">{question.prompt}</span>
+        {archived && (
+          <Badge tone="neutral" className="text-[10px]">
+            Archived
+          </Badge>
+        )}
+      </div>
+      <div className="text-[13px] leading-relaxed">{renderValue()}</div>
     </div>
   );
 }

@@ -19,6 +19,7 @@ import * as props from "@/lib/properties/actions";
 import * as lostItems from "@/lib/lost-items/actions";
 import * as scorecard from "@/lib/scorecard/actions";
 import * as hr from "@/lib/hr/actions";
+import * as roleQuestions from "@/lib/hr/application-questions";
 import * as surveys from "@/lib/hr/surveys";
 import type {
   QuestionType,
@@ -1442,7 +1443,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "create_candidate",
-    description: "Add a candidate to a role. HR admin only.",
+    description:
+      "Add a candidate to a role. HR admin only. Optionally accepts loom_url for a video intro.",
     input_schema: {
       type: "object",
       properties: {
@@ -1451,6 +1453,7 @@ export const TOOLS: ToolDef[] = [
         email: { type: "string" },
         phone: { type: "string" },
         resume_url: { type: "string" },
+        loom_url: { type: "string" },
         cover_letter: { type: "string" },
         source: { type: "string" },
         stage: { type: "string" },
@@ -1465,6 +1468,7 @@ export const TOOLS: ToolDef[] = [
         email: s(input.email),
         phone: s(input.phone),
         resume_url: s(input.resume_url),
+        loom_url: s(input.loom_url),
         cover_letter: s(input.cover_letter),
         source: s(input.source),
         stage: s(input.stage),
@@ -1496,9 +1500,80 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "list_role_questions",
+    description:
+      "List custom application questions for a role (used on the public apply page). HR admin only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        role_id: { type: "string" },
+        include_archived: { type: "boolean" },
+      },
+      required: ["role_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      return roleQuestions.listRoleQuestions(s(input.role_id)!, {
+        includeArchived: input.include_archived === true,
+      });
+    },
+  },
+  {
+    name: "add_role_question",
+    description:
+      "Add a custom application question to a role. question_type is one of: short_text, long_text, url, single_choice, multi_choice, rating, yes_no. For choice types pass options as an array via config.options. HR admin only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        role_id: { type: "string" },
+        question_type: { type: "string" },
+        prompt: { type: "string" },
+        help_text: { type: "string" },
+        required: { type: "boolean" },
+        options: { type: "array", items: { type: "string" } },
+      },
+      required: ["role_id", "question_type", "prompt"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      const opts = Array.isArray(input.options)
+        ? (input.options as unknown[]).map((o) => String(o))
+        : undefined;
+      const res = await roleQuestions.addRoleQuestion({
+        role_id: s(input.role_id)!,
+        question_type: s(input.question_type) as never,
+        prompt: s(input.prompt)!,
+        help_text: s(input.help_text),
+        required: input.required === true,
+        config: opts ? { options: opts } : undefined,
+      });
+      return res;
+    },
+  },
+  {
+    name: "archive_role_question",
+    description:
+      "Soft-archive a role's application question so it stops appearing on the public apply page. Existing answers are preserved. HR admin only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        question_id: { type: "string" },
+        role_id: { type: "string" },
+      },
+      required: ["question_id", "role_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      return roleQuestions.archiveRoleQuestion(
+        s(input.question_id)!,
+        s(input.role_id)!,
+      );
+    },
+  },
+  {
     name: "get_candidate",
     description:
-      "Fetch a single candidate's full record (name, contact, stage, source, application notes, timestamps). HR admin only.",
+      "Fetch a single candidate's full record (name, contact, stage, source, application notes, timestamps, loom_url). HR admin only.",
     input_schema: {
       type: "object",
       properties: { candidate_id: { type: "string" } },
@@ -1509,6 +1584,20 @@ export const TOOLS: ToolDef[] = [
       const c = await hr.getCandidate(s(input.candidate_id)!);
       if (!c) throw new Error("Candidate not found");
       return c;
+    },
+  },
+  {
+    name: "list_candidate_answers",
+    description:
+      "List the candidate's answers to a role's custom application questions. Returns rows linked to question_id. HR admin only.",
+    input_schema: {
+      type: "object",
+      properties: { candidate_id: { type: "string" } },
+      required: ["candidate_id"],
+    },
+    execute: async (input, ctx) => {
+      await requireHr(ctx);
+      return roleQuestions.listCandidateAnswers(s(input.candidate_id)!);
     },
   },
   {

@@ -67,12 +67,75 @@ export type DbCandidate = {
   email: string | null;
   phone: string | null;
   resume_url: string | null;
+  loom_url: string | null;
   cover_letter: string;
   stage: string; // applied | screen | interview | offer | hired | rejected
   source: string; // public_form | referral | manual
   notes: string;
   created_at: string;
   updated_at: string;
+};
+
+export type ApplicationQuestionConfig = {
+  options?: string[];
+  scale_min?: number;
+  scale_max?: number;
+  scale_label_low?: string;
+  scale_label_high?: string;
+};
+
+export type DbRoleQuestion = {
+  id: string;
+  role_id: string;
+  position: number;
+  question_type: string; // short_text | long_text | url | single_choice | multi_choice | rating | yes_no
+  prompt: string;
+  help_text: string;
+  required: boolean;
+  config: ApplicationQuestionConfig;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbCandidateAnswer = {
+  id: string;
+  candidate_id: string;
+  question_id: string;
+  value_text: string | null;
+  value_choice: string | null;
+  value_choices: string[] | null;
+  value_number: number | null;
+  created_at: string;
+};
+
+export type ApplicationAnswerInput = {
+  question_id: string;
+  value_text?: string | null;
+  value_choice?: string | null;
+  value_choices?: string[] | null;
+  value_number?: number | null;
+};
+
+export const APPLICATION_QUESTION_TYPES = [
+  "short_text",
+  "long_text",
+  "url",
+  "single_choice",
+  "multi_choice",
+  "rating",
+  "yes_no",
+] as const;
+export type ApplicationQuestionType = (typeof APPLICATION_QUESTION_TYPES)[number];
+
+export const APPLICATION_QUESTION_TYPE_LABELS: Record<ApplicationQuestionType, string> = {
+  short_text: "Short text",
+  long_text: "Long text",
+  url: "URL / link",
+  single_choice: "Single choice",
+  multi_choice: "Multiple choice",
+  rating: "Rating",
+  yes_no: "Yes / No",
 };
 
 export type DbCandidateNote = {

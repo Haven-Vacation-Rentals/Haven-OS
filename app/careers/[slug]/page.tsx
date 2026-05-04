@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { getPublicRoleBySlug } from "@/lib/hr/public";
+import { getPublicRoleBySlug, getPublicRoleQuestions } from "@/lib/hr/public";
 import { EMPLOYMENT_TYPE_LABELS, type EmploymentType } from "@/lib/hr/types";
 import { renderAnnouncementBody } from "@/lib/board/markdown";
 import { HavenWordmark } from "@/components/brand/haven-logo";
@@ -31,6 +31,8 @@ export default async function RoleLandingPage({
   const { slug } = await params;
   const role = await getPublicRoleBySlug(slug);
   if (!role) notFound();
+
+  const questions = await getPublicRoleQuestions(role.id);
 
   const meta = [
     role.department,
@@ -77,7 +79,7 @@ export default async function RoleLandingPage({
           <p className="text-[13px] text-muted-foreground">
             Tell us a bit about yourself and we'll be in touch.
           </p>
-          <ApplyForm roleId={role.id} roleSlug={role.slug} />
+          <ApplyForm roleId={role.id} roleSlug={role.slug} questions={questions} />
         </section>
       </main>
       <Footer />

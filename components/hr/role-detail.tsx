@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { RoleEditor } from "./role-editor";
 import { CandidateKanban } from "./candidate-kanban";
 import { CandidateEditor } from "./candidate-editor";
+import { RoleQuestionsManager } from "./role-questions-manager";
 import { deleteRole } from "@/lib/hr/actions";
 import { canonicalUrl } from "@/lib/canonical-url";
 import {
@@ -15,6 +16,7 @@ import {
   ROLE_STATUS_LABELS,
   type DbCandidate,
   type DbRole,
+  type DbRoleQuestion,
   type EmploymentType,
   type RoleStatus,
 } from "@/lib/hr/types";
@@ -28,9 +30,10 @@ const STATUS_TONE: Record<RoleStatus, "neutral" | "success" | "warn"> = {
 type Props = {
   role: DbRole;
   candidates: DbCandidate[];
+  questions?: DbRoleQuestion[];
 };
 
-export function RoleDetail({ role, candidates }: Props) {
+export function RoleDetail({ role, candidates, questions = [] }: Props) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [candOpen, setCandOpen] = useState(false);
@@ -109,6 +112,9 @@ export function RoleDetail({ role, candidates }: Props) {
           </Button>
         </div>
       </div>
+
+      {/* Custom application questions (HR-managed) */}
+      <RoleQuestionsManager roleId={role.id} questions={questions} />
 
       {/* Candidates */}
       <section className="flex flex-col gap-3">

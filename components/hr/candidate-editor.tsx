@@ -24,6 +24,7 @@ export function CandidateEditor({ open, onOpenChange, roleId, candidate }: Props
   const [email, setEmail] = useState(candidate?.email ?? "");
   const [phone, setPhone] = useState(candidate?.phone ?? "");
   const [resumeUrl, setResumeUrl] = useState(candidate?.resume_url ?? "");
+  const [loomUrl, setLoomUrl] = useState(candidate?.loom_url ?? "");
   const [stage, setStage] = useState(candidate?.stage ?? "applied");
   const [notes, setNotes] = useState(candidate?.notes ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +46,7 @@ export function CandidateEditor({ open, onOpenChange, roleId, candidate }: Props
               email: email || null,
               phone: phone || null,
               resume_url: resumeUrl || null,
+              loom_url: loomUrl || null,
               stage,
               notes,
             },
@@ -57,6 +59,7 @@ export function CandidateEditor({ open, onOpenChange, roleId, candidate }: Props
             email,
             phone,
             resume_url: resumeUrl,
+            loom_url: loomUrl,
             stage,
             notes,
             source: "manual",
@@ -68,6 +71,7 @@ export function CandidateEditor({ open, onOpenChange, roleId, candidate }: Props
           setEmail("");
           setPhone("");
           setResumeUrl("");
+          setLoomUrl("");
           setStage("applied");
           setNotes("");
         }
@@ -112,6 +116,17 @@ export function CandidateEditor({ open, onOpenChange, roleId, candidate }: Props
                 value={resumeUrl}
                 onChange={(e) => setResumeUrl(e.target.value)}
                 placeholder="https://drive.google.com/…"
+              />
+            </Field>
+          </div>
+          <div className="sm:col-span-2">
+            <Field label="Video intro URL">
+              <Input
+                value={loomUrl}
+                onChange={(e) => setLoomUrl(e.target.value)}
+                placeholder="https://www.loom.com/share/…"
+                type="url"
+                inputMode="url"
               />
             </Field>
           </div>

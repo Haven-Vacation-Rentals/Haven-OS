@@ -754,6 +754,7 @@ export async function createCandidate(input: {
   email?: string;
   phone?: string;
   resume_url?: string;
+  loom_url?: string;
   cover_letter?: string;
   source?: string;
   stage?: string;
@@ -768,6 +769,7 @@ export async function createCandidate(input: {
     email: input.email?.trim() || null,
     phone: input.phone?.trim() || null,
     resume_url: input.resume_url?.trim() || null,
+    loom_url: input.loom_url?.trim() || null,
     cover_letter: input.cover_letter ?? "",
     source: input.source || "manual",
     stage: input.stage || "applied",
@@ -827,6 +829,7 @@ export async function updateCandidate(
     email: string | null;
     phone: string | null;
     resume_url: string | null;
+    loom_url: string | null;
     cover_letter: string;
     stage: string;
     notes: string;
@@ -837,6 +840,7 @@ export async function updateCandidate(
   const supabase = await db();
   await supabase.from("hr_candidates").update(input).eq("id", id);
   revalidatePath(`/hr/hiring/${roleId}`);
+  revalidatePath(`/hr/hiring/${roleId}/candidates/${id}`);
 }
 
 export async function deleteCandidate(id: string, roleId: string): Promise<void> {

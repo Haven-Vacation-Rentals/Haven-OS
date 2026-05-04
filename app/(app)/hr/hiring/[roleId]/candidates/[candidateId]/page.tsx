@@ -6,6 +6,10 @@ import {
   getRole,
   listCandidateNotes,
 } from "@/lib/hr/actions";
+import {
+  listRoleQuestions,
+  listCandidateAnswers,
+} from "@/lib/hr/application-questions";
 import { CandidateDetail } from "@/components/hr/candidate-detail";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +26,11 @@ export default async function CandidateDetailPage({
   ]);
   if (!candidate || !role || candidate.role_id !== roleId) notFound();
 
-  const notes = await listCandidateNotes(candidateId);
+  const [notes, questions, answers] = await Promise.all([
+    listCandidateNotes(candidateId),
+    listRoleQuestions(roleId, { includeArchived: true }),
+    listCandidateAnswers(candidateId),
+  ]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -33,7 +41,13 @@ export default async function CandidateDetailPage({
         <ArrowLeft className="h-3.5 w-3.5" />
         Back to {role.title}
       </Link>
-      <CandidateDetail candidate={candidate} role={role} notes={notes} />
+      <CandidateDetail
+        candidate={candidate}
+        role={role}
+        notes={notes}
+        questions={questions}
+        answers={answers}
+      />
     </div>
   );
 }
