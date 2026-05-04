@@ -87,6 +87,10 @@ export async function submitApplication(input: {
   email: string;
   phone?: string;
   resume_url?: string;
+  resume_path?: string | null;
+  resume_filename?: string | null;
+  resume_mime?: string | null;
+  resume_size?: number | null;
   loom_url?: string;
   cover_letter?: string;
   answers?: ApplicationAnswerInput[];
@@ -174,6 +178,11 @@ export async function submitApplication(input: {
         email: input.email.trim(),
         phone: input.phone?.trim() || null,
         resume_url: resumeUrl,
+        resume_path: input.resume_path ?? null,
+        resume_filename: input.resume_filename ?? null,
+        resume_mime: input.resume_mime ?? null,
+        resume_size:
+          typeof input.resume_size === "number" ? input.resume_size : null,
         loom_url: loomUrl,
         cover_letter: input.cover_letter ?? "",
         source: "public_form",

@@ -11,6 +11,8 @@ import {
   Trash2,
   MessageSquare,
   Video,
+  FileText,
+  Download,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,12 +57,14 @@ export function CandidateDetail({
   notes,
   questions = [],
   answers = [],
+  resumeSignedUrl = null,
 }: {
   candidate: DbCandidate;
   role: DbRole;
   notes: DbCandidateNote[];
   questions?: DbRoleQuestion[];
   answers?: DbCandidateAnswer[];
+  resumeSignedUrl?: string | null;
 }) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
@@ -158,7 +162,19 @@ export function CandidateDetail({
                 {candidate.phone}
               </a>
             )}
-            {candidate.resume_url && (
+            {candidate.resume_path && resumeSignedUrl ? (
+              <a
+                href={resumeSignedUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-accent hover:brightness-90"
+                title={candidate.resume_filename ?? undefined}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                {candidate.resume_filename ?? "Resume"}
+                <Download className="h-3 w-3" />
+              </a>
+            ) : candidate.resume_url ? (
               <a
                 href={candidate.resume_url}
                 target="_blank"
@@ -168,7 +184,7 @@ export function CandidateDetail({
                 <ExternalLink className="h-3.5 w-3.5" />
                 Resume
               </a>
-            )}
+            ) : null}
             {candidate.loom_url && (
               <a
                 href={candidate.loom_url}

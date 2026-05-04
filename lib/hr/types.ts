@@ -67,6 +67,10 @@ export type DbCandidate = {
   email: string | null;
   phone: string | null;
   resume_url: string | null;
+  resume_path: string | null;
+  resume_filename: string | null;
+  resume_mime: string | null;
+  resume_size: number | null;
   loom_url: string | null;
   cover_letter: string;
   stage: string; // applied | screen | interview | offer | hired | rejected

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import {
   getCandidate,
+  getCandidateResumeSignedUrl,
   getRole,
   listCandidateNotes,
 } from "@/lib/hr/actions";
@@ -26,10 +27,13 @@ export default async function CandidateDetailPage({
   ]);
   if (!candidate || !role || candidate.role_id !== roleId) notFound();
 
-  const [notes, questions, answers] = await Promise.all([
+  const [notes, questions, answers, resumeSignedUrl] = await Promise.all([
     listCandidateNotes(candidateId),
     listRoleQuestions(roleId, { includeArchived: true }),
     listCandidateAnswers(candidateId),
+    candidate.resume_path
+      ? getCandidateResumeSignedUrl(candidateId)
+      : Promise.resolve(null),
   ]);
 
   return (
@@ -47,6 +51,7 @@ export default async function CandidateDetailPage({
         notes={notes}
         questions={questions}
         answers={answers}
+        resumeSignedUrl={resumeSignedUrl}
       />
     </div>
   );

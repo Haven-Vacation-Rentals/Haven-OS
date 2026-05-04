@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { useRef, useState, useTransition } from "react";
+import { CheckCircle2, FileText, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { submitApplication } from "@/lib/hr/public";
@@ -10,6 +10,29 @@ import {
   type ApplicationQuestionType,
   type DbRoleQuestion,
 } from "@/lib/hr/types";
+
+const RESUME_MAX_BYTES = 10 * 1024 * 1024; // 10 MB — keep in sync with the API route + bucket
+const RESUME_ACCEPT =
+  ".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const RESUME_ALLOWED_EXT = new Set(["pdf", "doc", "docx"]);
+
+type UploadedResume = {
+  path: string;
+  filename: string;
+  mime: string;
+  size: number;
+};
+
+function fileExt(name: string): string {
+  const i = name.lastIndexOf(".");
+  return i < 0 ? "" : name.slice(i + 1).toLowerCase();
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 type Props = {
   roleId: string;
@@ -28,13 +51,67 @@ export function ApplyForm({ roleId, roleSlug, questions = [] }: Props) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [resumeUrl, setResumeUrl] = useState("");
+  const [resume, setResume] = useState<UploadedResume | null>(null);
+  const [resumeUploading, setResumeUploading] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [loomUrl, setLoomUrl] = useState("");
   const [coverLetter, setCoverLetter] = useState("");
   const [answers, setAnswers] = useState<Record<string, AnswerState>>({});
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [pending, startTransition] = useTransition();
+
+  const handleResumeChange = async (file: File | null) => {
+    setResumeError(null);
+    if (!file) return;
+    if (file.size <= 0) {
+      setResumeError("File is empty.");
+      return;
+    }
+    if (file.size > RESUME_MAX_BYTES) {
+      setResumeError("File too large. Max 10 MB.");
+      return;
+    }
+    const ext = fileExt(file.name);
+    if (!RESUME_ALLOWED_EXT.has(ext)) {
+      setResumeError("Unsupported file type. Please upload a PDF, DOC, or DOCX.");
+      return;
+    }
+    setResumeUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("role_id", roleId);
+      fd.append("file", file);
+      const res = await fetch("/api/public/career-resume", {
+        method: "POST",
+        body: fd,
+      });
+      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok || !json || json.ok !== true) {
+        const msg =
+          typeof json?.error === "string" ? json.error : "Upload failed. Try again.";
+        setResumeError(msg);
+        return;
+      }
+      setResume({
+        path: String(json.path),
+        filename: String(json.filename),
+        mime: String(json.mime),
+        size: Number(json.size),
+      });
+    } catch (err) {
+      setResumeError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setResumeUploading(false);
+    }
+  };
+
+  const clearResume = () => {
+    setResume(null);
+    setResumeError(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   const handleAnswer = (qid: string, patch: AnswerState) => {
     setAnswers((prev) => ({ ...prev, [qid]: { ...prev[qid], ...patch } }));
@@ -90,6 +167,11 @@ export function ApplyForm({ roleId, roleSlug, questions = [] }: Props) {
       };
     });
 
+    if (resumeUploading) {
+      setError("Please wait for the resume upload to finish.");
+      return;
+    }
+
     startTransition(async () => {
       try {
         const res = await submitApplication({
@@ -98,7 +180,10 @@ export function ApplyForm({ roleId, roleSlug, questions = [] }: Props) {
           name,
           email,
           phone,
-          resume_url: resumeUrl,
+          resume_path: resume?.path ?? null,
+          resume_filename: resume?.filename ?? null,
+          resume_mime: resume?.mime ?? null,
+          resume_size: resume?.size ?? null,
           loom_url: loomUrl,
           cover_letter: coverLetter,
           answers: payload,
@@ -143,13 +228,60 @@ export function ApplyForm({ roleId, roleSlug, questions = [] }: Props) {
         <Field label="Phone">
           <Input value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" />
         </Field>
-        <Field label="Resume URL">
-          <Input
-            value={resumeUrl}
-            onChange={(e) => setResumeUrl(e.target.value)}
-            placeholder="Google Drive, Dropbox, LinkedIn…"
-          />
-        </Field>
+        <div className="sm:col-span-2">
+          <Field
+            label="Resume attachment (PDF preferred)"
+            hint="PDF, DOC, or DOCX, up to 10 MB."
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={RESUME_ACCEPT}
+              className="sr-only"
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                void handleResumeChange(f);
+              }}
+              disabled={resumeUploading}
+            />
+            {resume ? (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface p-3">
+                <div className="flex min-w-0 items-center gap-2 text-[13px]">
+                  <FileText className="h-4 w-4 shrink-0 text-accent" />
+                  <span className="truncate font-medium">{resume.filename}</span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                    {formatBytes(resume.size)}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearResume}
+                  className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-[12px] hover:bg-surface-alt"
+                  aria-label="Remove resume"
+                  disabled={resumeUploading}
+                >
+                  <X className="h-3 w-3" />
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={resumeUploading}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-border bg-surface/40 px-3 py-3 text-[13px] font-medium text-muted-foreground hover:border-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Upload className="h-4 w-4" />
+                {resumeUploading ? "Uploading…" : "Choose PDF / DOC / DOCX"}
+              </button>
+            )}
+            {resumeError && (
+              <div className="mt-1 text-[12px] text-rose-600 dark:text-rose-400">
+                {resumeError}
+              </div>
+            )}
+          </Field>
+        </div>
         <div className="sm:col-span-2">
           <Field
             label="Video intro (Loom or other)"
@@ -203,7 +335,13 @@ export function ApplyForm({ roleId, roleSlug, questions = [] }: Props) {
         </div>
       )}
       <div>
-        <Button type="submit" variant="cta" size="lg" disabled={pending} className="w-full sm:w-auto">
+        <Button
+          type="submit"
+          variant="cta"
+          size="lg"
+          disabled={pending || resumeUploading}
+          className="w-full sm:w-auto"
+        >
           {pending ? "Submitting…" : "Submit application"}
         </Button>
       </div>

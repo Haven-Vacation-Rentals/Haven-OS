@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getAdminClient } from "@/lib/supabase/admin";
 import {
   getPermissions,
   visibleEmployeeIds,
@@ -995,4 +996,37 @@ export async function deleteDoc(id: string, kind: "policy" | "procedure"): Promi
   const supabase = await db();
   await supabase.from("hr_docs").delete().eq("id", id);
   revalidatePath(`/hr/${kind === "policy" ? "policies" : "procedures"}`);
+}
+
+// ---------------------------------------------------------------------------
+// Hiring — candidate resume attachment (signed URL access)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mint a short-lived signed URL for a candidate's stored resume. The
+ * `hr-resumes` bucket is private; HR pages call this server-side and pass
+ * the resulting URL to the client. Returns null if no file is on the
+ * candidate or the signing fails (e.g. object missing).
+ */
+export async function getCandidateResumeSignedUrl(
+  candidateId: string,
+  expiresInSeconds: number = 60 * 10,
+): Promise<string | null> {
+  await requireHrModule("hiring");
+  const supabase = await db();
+  const { data: candidate } = await supabase
+    .from("hr_candidates")
+    .select("resume_path")
+    .eq("id", candidateId)
+    .maybeSingle();
+  const path = candidate?.resume_path as string | null | undefined;
+  if (!path) return null;
+  // Use the service-role client for signing — the SSR client may not have
+  // a session present in some HR-admin grant flows.
+  const admin = getAdminClient();
+  const { data, error } = await admin.storage
+    .from("hr-resumes")
+    .createSignedUrl(path, expiresInSeconds);
+  if (error) return null;
+  return data?.signedUrl ?? null;
 }
