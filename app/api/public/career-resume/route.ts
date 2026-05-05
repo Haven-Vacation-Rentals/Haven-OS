@@ -7,9 +7,9 @@
  * the private `hr-resumes` Supabase bucket via the service-role client.
  *
  * Returns the storage path / sanitised filename / mime / size so the
- * client can hand them to the existing submitApplication server action.
- * Public callers never receive a public URL — HR opens files via signed
- * URLs minted server-side.
+ * client can hand them to /api/public/career-apply when the form is
+ * submitted. Public callers never receive a public URL — HR opens files
+ * via signed URLs minted server-side.
  *
  * Mitigations: per-IP rate limit, server-side type/size validation,
  * filename sanitisation. Role id is required and must match an open role

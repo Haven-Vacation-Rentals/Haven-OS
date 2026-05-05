@@ -4,7 +4,6 @@ import { useRef, useState, useTransition } from "react";
 import { CheckCircle2, FileText, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { submitApplication } from "@/lib/hr/public";
 import {
   type ApplicationAnswerInput,
   type ApplicationQuestionType,
@@ -174,25 +173,32 @@ export function ApplyForm({ roleId, roleSlug, questions = [] }: Props) {
 
     startTransition(async () => {
       try {
-        const res = await submitApplication({
-          role_id: roleId,
-          role_slug: roleSlug,
-          name,
-          email,
-          phone,
-          resume_path: resume?.path ?? null,
-          resume_filename: resume?.filename ?? null,
-          resume_mime: resume?.mime ?? null,
-          resume_size: resume?.size ?? null,
-          loom_url: loomUrl,
-          cover_letter: coverLetter,
-          answers: payload,
+        const res = await fetch("/api/public/career-apply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            role_id: roleId,
+            name,
+            email,
+            phone,
+            resume_path: resume?.path ?? null,
+            resume_filename: resume?.filename ?? null,
+            resume_mime: resume?.mime ?? null,
+            resume_size: resume?.size ?? null,
+            loom_url: loomUrl,
+            cover_letter: coverLetter,
+            answers: payload,
+          }),
         });
-        if (res?.ok) {
+        const json = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error?: string;
+        };
+        if (res.ok && json.ok) {
           setSubmitted(true);
         } else {
           setError(
-            (res && "error" in res && res.error) ||
+            json.error ??
               "Something went wrong submitting your application. Please try again.",
           );
         }

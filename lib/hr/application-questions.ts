@@ -15,8 +15,8 @@ import {
  * Per-role application questions + candidate answers.
  *
  * Mirrors the survey questions/answers design from lib/hr/surveys.ts but is
- * scoped to hiring roles. Public submission of answers happens via
- * lib/hr/public.ts (submitApplication); these helpers cover the HR admin
+ * scoped to hiring roles. Public submission of answers happens via the
+ * server route /api/public/career-apply; these helpers cover the HR admin
  * authoring side.
  */
 
