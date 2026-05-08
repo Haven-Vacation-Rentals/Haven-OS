@@ -16,6 +16,7 @@ import {
   setStatus,
   setAssignee,
   addComment,
+  deleteCase,
 } from "@/lib/lost-items/actions";
 import { StatusBadge, formatDateTime, formatRelative } from "./shared";
 
@@ -31,9 +32,16 @@ type Props = {
   events: LostItemEventWithActor[];
   properties: { id: string; name: string }[];
   members: Member[];
+  isAdmin: boolean;
 };
 
-export function LostItemDetail({ item, events, properties, members }: Props) {
+export function LostItemDetail({
+  item,
+  events,
+  properties,
+  members,
+  isAdmin,
+}: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +54,25 @@ export function LostItemDetail({ item, events, properties, members }: Props) {
         setError(res.error ?? "Update failed");
         return;
       }
+      router.refresh();
+    });
+  };
+
+  const handleDelete = () => {
+    if (
+      !confirm(
+        `Delete case ${item.case_number}? This removes the case and its activity history. This cannot be undone.`,
+      )
+    )
+      return;
+    setError(null);
+    startTransition(async () => {
+      const res = await deleteCase(item.id);
+      if (!res.ok) {
+        setError(res.error ?? "Delete failed");
+        return;
+      }
+      router.push("/operations/lost-items");
       router.refresh();
     });
   };
@@ -190,6 +217,22 @@ export function LostItemDetail({ item, events, properties, members }: Props) {
           <KV label="Delivered" value={formatDateTime(item.delivered_at)} />
           <KV label="Completed" value={formatDateTime(item.completed_at)} />
         </SidePanel>
+
+        {isAdmin ? (
+          <SidePanel title="Danger zone">
+            <button
+              type="button"
+              disabled={pending}
+              onClick={handleDelete}
+              className="w-full rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 transition-colors hover:bg-rose-100 disabled:opacity-50"
+            >
+              Delete case
+            </button>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              Removes the case and its activity history. Admin only.
+            </p>
+          </SidePanel>
+        ) : null}
       </div>
     </div>
   );
