@@ -261,7 +261,7 @@ export function LostItemPublicIntakeForm() {
         />
       </Field>
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <Field label="Guest name">
           <Input
             value={guestName}
@@ -286,7 +286,7 @@ export function LostItemPublicIntakeForm() {
         </Field>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <Field label="Slack thread link">
           <Input
             type="url"
@@ -307,7 +307,7 @@ export function LostItemPublicIntakeForm() {
         </Field>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <Field label="Follow-up date">
           <Input
             type="date"
@@ -380,11 +380,11 @@ export function LostItemPublicIntakeForm() {
         </div>
       ) : null}
 
-      <div className="flex justify-end gap-2 pt-1">
+      <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:justify-end">
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex items-center gap-2 rounded-md bg-haven-coral px-5 py-2.5 text-sm font-semibold text-white hover:bg-haven-coral-700 disabled:opacity-60"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-haven-coral px-5 py-2.5 text-sm font-semibold text-white hover:bg-haven-coral-700 disabled:opacity-60 sm:w-auto"
         >
           {pending ? "Submitting…" : "Open case"}
         </button>
