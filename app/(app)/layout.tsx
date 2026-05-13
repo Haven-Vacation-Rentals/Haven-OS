@@ -38,7 +38,7 @@ export default async function AppLayout({
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar user={user} initialUnread={unread} />
-        <main className="flex-1 px-8 py-8">{children}</main>
+        <main className="flex-1 min-w-0 px-4 py-5 md:px-8 md:py-8">{children}</main>
       </div>
       <CommandPalette />
       <Toaster richColors position="bottom-right" />

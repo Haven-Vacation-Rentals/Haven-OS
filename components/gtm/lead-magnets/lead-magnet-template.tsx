@@ -38,7 +38,7 @@ export function LeadMagnetTemplate({ magnet }: { magnet: LeadMagnet }) {
     <main className="min-h-dvh bg-[#FAF8F3] text-haven-charcoal">
       {/* Top bar */}
       <header className="border-b border-haven-charcoal/10 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4 sm:px-6">
           <a href="https://havenvacationrentals.com" target="_blank" rel="noreferrer">
             <img src={HAVEN_LOGO} alt="Haven Vacation Rentals" className="h-9 w-auto" />
           </a>
@@ -60,13 +60,13 @@ export function LeadMagnetTemplate({ magnet }: { magnet: LeadMagnet }) {
           background: `linear-gradient(rgba(20,20,20,0.55), rgba(20,20,20,0.55)), url(${heroImage}) center/cover no-repeat`,
         }}
       >
-        <div className="mx-auto flex min-h-[420px] max-w-5xl flex-col items-start justify-end gap-3 px-6 py-16 text-white">
+        <div className="mx-auto flex min-h-[340px] sm:min-h-[420px] max-w-5xl flex-col items-start justify-end gap-3 px-4 py-10 sm:px-6 sm:py-16 text-white">
           {magnet.eyebrow ? (
             <div className="haven-eyebrow text-white/90 tracking-[2px]">
               {magnet.eyebrow}
             </div>
           ) : null}
-          <h1 className="font-heading text-[40px] font-bold leading-[1.05] uppercase sm:text-[56px]">
+          <h1 className="font-heading text-[32px] font-bold leading-[1.05] uppercase sm:text-[56px]">
             {magnet.title}
           </h1>
           {magnet.subtitle ? (
@@ -78,7 +78,7 @@ export function LeadMagnetTemplate({ magnet }: { magnet: LeadMagnet }) {
       </section>
 
       {/* Body — content sections + capture form (sticky on desktop) */}
-      <section className="mx-auto grid max-w-5xl grid-cols-1 gap-10 px-6 py-12 lg:grid-cols-[1fr_360px]">
+      <section className="mx-auto grid max-w-5xl grid-cols-1 gap-8 px-4 py-10 sm:px-6 sm:py-12 sm:gap-10 lg:grid-cols-[1fr_360px]">
         <div className="flex flex-col gap-8">
           {sections.length === 0 ? (
             <DefaultBody title={magnet.title} />
@@ -114,7 +114,7 @@ export function LeadMagnetTemplate({ magnet }: { magnet: LeadMagnet }) {
 
       {/* Footer */}
       <footer className="border-t border-haven-charcoal/10 bg-white">
-        <div className="mx-auto flex max-w-5xl flex-col items-center gap-2 px-6 py-8 text-center">
+        <div className="mx-auto flex max-w-5xl flex-col items-center gap-2 px-4 py-8 text-center sm:px-6">
           <img src={HAVEN_LOGO} alt="Haven Vacation Rentals" className="h-7 w-auto" />
           <p className="text-[12px] text-haven-charcoal/60">
             © {new Date().getFullYear()} Haven Vacation Rentals · Pigeon Forge · Gatlinburg · Sevierville

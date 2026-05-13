@@ -47,7 +47,7 @@ export default async function RoleLandingPage({
   return (
     <div className="min-h-dvh bg-background">
       <Header />
-      <main className="mx-auto flex max-w-[900px] flex-col gap-8 px-6 py-10 sm:py-16">
+      <main className="mx-auto flex max-w-[900px] flex-col gap-7 px-4 py-8 sm:gap-8 sm:px-6 sm:py-16">
         <Link
           href="/careers"
           className="inline-flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground hover:text-foreground"
@@ -60,7 +60,7 @@ export default async function RoleLandingPage({
           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">
             We're hiring
           </div>
-          <h1 className="font-heading text-[40px] font-black leading-[1.05] tracking-tight sm:text-[48px]">
+          <h1 className="font-heading text-[30px] font-black leading-[1.05] tracking-tight sm:text-[48px]">
             {role.title}
           </h1>
           {meta && <div className="text-[14px] text-muted-foreground">{meta}</div>}
@@ -74,7 +74,7 @@ export default async function RoleLandingPage({
         )}
         {role.perks && <Section title="Why Haven" body={role.perks} />}
 
-        <section id="apply" className="flex flex-col gap-3 rounded-card border border-border bg-surface-alt/40 p-6">
+        <section id="apply" className="flex flex-col gap-3 rounded-card border border-border bg-surface-alt/40 p-4 sm:p-6">
           <h2 className="font-heading text-[22px] font-bold">Apply</h2>
           <p className="text-[13px] text-muted-foreground">
             Tell us a bit about yourself and we'll be in touch.
@@ -102,7 +102,7 @@ function Section({ title, body }: { title: string; body: string }) {
 function Header() {
   return (
     <header className="border-b border-border bg-surface-alt/40">
-      <div className="mx-auto flex max-w-[1100px] items-center justify-between px-6 py-4">
+      <div className="mx-auto flex max-w-[1100px] items-center justify-between gap-3 px-4 py-4 sm:px-6">
         <HavenWordmark />
         <a
           href="#apply"
@@ -118,7 +118,7 @@ function Header() {
 function Footer() {
   return (
     <footer className="border-t border-border bg-surface-alt/40">
-      <div className="mx-auto flex max-w-[1100px] items-center justify-between px-6 py-6 text-[12px] text-muted-foreground">
+      <div className="mx-auto flex max-w-[1100px] flex-col items-start justify-between gap-2 px-4 py-6 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:px-6">
         <div>© {new Date().getFullYear()} Haven Vacation Rentals</div>
         <Link href="/careers" className="hover:text-foreground">
           All open roles

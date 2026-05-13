@@ -85,8 +85,8 @@ export function HavenAssistant({ open, onClose }: HavenAssistantProps) {
       {/* Panel */}
       <div
         className={cn(
-          "fixed bottom-4 right-4 z-50 flex flex-col",
-          "w-[440px] max-h-[calc(100dvh-2rem)]",
+          "fixed inset-x-2 bottom-2 sm:inset-x-auto sm:bottom-4 sm:right-4 z-50 flex flex-col",
+          "w-auto sm:w-[440px] max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)]",
           "rounded-2xl border border-border bg-surface shadow-2xl shadow-black/20",
           "animate-in slide-in-from-bottom-4 fade-in duration-200",
         )}

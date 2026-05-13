@@ -181,8 +181,8 @@ export function LostItemsDirectory({
 
       {/* Toolbar */}
       <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[240px]">
+        <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:gap-3">
+          <div className="relative flex-1 md:min-w-[240px]">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={q}
@@ -191,36 +191,38 @@ export function LostItemsDirectory({
               className="pl-9"
             />
           </div>
-          <FilterSelect
-            value={propertyFilter}
-            onChange={setPropertyFilter}
-            options={[
-              { value: "all", label: "Any property" },
-              ...properties.map((p) => ({ value: p.id, label: p.name })),
-            ]}
-          />
-          <FilterSelect
-            value={assigneeFilter}
-            onChange={setAssigneeFilter}
-            options={[
-              { value: "all", label: "Anyone" },
-              { value: "unassigned", label: "Unassigned" },
-              ...members.map((m) => ({
-                value: m.id,
-                label: m.full_name ?? m.email,
-              })),
-            ]}
-          />
-          <ViewToggle value={view} onChange={setView} />
-          <SharePublicLinkButton />
-          <button
-            type="button"
-            onClick={() => setShowForm(true)}
-            className="inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground hover:brightness-95"
-          >
-            <Plus className="h-4 w-4" />
-            New case
-          </button>
+          <div className="flex flex-wrap items-center gap-2 md:contents">
+            <FilterSelect
+              value={propertyFilter}
+              onChange={setPropertyFilter}
+              options={[
+                { value: "all", label: "Any property" },
+                ...properties.map((p) => ({ value: p.id, label: p.name })),
+              ]}
+            />
+            <FilterSelect
+              value={assigneeFilter}
+              onChange={setAssigneeFilter}
+              options={[
+                { value: "all", label: "Anyone" },
+                { value: "unassigned", label: "Unassigned" },
+                ...members.map((m) => ({
+                  value: m.id,
+                  label: m.full_name ?? m.email,
+                })),
+              ]}
+            />
+            <ViewToggle value={view} onChange={setView} />
+            <SharePublicLinkButton />
+            <button
+              type="button"
+              onClick={() => setShowForm(true)}
+              className="ml-auto inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground hover:brightness-95 md:ml-0"
+            >
+              <Plus className="h-4 w-4" />
+              New case
+            </button>
+          </div>
         </div>
 
         {/* Status filter chips */}
@@ -547,15 +549,18 @@ function BoardView({ cases }: { cases: LostItemCaseWithRelations[] }) {
       onDragEnd={onDragEnd}
       onDragCancel={() => setActiveId(null)}
     >
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        {LOST_ITEM_PIPELINE.map((s) => (
-          <BoardColumn
-            key={s}
-            status={s}
-            cases={grouped.get(s) ?? []}
-            activeId={activeId}
-          />
-        ))}
+      {/* Horizontal-scrolling board on mobile/tablet, grid on desktop */}
+      <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:overflow-visible md:px-0">
+        <div className="flex gap-3 md:grid md:grid-cols-2 lg:grid-cols-5 md:gap-3">
+          {LOST_ITEM_PIPELINE.map((s) => (
+            <BoardColumn
+              key={s}
+              status={s}
+              cases={grouped.get(s) ?? []}
+              activeId={activeId}
+            />
+          ))}
+        </div>
       </div>
       <DragOverlay dropAnimation={null}>
         {activeCase ? <BoardCard c={activeCase} isDragging /> : null}
@@ -578,7 +583,7 @@ function BoardColumn({
     <div
       ref={setNodeRef}
       className={
-        "flex flex-col gap-2 rounded-card border bg-surface-alt/30 p-2 min-h-[220px] transition-colors " +
+        "flex flex-col gap-2 rounded-card border bg-surface-alt/30 p-2 min-h-[220px] w-[260px] shrink-0 md:w-auto transition-colors " +
         (isOver
           ? "border-haven-coral-600 bg-accent-soft/50 ring-2 ring-haven-coral-600/30"
           : "border-border")

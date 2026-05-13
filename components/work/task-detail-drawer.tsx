@@ -339,7 +339,7 @@ export function TaskDetailDrawer({
           onClick={onClose}
         />
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+          className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6"
           onClick={onClose}
         >
           <motion.div
@@ -348,7 +348,7 @@ export function TaskDetailDrawer({
             exit={{ opacity: 0, scale: 0.99, y: 2 }}
             transition={{ duration: 0.14, ease: [0.2, 0.8, 0.2, 1] }}
             onClick={(e) => e.stopPropagation()}
-            className="flex max-h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
+            className="flex max-h-[96vh] sm:max-h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-card border border-border bg-surface shadow-2xl"
           >
             <div className="flex items-center gap-2 border-b border-border px-4 py-3">
               <div className="h-5 w-64 animate-pulse rounded bg-surface-alt" />

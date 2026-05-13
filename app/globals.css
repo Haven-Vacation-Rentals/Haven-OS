@@ -69,6 +69,19 @@
     font-family: var(--font-raleway), Helvetica, Arial, sans-serif;
     font-weight: 500;
     font-size: 15px;
+    /* Prevent horizontal page scroll on small screens. Individual scrollable
+       regions (tables, kanban) opt back in via overflow-x-auto. */
+    overflow-x: hidden;
+  }
+
+  /* Prevent iOS Safari from auto-zooming on focus when a textarea/select
+     has font-size < 16px. We bump the actual font-size at the source for
+     <input> via the Input component; this handles native textarea/select
+     anywhere else they appear. */
+  @media (max-width: 767px) {
+    textarea, select, input:not([type="checkbox"]):not([type="radio"]) {
+      font-size: 16px;
+    }
   }
 
   h1, h2, h3, h4, h5, h6 {

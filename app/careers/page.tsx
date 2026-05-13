@@ -17,15 +17,15 @@ export default async function CareersIndexPage() {
   return (
     <div className="min-h-dvh bg-background">
       <PublicHeader />
-      <main className="mx-auto flex max-w-[1100px] flex-col gap-10 px-6 py-12 sm:py-20">
+      <main className="mx-auto flex max-w-[1100px] flex-col gap-8 px-4 py-10 sm:gap-10 sm:px-6 sm:py-20">
         <section className="flex flex-col items-start gap-3">
           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">
             Join Haven
           </div>
-          <h1 className="font-heading text-[40px] font-black leading-[1.05] tracking-tight sm:text-[56px]">
+          <h1 className="font-heading text-[32px] font-black leading-[1.05] tracking-tight sm:text-[56px]">
             Build the future of vacation rentals in the Smokies.
           </h1>
-          <p className="max-w-2xl text-lg text-muted-foreground">
+          <p className="max-w-2xl text-base sm:text-lg text-muted-foreground">
             We run full-service property management across East Tennessee. If you love hospitality,
             systems, and hard work — we want to meet you.
           </p>
@@ -73,13 +73,14 @@ export default async function CareersIndexPage() {
 function PublicHeader() {
   return (
     <header className="border-b border-border bg-surface-alt/40">
-      <div className="mx-auto flex max-w-[1100px] items-center justify-between px-6 py-4">
+      <div className="mx-auto flex max-w-[1100px] items-center justify-between gap-3 px-4 py-4 sm:px-6">
         <HavenWordmark />
         <a
           href="https://havenvacationrentals.com"
-          className="text-[12px] font-semibold text-muted-foreground hover:text-foreground"
+          className="truncate text-[12px] font-semibold text-muted-foreground hover:text-foreground"
         >
-          havenvacationrentals.com →
+          <span className="hidden sm:inline">havenvacationrentals.com →</span>
+          <span className="sm:hidden">haven.com →</span>
         </a>
       </div>
     </header>
@@ -89,7 +90,7 @@ function PublicHeader() {
 function PublicFooter() {
   return (
     <footer className="border-t border-border bg-surface-alt/40">
-      <div className="mx-auto flex max-w-[1100px] items-center justify-between px-6 py-6 text-[12px] text-muted-foreground">
+      <div className="mx-auto flex max-w-[1100px] flex-col items-start justify-between gap-2 px-4 py-6 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:px-6">
         <div>© {new Date().getFullYear()} Haven Vacation Rentals</div>
         <Link href="/careers" className="hover:text-foreground">
           All roles

@@ -200,7 +200,7 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
        * HEADER NAV
        * ============================================================ */}
       <header className="border-b border-[#E2E4E2] bg-white/95 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-[1200px] items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-[1200px] items-center justify-between px-4 py-4 sm:px-6">
           <a href="https://havenvacationrentals.com" target="_blank" rel="noreferrer">
             <img src={HAVEN_LOGO} alt="Haven Vacation Rentals" className="h-9 w-auto" />
           </a>
@@ -227,12 +227,12 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
           aria-hidden
         />
 
-        <div className="mx-auto max-w-[1200px] px-6 py-24 sm:py-32">
+        <div className="mx-auto max-w-[1200px] px-4 py-16 sm:px-6 sm:py-32">
           <div className="max-w-3xl">
             <div className="text-[12px] font-black uppercase tracking-[3px] text-white/80">
               Custom proposal · Prepared for {pitch.owner_name}
             </div>
-            <h1 className="mt-4 font-heading text-[44px] font-black uppercase leading-[1.05] text-white sm:text-[64px]">
+            <h1 className="mt-4 font-heading text-[34px] font-black uppercase leading-[1.05] text-white sm:text-[64px]">
               {ownerFirstName}, your cabin
               <br />
               deserves <span className="text-[#FF564E]">Haven.</span>
@@ -268,7 +268,7 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
        * YOUR PROPERTY — at-a-glance card
        * ============================================================ */}
       <section className="bg-white py-16">
-        <div className="mx-auto max-w-[1200px] px-6">
+        <div className="mx-auto max-w-[1200px] px-4 sm:px-6">
           <div className="text-[12px] font-black uppercase tracking-[3px] text-[#FF564E]">
             Your Property
           </div>
@@ -339,11 +339,11 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
        * PROJECTION
        * ============================================================ */}
       <section id="projection" className="bg-[#FAF8F3] py-20">
-        <div className="mx-auto max-w-[1200px] px-6 text-center">
+        <div className="mx-auto max-w-[1200px] px-4 sm:px-6 text-center">
           <div className="text-[12px] font-black uppercase tracking-[3px] text-[#FF564E]">
             Projected Annual Gross Revenue
           </div>
-          <div className="mt-4 font-heading text-[60px] font-black leading-[1] text-[#424242] sm:text-[88px]">
+          <div className="mt-4 font-heading text-[44px] font-black leading-[1] text-[#424242] sm:text-[88px] break-words">
             {formattedRange}
           </div>
           {pitch.projection_note ? (
@@ -381,7 +381,7 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
        * THE HAVEN STANDARD — pillars
        * ============================================================ */}
       <section id="standard" className="bg-white py-20">
-        <div className="mx-auto max-w-[1200px] px-6">
+        <div className="mx-auto max-w-[1200px] px-4 sm:px-6">
           <div className="text-[12px] font-black uppercase tracking-[3px] text-[#FF564E]">
             The Haven Standard
           </div>
@@ -424,7 +424,7 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
        * WHAT SETS US APART — Smokies-specific
        * ============================================================ */}
       <section className="bg-[#EDF0EE] py-20">
-        <div className="mx-auto max-w-[1200px] px-6">
+        <div className="mx-auto max-w-[1200px] px-4 sm:px-6">
           <div className="text-[12px] font-black uppercase tracking-[3px] text-[#FF564E]">
             What Sets Us Apart
           </div>
@@ -456,7 +456,7 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
        * TRUST — stats band
        * ============================================================ */}
       <section className="bg-[#424242] py-20 text-white">
-        <div className="mx-auto max-w-[1200px] px-6">
+        <div className="mx-auto max-w-[1200px] px-4 sm:px-6">
           <div className="text-[12px] font-black uppercase tracking-[3px] text-[#FF564E]">
             By the Numbers
           </div>
@@ -496,7 +496,7 @@ export function PitchTemplate({ pitch }: { pitch: SalesPitch }) {
        * KEEP READING — blog links
        * ============================================================ */}
       <section className="bg-white py-20">
-        <div className="mx-auto max-w-[1200px] px-6">
+        <div className="mx-auto max-w-[1200px] px-4 sm:px-6">
           <div className="text-[12px] font-black uppercase tracking-[3px] text-[#FF564E]">
             Keep Reading
           </div>

@@ -43,7 +43,7 @@ export default async function ContentStudioPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex items-start justify-between gap-4">
+      <header className="flex flex-col items-start justify-between gap-3 md:flex-row md:gap-4">
         <div>
           <div className="haven-eyebrow text-haven-coral">Content</div>
           <h1 className="font-heading text-display-3 text-foreground">
@@ -55,7 +55,7 @@ export default async function ContentStudioPage() {
             drafts to WordPress.
           </p>
         </div>
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex flex-row md:flex-col flex-wrap items-start md:items-end gap-2">
           <div className="flex items-center gap-2 rounded-md border border-haven-coral/30 bg-accent-soft/40 px-3 py-2 text-[12px] text-haven-coral-700">
             <Sparkles className="h-3.5 w-3.5" />
             <span className="font-semibold">Content Studio · v1</span>

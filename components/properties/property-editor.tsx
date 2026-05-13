@@ -90,12 +90,12 @@ export function PropertyEditor({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4"
       onClick={() => !pending && onOpenChange(false)}
     >
       <div className="absolute inset-0 animate-fade-in bg-foreground/30 backdrop-blur-sm" />
       <div
-        className="relative flex w-full max-w-3xl animate-slide-up flex-col overflow-hidden rounded-card border border-border bg-surface shadow-card-hover"
+        className="relative flex max-h-[95vh] w-full max-w-3xl animate-slide-up flex-col overflow-hidden rounded-card border border-border bg-surface shadow-card-hover"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 border-b border-border px-5 py-4">

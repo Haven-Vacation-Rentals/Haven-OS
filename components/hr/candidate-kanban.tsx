@@ -122,16 +122,18 @@ export function CandidateKanban({
       onDragEnd={onDragEnd}
       onDragCancel={() => setActiveId(null)}
     >
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {COLS.map((stage) => (
-          <Column
-            key={stage}
-            stage={stage}
-            candidates={groups.get(stage) ?? []}
-            roleId={roleId}
-            activeId={activeId}
-          />
-        ))}
+      <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:overflow-visible md:px-0">
+        <div className="flex gap-3 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 md:gap-3">
+          {COLS.map((stage) => (
+            <Column
+              key={stage}
+              stage={stage}
+              candidates={groups.get(stage) ?? []}
+              roleId={roleId}
+              activeId={activeId}
+            />
+          ))}
+        </div>
       </div>
 
       <DragOverlay dropAnimation={null}>
@@ -159,7 +161,7 @@ function Column({
     <div
       ref={setNodeRef}
       className={
-        "flex flex-col gap-2 rounded-card border bg-surface-alt/30 p-2 min-h-[140px] transition-colors " +
+        "flex flex-col gap-2 rounded-card border bg-surface-alt/30 p-2 min-h-[140px] w-[260px] shrink-0 md:w-auto transition-colors " +
         (isOver
           ? "border-haven-coral-600 bg-accent-soft/50 ring-2 ring-haven-coral-600/30"
           : "border-border")

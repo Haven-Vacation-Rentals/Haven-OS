@@ -30,7 +30,7 @@ export default async function LoginPage({
     <div className="relative min-h-dvh overflow-hidden bg-foreground text-background">
       <TopographicBg className="text-background" />
 
-      <div className="relative z-10 flex min-h-dvh items-center justify-center px-6 py-16">
+      <div className="relative z-10 flex min-h-dvh items-center justify-center px-4 py-10 sm:px-6 sm:py-16">
         <div className="w-full max-w-xl">
           {/* Brand mark + headline */}
           <div className="flex flex-col items-center text-center">

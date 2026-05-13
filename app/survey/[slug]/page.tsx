@@ -35,7 +35,7 @@ export default async function SurveyLandingPage({
   return (
     <div className="min-h-dvh bg-background">
       <Header />
-      <main className="mx-auto flex max-w-[760px] flex-col gap-6 px-6 py-10 sm:py-16">
+      <main className="mx-auto flex max-w-[760px] flex-col gap-6 px-4 py-8 sm:px-6 sm:py-16">
         {!view ? (
           <Unavailable
             title="Survey not found"
@@ -86,7 +86,7 @@ export default async function SurveyLandingPage({
 function Header() {
   return (
     <header className="border-b border-border bg-background">
-      <div className="mx-auto flex max-w-[1200px] items-center justify-between px-6 py-4">
+      <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-3 px-4 py-4 sm:px-6">
         <Link href="/">
           <HavenWordmark />
         </Link>
