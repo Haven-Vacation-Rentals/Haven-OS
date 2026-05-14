@@ -154,6 +154,7 @@ export async function logApiAccess(
   req: NextRequest,
   ctx: ApiAuthContext | null,
   statusCode: number,
+  override?: { method?: string; path?: string },
 ): Promise<void> {
   try {
     const admin = getAdminClient();
@@ -168,8 +169,8 @@ export async function logApiAccess(
     await admin.from("api_access_logs").insert({
       token_id: ctx?.token_id ?? null,
       profile_id: ctx?.actor.id ?? null,
-      method: req.method,
-      path: url.pathname,
+      method: override?.method ?? req.method,
+      path: override?.path ?? url.pathname,
       status_code: statusCode,
       user_agent: req.headers.get("user-agent")?.slice(0, 500) ?? null,
       ip_hash,

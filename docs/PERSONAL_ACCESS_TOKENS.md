@@ -189,3 +189,12 @@ curl -s -X PATCH https://app.haven-os.example.com/api/v1/tasks/<task-id> \
 - **Rotation.** Set an `expires_at` when you create the token. We
   recommend rotating tokens used by long-lived integrations every 90
   days.
+
+## MCP (Claude integration)
+
+The same PATs authenticate the Haven OS MCP server at `/api/mcp`. The
+MCP endpoint exposes curated tools — not raw SQL — that wrap the same
+operations as `/api/v1`, with the same scope and permission rules.
+
+See [`docs/HAVEN_OS_MCP.md`](HAVEN_OS_MCP.md) for the tool catalog and
+how to wire Claude up.

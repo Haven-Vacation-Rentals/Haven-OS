@@ -110,6 +110,16 @@ Haven OS exposes a user-scoped REST surface under `/api/v1` for external agents 
 
 See [`docs/PERSONAL_ACCESS_TOKENS.md`](docs/PERSONAL_ACCESS_TOKENS.md) for the full endpoint catalog and security model.
 
+### MCP server (Claude integration)
+
+Haven OS also exposes a **Model Context Protocol** endpoint at
+**`/api/mcp`** so Claude (claude.ai or Claude Code) can use Haven OS
+tools directly. Uses the same PAT for auth. Initial tools cover Tasks,
+Lost Items, and the Content Studio / GTM content tracker.
+
+See [`docs/HAVEN_OS_MCP.md`](docs/HAVEN_OS_MCP.md) for the tool catalog
+and connection instructions.
+
 ---
 
 ## Run it locally
