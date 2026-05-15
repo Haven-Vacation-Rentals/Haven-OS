@@ -25,7 +25,16 @@ import type { ApiAuthContext } from "@/lib/api-tokens/auth";
 import { hasApiScope } from "@/lib/api-tokens/auth";
 import { MCP_TOOLS, MCP_TOOLS_BY_NAME } from "./tools";
 
-const MCP_PROTOCOL_VERSION = "2025-03-26";
+// Protocol versions we understand, newest first. We echo the client's
+// requested version if it's in this list; otherwise we fall back to our
+// newest supported version. Claude's connector currently negotiates one
+// of these on initialize.
+export const MCP_SUPPORTED_PROTOCOL_VERSIONS = [
+  "2025-06-18",
+  "2025-03-26",
+] as const;
+export const MCP_LATEST_PROTOCOL_VERSION = MCP_SUPPORTED_PROTOCOL_VERSIONS[0];
+
 const SERVER_INFO = {
   name: "haven-os",
   title: "Haven OS",
@@ -53,6 +62,25 @@ function failure(
 }
 
 /**
+ * Negotiate the protocol version off an `initialize` request. We accept the
+ * client's requested version if we support it; otherwise we respond with our
+ * newest supported version (per MCP spec — the client then decides whether
+ * to proceed or abort).
+ */
+function negotiateProtocolVersion(params: unknown): string {
+  const requested =
+    params && typeof params === "object" && "protocolVersion" in params
+      ? (params as { protocolVersion?: unknown }).protocolVersion
+      : undefined;
+  if (typeof requested === "string") {
+    if ((MCP_SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(requested)) {
+      return requested;
+    }
+  }
+  return MCP_LATEST_PROTOCOL_VERSION;
+}
+
+/**
  * Dispatch a single JSON-RPC request. Returns `null` for notifications
  * (no id) — MCP servers must not respond to notifications.
  */
@@ -69,28 +97,39 @@ export async function dispatchMcp(
   }
 
   switch (req.method) {
-    case "initialize":
+    case "initialize": {
+      const protocolVersion = negotiateProtocolVersion(req.params);
       return success(req.id, {
-        protocolVersion: MCP_PROTOCOL_VERSION,
+        protocolVersion,
         capabilities: {
-          tools: { listChanged: false },
+          // listChanged: true is the spec example and what Claude expects to
+          // see — keeps the capability shape identical to the SDK default.
+          tools: { listChanged: true },
         },
         serverInfo: SERVER_INFO,
         instructions:
           "Haven OS — internal operating system for Haven Vacation Rentals. Tools wrap Tasks, Lost Items, and Content Studio. Calls are scoped to the personal access token's owner; the token cannot do anything the owner cannot do.",
       });
+    }
 
     case "ping":
       return success(req.id, {});
 
     case "tools/list":
       return success(req.id, {
-        tools: MCP_TOOLS.filter((t) => hasApiScope(authCtx, t.scope)).map((t) => ({
-          name: t.name,
-          title: t.title ?? t.name,
-          description: t.description,
-          inputSchema: t.inputSchema,
-        })),
+        tools: MCP_TOOLS.filter((t) => hasApiScope(authCtx, t.scope)).map((t) => {
+          // `title` was only added to the Tool shape in 2025-06-18. Emit it
+          // alongside `name` + `description` + `inputSchema` — older clients
+          // ignore unknown fields per JSON-RPC, newer ones use it for the
+          // display label.
+          const out: Record<string, unknown> = {
+            name: t.name,
+            description: t.description,
+            inputSchema: t.inputSchema,
+          };
+          if (t.title) out.title = t.title;
+          return out;
+        }),
       });
 
     case "tools/call": {

@@ -19,9 +19,13 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { logApiAccess } from "@/lib/api-tokens/auth";
 import { authenticateMcpRequest } from "@/lib/mcp/auth-bearer";
-import { dispatchMcp } from "@/lib/mcp/server";
+import {
+  dispatchMcp,
+  MCP_SUPPORTED_PROTOCOL_VERSIONS,
+} from "@/lib/mcp/server";
 import {
   JSON_RPC_ERRORS,
   type JsonRpcRequest,
@@ -36,15 +40,24 @@ export const dynamic = "force-dynamic";
 // browser, so we need to allow it via CORS. We mirror the request's Origin
 // when present (rather than `*`) so browsers will send the
 // Authorization header.
+//
+// `Mcp-Session-Id` and `MCP-Protocol-Version` are part of the Streamable
+// HTTP transport handshake and must be both accepted on requests and
+// exposed on responses so Claude's browser-side connector can read them.
 // ---------------------------------------------------------------------------
+
+const ALLOWED_HEADERS =
+  "Authorization, Content-Type, Accept, Mcp-Session-Id, MCP-Session-Id, MCP-Protocol-Version, Last-Event-ID";
+const EXPOSED_HEADERS =
+  "Mcp-Session-Id, MCP-Session-Id, MCP-Protocol-Version, WWW-Authenticate";
 
 function corsHeaders(req: NextRequest): Record<string, string> {
   const origin = req.headers.get("origin");
   return {
     "Access-Control-Allow-Origin": origin ?? "*",
-    "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, MCP-Session-Id",
-    "Access-Control-Expose-Headers": "MCP-Session-Id, WWW-Authenticate",
+    "Access-Control-Allow-Methods": "POST, GET, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": ALLOWED_HEADERS,
+    "Access-Control-Expose-Headers": EXPOSED_HEADERS,
     "Access-Control-Max-Age": "600",
     Vary: "Origin",
   };
@@ -55,21 +68,62 @@ export async function OPTIONS(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  // Streamable HTTP MCP clients use POST. We expose GET to give humans a
-  // friendly hint and to act as a liveness probe.
+  const cors = corsHeaders(req);
+  const accept = req.headers.get("accept") ?? "";
+
+  // Per MCP Streamable HTTP spec: GET is used by clients to open a
+  // server-initiated SSE stream. We don't push server-initiated messages,
+  // so we explicitly return 405 — clients fall back to POST-only mode.
+  if (accept.includes("text/event-stream")) {
+    return new NextResponse(null, {
+      status: 405,
+      headers: { ...cors, Allow: "POST, OPTIONS" },
+    });
+  }
+
+  // Human / curl probe — friendly hint.
   return NextResponse.json(
     {
       server: "haven-os-mcp",
       transport: "streamable-http",
+      protocolVersions: MCP_SUPPORTED_PROTOCOL_VERSIONS,
       message:
         "POST JSON-RPC 2.0 requests to this URL with `Authorization: Bearer <hvn_pat_…>`. See /docs/HAVEN_OS_MCP.md.",
     },
-    { headers: corsHeaders(req) },
+    { headers: cors },
   );
+}
+
+// Allow clients to explicitly terminate a session. We're stateless, so
+// just acknowledge.
+export async function DELETE(req: NextRequest) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(req) });
 }
 
 export async function POST(req: NextRequest) {
   const cors = corsHeaders(req);
+
+  // Validate MCP-Protocol-Version header (spec: 2025-06-18 §Transports).
+  // If the client supplies one and we don't speak it, RFC says 400.
+  // Missing header → treat as 2025-03-26 default.
+  const clientProtocol = req.headers.get("mcp-protocol-version");
+  if (
+    clientProtocol &&
+    !(MCP_SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(clientProtocol)
+  ) {
+    return jsonRpcResponse(
+      {
+        jsonrpc: "2.0",
+        id: null,
+        error: {
+          code: JSON_RPC_ERRORS.invalidRequest,
+          message: `Unsupported MCP-Protocol-Version: ${clientProtocol}`,
+        },
+      },
+      400,
+      cors,
+    );
+  }
 
   const auth = await authenticateMcpRequest(req);
   if (!auth.ok) {
@@ -103,6 +157,7 @@ export async function POST(req: NextRequest) {
   }
 
   const responses: JsonRpcResponse[] = [];
+  let isInitialize = false;
   for (const r of requests) {
     if (!r || typeof r !== "object" || r.jsonrpc !== "2.0" || typeof r.method !== "string") {
       responses.push({
@@ -112,6 +167,8 @@ export async function POST(req: NextRequest) {
       });
       continue;
     }
+    if (r.method === "initialize") isInitialize = true;
+
     const res = await dispatchMcp(r, auth.ctx);
     if (res) responses.push(res);
 
@@ -130,14 +187,36 @@ export async function POST(req: NextRequest) {
     }).catch(() => {});
   }
 
+  // Per the Streamable HTTP spec, the server must return 202 Accepted with
+  // no body for notification-only / response-only POST bodies. (Some
+  // clients — Claude included — send `notifications/initialized` as a bare
+  // POST and may treat a JSON-RPC reply as a protocol violation.)
+  if (responses.length === 0) {
+    return new NextResponse(null, { status: 202, headers: cors });
+  }
+
+  const responseHeaders: Record<string, string> = { ...cors };
+
+  // Issue an Mcp-Session-Id on initialize. We're stateless so any opaque
+  // UUID works — clients echo it back on subsequent requests but we don't
+  // validate it. Returning one helps clients that branch on whether the
+  // server declared a session (Claude's connector does).
+  if (isInitialize) {
+    const sid =
+      req.headers.get("mcp-session-id") ??
+      req.headers.get("Mcp-Session-Id") ??
+      randomUUID();
+    responseHeaders["Mcp-Session-Id"] = sid;
+  }
+
   const payload: unknown = isBatch ? responses : responses[0];
-  return jsonRpcResponse(payload, 200, cors);
+  return jsonRpcResponse(payload, 200, responseHeaders);
 }
 
 function jsonRpcResponse(
   payload: unknown,
   status: number,
-  cors: Record<string, string>,
+  headers: Record<string, string>,
 ): NextResponse {
-  return NextResponse.json(payload, { status, headers: cors });
+  return NextResponse.json(payload, { status, headers });
 }
