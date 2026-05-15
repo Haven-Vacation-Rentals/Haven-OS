@@ -141,11 +141,11 @@ export default async function SettingsPage() {
             </div>
             <div className="flex-1">
               <div className="font-heading text-[14px] font-bold">
-                Personal Access Tokens
+                Personal Access Tokens &amp; Claude Connector
               </div>
               <div className="text-[12px] text-muted-foreground">
-                Create bearer tokens for external agents and scripts to call
-                the Haven OS API as you.
+                Create bearer tokens for external agents, or add Haven OS as a
+                custom Claude MCP connector (OAuth + PKCE).
               </div>
             </div>
             <ChevronRight className="h-4 w-4 text-muted-foreground" />

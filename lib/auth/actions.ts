@@ -20,7 +20,7 @@ import { canonicalBaseUrl } from "@/lib/canonical-url";
  * challenge and the callback would fail with "code challenge does
  * not match previously saved code verifier".
  */
-export async function signInWithGoogle(): Promise<void> {
+export async function signInWithGoogle(formData?: FormData): Promise<void> {
   if (!isSupabaseConfigured()) {
     throw new Error(
       "Supabase is not configured. Populate NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local.",
@@ -33,11 +33,14 @@ export async function signInWithGoogle(): Promise<void> {
   if (!supabase) throw new Error("Supabase client unavailable.");
 
   const origin = canonicalBaseUrl();
+  const requestedNext = sanitizeNext(
+    typeof formData?.get === "function" ? (formData.get("next") as string | null) : null,
+  );
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
-      redirectTo: `${origin}/auth/callback?next=/dashboard`,
+      redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(requestedNext)}`,
       queryParams: {
         // Internal tool — force Haven workspace picker every time.
         prompt: "select_account",
@@ -49,6 +52,20 @@ export async function signInWithGoogle(): Promise<void> {
   if (!data.url) throw new Error("No OAuth URL returned from Supabase.");
 
   redirect(data.url);
+}
+
+/**
+ * Constrain the post-login redirect to same-origin, relative paths
+ * starting with "/". Blocks open-redirect tricks from any caller
+ * that surfaces a user-controlled `next` parameter (/mcp/consent
+ * uses this to round-trip the OAuth state through Google sign-in).
+ */
+function sanitizeNext(raw: string | null | undefined): string {
+  if (!raw || typeof raw !== "string") return "/dashboard";
+  if (!raw.startsWith("/")) return "/dashboard";
+  if (raw.startsWith("//")) return "/dashboard";
+  if (raw.includes("\\")) return "/dashboard";
+  return raw;
 }
 
 export async function signOut(): Promise<void> {

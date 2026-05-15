@@ -5,6 +5,8 @@ import { requireUser } from "@/lib/auth/user";
 import { getPermissions } from "@/lib/auth/permissions";
 import { listOwnTokens } from "@/lib/api-tokens/actions";
 import { ApiTokensCard } from "@/components/settings/api-tokens-card";
+import { McpConnectorCard } from "@/components/settings/mcp-connector-card";
+import { listMyMcpConnectors } from "@/lib/mcp/oauth/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -14,9 +16,10 @@ export const metadata: Metadata = {
 
 export default async function ApiTokensSettingsPage() {
   await requireUser();
-  const [perm, tokens] = await Promise.all([
+  const [perm, tokens, connectors] = await Promise.all([
     getPermissions(),
     listOwnTokens(),
+    listMyMcpConnectors(),
   ]);
 
   return (
@@ -45,6 +48,8 @@ export default async function ApiTokensSettingsPage() {
         initialTokens={tokens}
         isSuperAdmin={perm.is_super_admin}
       />
+
+      <McpConnectorCard initialConnectors={connectors} />
     </div>
   );
 }

@@ -9,17 +9,18 @@
  *   GET  /api/mcp        — capability probe / SSE (we return a 405 hint;
  *                          Streamable HTTP clients use POST for everything)
  *
- * Auth: `Authorization: Bearer <hvn_pat_…>`
+ * Auth: `Authorization: Bearer <hvn_pat_…>` (Personal Access Token)
+ *       or `Authorization: Bearer <hvn_mcp_…>` (OAuth access token,
+ *       issued via the dynamic-client-registration + PKCE flow under
+ *       /api/mcp/oauth/*). The same scope catalog applies to both.
  *
  * Every successful tool call is logged to `api_access_logs` against the
  * token owner, just like /api/v1.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import {
-  authenticatePat,
-  logApiAccess,
-} from "@/lib/api-tokens/auth";
+import { logApiAccess } from "@/lib/api-tokens/auth";
+import { authenticateMcpRequest } from "@/lib/mcp/auth-bearer";
 import { dispatchMcp } from "@/lib/mcp/server";
 import {
   JSON_RPC_ERRORS,
@@ -43,7 +44,7 @@ function corsHeaders(req: NextRequest): Record<string, string> {
     "Access-Control-Allow-Origin": origin ?? "*",
     "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
     "Access-Control-Allow-Headers": "Authorization, Content-Type, MCP-Session-Id",
-    "Access-Control-Expose-Headers": "MCP-Session-Id",
+    "Access-Control-Expose-Headers": "MCP-Session-Id, WWW-Authenticate",
     "Access-Control-Max-Age": "600",
     Vary: "Origin",
   };
@@ -70,9 +71,10 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const cors = corsHeaders(req);
 
-  const auth = await authenticatePat(req);
+  const auth = await authenticateMcpRequest(req);
   if (!auth.ok) {
-    // authenticatePat already returns a 401 with the right shape.
+    // authenticateMcpRequest already returns a 401 with the right
+    // WWW-Authenticate hint pointing at /.well-known.
     const errRes = auth.response;
     for (const [k, v] of Object.entries(cors)) errRes.headers.set(k, v);
     return errRes;

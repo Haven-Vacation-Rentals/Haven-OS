@@ -18,13 +18,15 @@ const CORE_VALUES = [
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string }>;
 }) {
+  const { error, next: nextParam } = await searchParams;
+  const next = sanitizeLoginNext(nextParam);
+
   const user = await getCurrentUser();
-  if (user) redirect("/dashboard");
+  if (user) redirect(next ?? "/dashboard");
 
   const configured = isSupabaseConfigured();
-  const { error } = await searchParams;
 
   return (
     <div className="relative min-h-dvh overflow-hidden bg-foreground text-background">
@@ -72,7 +74,7 @@ export default async function LoginPage({
               </div>
             ) : null}
 
-            <GoogleSignInButton disabled={!configured} />
+            <GoogleSignInButton disabled={!configured} next={next ?? undefined} />
 
             <div className="mt-5 text-center text-[11px] text-background/55">
               <Link href="/dashboard" className="hover:text-[#FF564E]">
@@ -126,6 +128,14 @@ export default async function LoginPage({
       </div>
     </div>
   );
+}
+
+function sanitizeLoginNext(raw: string | undefined | null): string | null {
+  if (!raw || typeof raw !== "string") return null;
+  if (!raw.startsWith("/")) return null;
+  if (raw.startsWith("//")) return null;
+  if (raw.includes("\\")) return null;
+  return raw;
 }
 
 function NotConfiguredBanner() {

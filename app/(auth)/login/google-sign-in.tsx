@@ -11,17 +11,24 @@ import { Button } from "@/components/ui/button";
  * `variant="cta"` matches the havenvacationrentals.com button spec
  * exactly: pill / uppercase / 2px tracking / 900 weight.
  */
-export function GoogleSignInButton({ disabled }: { disabled?: boolean }) {
+export function GoogleSignInButton({
+  disabled,
+  next,
+}: {
+  disabled?: boolean;
+  next?: string;
+}) {
   const [pending, startTransition] = useTransition();
 
   return (
     <form
-      action={() => {
+      action={(formData: FormData) => {
         startTransition(async () => {
-          await signInWithGoogle();
+          await signInWithGoogle(formData);
         });
       }}
     >
+      {next ? <input type="hidden" name="next" value={next} /> : null}
       <Button
         type="submit"
         variant="cta"

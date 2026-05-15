@@ -10,12 +10,44 @@ local proxy or stdio bridge — Claude connects directly over HTTPS, with
 a Personal Access Token (PAT) used as the bearer credential.
 
 - **Endpoint:** `https://www.havenvros.com/api/mcp`
-- **Auth:** `Authorization: Bearer hvn_pat_…`
+- **Auth:** `Authorization: Bearer hvn_pat_…` (PAT)
+  *or* OAuth 2.0 + PKCE (`Authorization: Bearer hvn_mcp_…`,
+  issued via `/api/mcp/oauth/*` — Claude's "Add custom connector"
+  flow uses this automatically)
 - **Transport:** Streamable HTTP (JSON-RPC 2.0 POST)
 
 ## Connecting from Claude
 
-### claude.ai (remote MCP)
+### Claude (web + mobile) — recommended, OAuth flow
+
+The simplest path. Claude does the OAuth + PKCE handshake itself; no
+token to paste.
+
+1. In Claude (web), open **Settings → Connectors → Add custom
+   connector**.
+2. Enter the URL `https://www.havenvros.com/api/mcp`.
+3. Claude pops open Haven OS. Sign in with your Haven Google account if
+   prompted, then approve the requested scopes on the
+   `/mcp/consent` screen.
+4. You're done — Claude (web *and* mobile, on the same Claude account)
+   can now use the Haven OS tool set.
+
+Behind the scenes Claude calls these endpoints:
+
+- `GET  /.well-known/oauth-authorization-server` — server metadata
+- `GET  /.well-known/oauth-protected-resource` — resource metadata
+- `POST /api/mcp/oauth/register` — dynamic client registration (public client, no secret)
+- `GET  /api/mcp/oauth/authorize` — auth code w/ PKCE S256
+- `POST /api/mcp/oauth/token` — exchange code → access (1h) + refresh (30d)
+- `POST /api/mcp/oauth/revoke` — RFC 7009 revocation
+
+Access tokens use the `hvn_mcp_…` prefix to distinguish them from PATs;
+both are accepted on `/api/mcp` and share the same scope catalog.
+
+You can revoke an approved connector anytime from **Settings →
+Personal Access Tokens** under "Claude Connector (MCP)".
+
+### claude.ai (remote MCP) — legacy PAT path
 
 1. In Haven OS, open **Settings → Personal Access Tokens** and mint a
    token. Either grant `platform:full` (broad) or the narrow set the
@@ -91,11 +123,16 @@ gets type information, enum values, and field descriptions inline.
 
 Scopes match the existing `/api/v1` system:
 
-- `platform:full` satisfies any scope check (broadest grant).
+- `platform:full` satisfies any scope check (broadest grant). PAT only;
+  not selectable via the Claude OAuth consent screen.
 - `tasks:read` / `tasks:write` — Tasks tools.
 - `lost-items:read` / `lost-items:write` — Lost Items tools.
 - `content:read` / `content:write` — Content Studio tools.
 - `me:read` — `get_me`.
+
+The Claude OAuth flow advertises and accepts only the granular
+subset above (`me:read`, `tasks:*`, `lost-items:*`, `content:*`) so a
+connector can never be issued the broad `platform:full` grant.
 
 If a token lacks a tool's scope, that tool is hidden from `tools/list`
 and `tools/call` returns `-32002 forbidden`. Calls never elevate the
@@ -132,7 +169,13 @@ activity per token.
   forwarded. claude.ai stores the secret in connector config; Claude
   Code reads it from `mcp.json` or `--header`.
 - **`401 Token expired` / `Token revoked`** — re-mint or unrevoke from
-  Settings → Personal Access Tokens.
+  Settings → Personal Access Tokens. For OAuth (`hvn_mcp_…`) tokens,
+  Claude will refresh automatically as long as the refresh token is
+  valid — if a 401 persists, remove and re-add the connector in
+  Claude.
+- **`WWW-Authenticate` header on 401** — `/api/mcp` always advertises
+  the protected-resource metadata URL on 401 so MCP clients can
+  bootstrap the OAuth flow without prior config.
 - **`-32002 Token missing required scope`** — the token doesn't carry
   the scope the tool needs. Edit it in Settings and retry.
 - **`Tool returned isError: true`** — the protocol call succeeded but
