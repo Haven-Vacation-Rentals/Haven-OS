@@ -41,10 +41,12 @@ export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) {
     // Should not happen — /mcp/consent gates on requireUser — but be
-    // defensive and bounce to login.
+    // defensive and bounce to login. 303 so the browser follows with
+    // GET instead of replaying this POST.
     const next = `/mcp/consent?ck=${encodeURIComponent(ck)}`;
     return NextResponse.redirect(
       `${new URL(req.url).origin}/login?next=${encodeURIComponent(next)}`,
+      { status: 303 },
     );
   }
 
@@ -89,12 +91,16 @@ export async function POST(req: NextRequest) {
   const u = new URL(payload.r);
   u.searchParams.set("code", raw);
   if (payload.st) u.searchParams.set("state", payload.st);
-  return NextResponse.redirect(u.toString());
+  // 303 See Other: convert the POST into a GET on the client's
+  // redirect_uri. Without this, the browser preserves POST (the
+  // default for 307 from NextResponse.redirect) and Claude's callback
+  // returns 405 "Method Not Allowed".
+  return NextResponse.redirect(u.toString(), { status: 303 });
 }
 
 function redirectWithError(redirectUri: string, code: string, state: string | null) {
   const u = new URL(redirectUri);
   u.searchParams.set("error", code);
   if (state) u.searchParams.set("state", state);
-  return NextResponse.redirect(u.toString());
+  return NextResponse.redirect(u.toString(), { status: 303 });
 }

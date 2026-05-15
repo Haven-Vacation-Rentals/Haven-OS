@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
   });
 
   const consentPath = `/mcp/consent?ck=${encodeURIComponent(consentToken)}`;
-  return NextResponse.redirect(`${url.origin}${consentPath}`);
+  return NextResponse.redirect(`${url.origin}${consentPath}`, { status: 302 });
 }
 
 function renderError(req: NextRequest, code: string, description: string) {
@@ -118,7 +118,7 @@ function redirectWithError(
   u.searchParams.set("error", code);
   if (description) u.searchParams.set("error_description", description);
   if (state) u.searchParams.set("state", state);
-  return NextResponse.redirect(u.toString());
+  return NextResponse.redirect(u.toString(), { status: 302 });
 }
 
 function escapeHtml(s: string): string {
