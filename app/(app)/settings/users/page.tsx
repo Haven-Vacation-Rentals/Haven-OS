@@ -10,7 +10,9 @@ import {
   listSurveysForAdmin,
 } from "@/lib/admin/actions";
 import { listEmployees } from "@/lib/hr/actions";
+import { listExternalInvites } from "@/lib/admin/invites";
 import { UserPermissionsTable } from "@/components/settings/user-permissions-table";
+import { ExternalInvitesCard } from "@/components/settings/external-invites-card";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -22,7 +24,7 @@ export default async function UsersSettingsPage() {
   const perm = await getPermissions();
   if (!perm.is_super_admin) redirect("/settings" as never);
 
-  const [users, departments, grants, moduleGrants, employees, surveys] =
+  const [users, departments, grants, moduleGrants, employees, surveys, invites] =
     await Promise.all([
       listUsers(),
       listDepartments(true),
@@ -30,6 +32,7 @@ export default async function UsersSettingsPage() {
       listHrModuleGrants(),
       listEmployees(),
       listSurveysForAdmin(),
+      listExternalInvites(),
     ]);
 
   return (
@@ -51,6 +54,8 @@ export default async function UsersSettingsPage() {
         employees={employees}
         currentUserId={perm.user_id ?? ""}
       />
+
+      <ExternalInvitesCard invites={invites} />
     </div>
   );
 }

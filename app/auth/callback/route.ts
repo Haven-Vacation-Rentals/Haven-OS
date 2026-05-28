@@ -1,7 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { getAdminClient } from "@/lib/supabase/admin";
 import { canonicalBaseUrl } from "@/lib/canonical-url";
+import { isHavenDomainEmail } from "@/lib/auth/allowed-emails";
+import {
+  findActiveInviteForEmailAdmin,
+  markInviteAcceptedAdmin,
+  applyInviteDefaultsAdmin,
+} from "@/lib/admin/invites";
 
 /**
  * OAuth return endpoint.
@@ -13,6 +20,14 @@ import { canonicalBaseUrl } from "@/lib/canonical-url";
  * We rebase the redirect on the canonical app URL so that even if
  * Supabase's redirect_uri pointed at the raw Vercel hostname, the
  * authenticated user lands back on the custom domain.
+ *
+ * Domain restriction:
+ *   - Haven domain emails (havenvacationrentals.com / haven.com) pass.
+ *   - Any other email must have an active row in `external_invites`.
+ *     If not, we sign the user out, wipe their cookies, and bounce
+ *     them back to /login with a friendly error. This is a defense-
+ *     in-depth check; Google's OAuth consent screen (Internal user
+ *     type or Workspace allowlist) should already block most cases.
  *
  * If the PKCE exchange fails because the verifier cookie was written
  * on a different host (e.g. the user started on the Vercel URL and
@@ -37,7 +52,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${base}/login?error=not_configured`);
   }
 
-  const { error } = await supabase.auth.exchangeCodeForSession(code);
+  const { data: exchanged, error } = await supabase.auth.exchangeCodeForSession(code);
   if (error) {
     if (isVerifierMismatch(error.message)) {
       const response = NextResponse.redirect(
@@ -49,6 +64,37 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(
       `${base}/login?error=${encodeURIComponent(error.message)}`,
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Domain / invite gate
+  // -------------------------------------------------------------------------
+  const sessionUser = exchanged.user;
+  const sessionEmail = sessionUser?.email ?? "";
+  if (sessionUser && sessionEmail && !isHavenDomainEmail(sessionEmail)) {
+    const invite = await findActiveInviteForEmailAdmin(sessionEmail);
+    if (!invite) {
+      await supabase.auth.signOut();
+      const response = NextResponse.redirect(
+        `${base}/login?error=not_invited`,
+      );
+      await clearSupabaseCookies(request, response);
+      // Best-effort: remove the just-created Supabase auth.users row so
+      // a stale, unusable user doesn't accumulate. The profiles row
+      // (if any) cascades via the FK on auth.users.id.
+      try {
+        const admin = getAdminClient();
+        await admin.auth.admin.deleteUser(sessionUser.id);
+      } catch (e) {
+        console.error("callback: failed to delete uninvited user", e);
+      }
+      return response;
+    }
+    await applyInviteDefaultsAdmin(sessionUser.id, {
+      full_name: invite.full_name,
+      role: invite.role,
+    });
+    await markInviteAcceptedAdmin(invite.id, sessionUser.id);
   }
 
   return NextResponse.redirect(`${base}${next}`);

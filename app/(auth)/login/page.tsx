@@ -69,7 +69,9 @@ export default async function LoginPage({
                       ? "Supabase is not configured yet."
                       : error === "auth_session_expired"
                         ? "Your sign-in session expired. We've cleared it — please try again."
-                        : decodeURIComponent(error)}
+                        : error === "not_invited"
+                          ? "That Google account isn't on the Haven allowlist. Ask a Haven super admin to invite your address."
+                          : decodeURIComponent(error)}
                 </span>
               </div>
             ) : null}
