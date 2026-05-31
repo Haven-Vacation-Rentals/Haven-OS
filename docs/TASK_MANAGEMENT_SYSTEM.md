@@ -8,15 +8,21 @@
 > shell over a shared, ClickUp-parity engine that lives in `lib/work/*` (server) and
 > `components/work/*` (client). Replicating "My Tasks" means replicating that engine.
 >
-> **How to read this document.** Sections 1–13 describe the system. **Section 15 ("Accuracy,
-> Security & Operational Addenda") is mandatory reading before you ship** — it documents the
-> real security posture (RLS is intentionally permissive; access is enforced in server actions,
-> with gaps), exact RLS policies, data-integrity constraints that are *not* enforced today,
-> transaction/concurrency behavior, validation, archival, and a test plan. Where this document
-> says something "should" be enforced but isn't, it is flagged **⚠️ GAP** (a real
-> characteristic of the current code) or **➕ RECOMMENDED** (a suggested addition that is *not*
-> in the codebase today). The base spec documents **actual current behavior**; recommendations
-> are always marked.
+> **How to read this document — two modes.** The doc deliberately separates **"faithful mode"**
+> from **"ship-safe mode"**:
+> - **Faithful mode (§1–§15):** reproduce Haven OS *exactly as it is today*, gaps and all. This is
+>   what you want for a 1:1 clone. Sections 1–14 describe the system; **§15 is mandatory** — it
+>   documents the real security posture (RLS is intentionally permissive; access is enforced in
+>   server actions, with gaps), exact RLS policies, integrity constraints that are *not* enforced
+>   today, transaction/concurrency behavior, validation, archival, and a test plan.
+> - **Ship-safe mode (§16):** the consolidated, prioritized delta to make the system safe for real
+>   multi-tenant use (close action gates, harden RLS/storage, add the timer index, transactionize
+>   multi-step ops, etc.). Build faithful mode first, then apply §16.
+>
+> Where this document says something "should" be enforced but isn't, it is flagged **⚠️ GAP** (a
+> real characteristic of the current code) or **➕ RECOMMENDED** (a suggested addition that is *not*
+> in the codebase today — every §16 item is one of these). The base spec documents **actual current
+> behavior**; recommendations are always marked.
 >
 > **Core security assumption (read this first):** the entire access model assumes **all writes
 > and sensitive reads go through these Next.js Server Actions, and end-user clients never talk
@@ -60,6 +66,7 @@
     - 15.14 Test plan
     - 15.15 Performance & scale assumptions
     - 15.16 Mobile & accessibility (scope note)
+16. [Recommended Production Mode (ship-safe profile)](#16-recommended-production-mode-ship-safe-profile)
 
 ---
 
@@ -100,8 +107,10 @@ Personal "My Tasks" list = a List with space_id = NULL and personal_owner_id = <
   **fine-grained access control is enforced in the server actions**, not RLS.
 - **Optimistic UI**: client components mutate local React state immediately, then fire the
   server action inside `useTransition`. On failure they roll back and show a `sonner` toast.
-- **Cache invalidation**: every mutating action calls `revalidatePath("/work", "layout")` and
-  `revalidatePath("/my-tasks")` so server components re-fetch.
+- **Cache invalidation**: mutating actions call `revalidatePath(...)` so server components
+  re-fetch — but **not uniformly**. Core CRUD revalidates `/work` (layout) **and** `/my-tasks`;
+  the later ClickUp-parity CRUD (statuses, fields, checklists, time, comments, attachments)
+  revalidates **only** `/work`. This is a real inconsistency — see the authoritative table in §15.7.
 
 ### The two views built on the same engine
 
@@ -152,13 +161,22 @@ Scripts: `dev: next dev`, `build: next build`, `start: next start`, `lint: next 
 Assumes a `public.profiles` table keyed by the Supabase auth user id:
 
 ```sql
--- profiles(id uuid pk = auth.users.id, full_name text, email text, avatar_url text, role text, ...)
+-- profiles(id uuid primary key = auth.users.id, full_name text, email text, avatar_url text, role text, ...)
 ```
 
-And a shared trigger function used everywhere:
+And a shared trigger function used everywhere (full body):
 
 ```sql
-create or replace function public.tg_set_updated_at() ...  -- sets new.updated_at = now()
+create or replace function public.tg_set_updated_at()
+returns trigger
+language plpgsql
+set search_path = public, pg_temp
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
 ```
 
 ### 3.2 Core Work schema (migration 0002 — `0002_work_module.sql`)
@@ -363,13 +381,20 @@ create table public.comments (
 **Seed helper** (called when any list is created):
 
 ```sql
-create function public.seed_default_statuses(p_list_id uuid) returns void ... as $$
+create or replace function public.seed_default_statuses(p_list_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
   insert into public.statuses (list_id, name, color, category, "order") values
     (p_list_id, 'To Do',       '#94a3b8', 'todo',        0),
     (p_list_id, 'In Progress', '#3b82f6', 'in_progress', 1),
     (p_list_id, 'In Review',   '#f59e0b', 'in_progress', 2),
     (p_list_id, 'Done',        '#22c55e', 'done',        3),
     (p_list_id, 'Closed',      '#6b7280', 'closed',      4);
+end;
 $$;
 ```
 
@@ -494,7 +519,7 @@ create index idx_task_assignees_task_id   on public.task_assignees(task_id);
 
 ```sql
 create table public.checklists (
-  id uuid pk default gen_random_uuid(),
+  id uuid primary key default gen_random_uuid(),
   task_id uuid not null references public.tasks(id) on delete cascade,
   name text not null default 'Checklist',
   "order" integer not null default 0,
@@ -506,7 +531,7 @@ create table public.checklists (
 
 ```sql
 create table public.checklist_items (
-  id uuid pk default gen_random_uuid(),
+  id uuid primary key default gen_random_uuid(),
   checklist_id uuid not null references public.checklists(id) on delete cascade,
   content text not null,
   completed boolean not null default false,
@@ -521,7 +546,7 @@ create table public.checklist_items (
 
 ```sql
 create table public.time_entries (
-  id uuid pk default gen_random_uuid(),
+  id uuid primary key default gen_random_uuid(),
   task_id uuid not null references public.tasks(id) on delete cascade,
   user_id uuid not null references public.profiles(id),
   description text,
@@ -536,7 +561,7 @@ create table public.time_entries (
 
 ```sql
 create table public.task_activity (
-  id uuid pk default gen_random_uuid(),
+  id uuid primary key default gen_random_uuid(),
   task_id uuid not null references public.tasks(id) on delete cascade,
   actor_id uuid references public.profiles(id),
   action text not null,          -- 'created','status_changed','priority_changed',...
@@ -552,7 +577,7 @@ create index idx_task_activity_task_id_created_at on public.task_activity(task_i
 
 ```sql
 create table public.task_attachments (
-  id uuid pk default gen_random_uuid(),
+  id uuid primary key default gen_random_uuid(),
   task_id uuid not null references public.tasks(id) on delete cascade,
   uploader_id uuid references public.profiles(id),
   file_name text not null,
@@ -567,14 +592,56 @@ create table public.task_attachments (
 
 ```sql
 -- 1) Log status changes into task_activity (fires only when status_id changes)
-create function public.tg_log_task_status_change() ... 
-create trigger tg_log_task_status_change after update on public.tasks for each row ...;
+create or replace function public.tg_log_task_status_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if (old.status_id is distinct from new.status_id) then
+    insert into public.task_activity (task_id, actor_id, action, from_value, to_value, metadata)
+    values (
+      new.id, auth.uid(), 'status_changed',
+      jsonb_build_object('status_id', old.status_id),
+      jsonb_build_object('status_id', new.status_id),
+      '{}'::jsonb
+    );
+  end if;
+  return new;
+end;
+$$;
+create trigger tg_log_task_status_change after update on public.tasks
+  for each row execute function public.tg_log_task_status_change();
 
 -- 2) Keep tasks.completed_at in sync with the status CATEGORY:
---    moving to a 'done' or 'closed' status sets completed_at = now();
---    any other status (or null) clears it.
-create function public.tg_update_task_completed_at() ...
-create trigger tg_update_task_completed_at before update on public.tasks for each row ...;
+--    moving to a 'done' or 'closed' status sets completed_at = now(); else clears it.
+create or replace function public.tg_update_task_completed_at()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_category task_status_category;
+begin
+  if (old.status_id is distinct from new.status_id) then
+    if new.status_id is not null then
+      select category into v_category from public.statuses where id = new.status_id;
+      if v_category in ('done', 'closed') then
+        new.completed_at = now();
+      else
+        new.completed_at = null;
+      end if;
+    else
+      new.completed_at = null;  -- status cleared
+    end if;
+  end if;
+  return new;
+end;
+$$;
+create trigger tg_update_task_completed_at before update on public.tasks
+  for each row execute function public.tg_update_task_completed_at();
 ```
 
 > **Why this matters for replication:** "done-ness" is derived from the status *category*, not a
@@ -591,7 +658,11 @@ alter table public.lists add column personal_owner_id uuid references public.pro
 create unique index lists_personal_owner_unique on public.lists (personal_owner_id)
   where personal_owner_id is not null;
 
--- a list must be anchored to EITHER a space OR a personal owner
+-- A list must have AT LEAST ONE of {space_id, personal_owner_id}. NOTE: this is an
+-- inclusive OR — the constraint does NOT forbid a row from having BOTH set. In practice
+-- the code never creates such a row (personal lists are inserted with space_id=null), but
+-- the DB does not enforce mutual exclusivity. ➕ If you want exactly-one, use XOR:
+--   check ((space_id is not null) <> (personal_owner_id is not null))
 alter table public.lists add constraint lists_space_or_owner_chk
   check (space_id is not null or personal_owner_id is not null);
 
@@ -693,12 +764,50 @@ grant execute on function public.user_has_list_access(uuid,uuid,text) to authent
 create extension if not exists pg_trgm;
 alter table public.tasks add column search_vector tsvector;
 
--- weighted vector: title (A) + description (B) + joined comment bodies (C)
-create function public.tasks_search_vector(p_task_id uuid) returns tsvector ...;
+-- Weighted vector: title (A) + description (B) + joined comment bodies (C).
+create or replace function public.tasks_search_vector(p_task_id uuid)
+returns tsvector
+language sql
+stable
+as $$
+  with t as (select title, description from public.tasks where id = p_task_id),
+       c as (select string_agg(body, ' ') as body from public.comments where task_id = p_task_id)
+  select
+    setweight(to_tsvector('english', coalesce((select title from t), '')), 'A') ||
+    setweight(to_tsvector('english', coalesce((select description from t), '')), 'B') ||
+    setweight(to_tsvector('english', coalesce((select body from c), '')), 'C');
+$$;
 
--- recompute on task title/description change AND on any comment change to that task
-create trigger tasks_search_vector_trg before insert or update of title, description ...;
-create trigger ... on public.comments ...;   -- recomputes parent task's vector
+-- Recompute when the task's own title/description changes.
+create or replace function public.tg_tasks_refresh_search_vector()
+returns trigger language plpgsql as $$
+begin
+  new.search_vector := public.tasks_search_vector(new.id);
+  return new;
+end;
+$$;
+create trigger tasks_search_vector_trg
+  before insert or update of title, description on public.tasks
+  for each row execute function public.tg_tasks_refresh_search_vector();
+
+-- Recompute the PARENT task's vector when any of its comments change.
+create or replace function public.tg_comments_refresh_task_search()
+returns trigger language plpgsql as $$
+declare v_task_id uuid;
+begin
+  v_task_id := coalesce(new.task_id, old.task_id);
+  if v_task_id is null then return coalesce(new, old); end if;
+  update public.tasks set search_vector = public.tasks_search_vector(v_task_id) where id = v_task_id;
+  return coalesce(new, old);
+end;
+$$;
+create trigger comments_refresh_task_search_trg
+  after insert or update or delete on public.comments
+  for each row execute function public.tg_comments_refresh_task_search();
+
+-- GIN indexes for fast matching (FTS + trigram fuzzy on title):
+create index tasks_search_vector_idx on public.tasks using gin (search_vector);
+create index tasks_title_trgm_idx    on public.tasks using gin (title gin_trgm_ops);
 ```
 
 Query side uses `websearch_to_tsquery('english', term)` for terms ≥ 3 chars, falling back to
@@ -1796,9 +1905,12 @@ Build in this order; each step is independently testable.
    position="bottom-right" />` once in a layout.
 2. **Supabase**: create the project; add the server client (`@supabase/ssr`, cookie-based) and
    `requireUser()`/`getPermissions()` auth helpers (§5.2). Provide a `profiles` table + `tg_set_updated_at`.
-3. **Schema**: run migrations 0002 → 0003 → 0008 → 0009 → 0010 → 0011 → 0023 (and 0031 + the storage
-   bucket if you want search/attachments). Verify enums, triggers (`tg_sync_assignee_ids`,
-   `tg_log_task_status_change`, `tg_update_task_completed_at`), and `seed_default_statuses`.
+3. **Schema**: run migrations **0002 → 0003 → 0006 → 0008 → 0009 → 0010 → 0011 → 0023** (and 0031 +
+   the storage bucket if you want search/attachments). **Migration 0006 is required** — it creates
+   `list_members` and `task_watchers`, adds `lists.type`, adds `task_assignees.role`/`sort_order`,
+   and wires the list/space auto-add-creator triggers (§3.3b). Verify enums, triggers
+   (`tg_sync_assignee_ids`, `tg_log_task_status_change`, `tg_update_task_completed_at`,
+   `tg_auto_add_list_creator`, `tg_auto_add_space_creator`), and `seed_default_statuses`.
    **Don't forget** the `role` column on `task_assignees` and `access_level` on `list_members`.
 4. **Types**: drop in `lib/work/types.ts` verbatim (§4).
 5. **Actions**: implement `lib/work/actions.ts` (§6) including the access helpers (§5) and
@@ -1830,7 +1942,14 @@ Build in this order; each step is independently testable.
   due-date/delete work with toasts.
 - Detail drawer tabs (Details/Checklist/Comments/Activity/Time) all function; recurrence config saves
   and a completed recurring task reopens on its next due date in the first "to do" status.
-- Everything is access-gated: another user cannot read or mutate your personal list.
+- **Through the list-scoped UI and gated actions** (`getTasksForListView`, `getStatuses`,
+  `createTask`/`updateTask`/`deleteTask`, etc.), another user cannot read or mutate your personal
+  list. ⚠️ **Caveat (current behavior):** several by-id reads/mutations are *not* list-gated
+  (`getTask`, `getComments`, `getChecklists`, `getTaskAttachments`, `setTaskFieldValue`, watcher/
+  timer/checklist actions — see §15.3), so a signed-in user who knows a task's UUID can still leak
+  or alter that task's data outside the list-scoped path. Closing those gates is part of
+  **§16 (Recommended Production Mode)**. Decide which guarantee you actually want before claiming
+  "private."
 
 ---
 
@@ -1944,10 +2063,11 @@ read/delete are bucket-wide (see §3.10). `comments` is the model to copy for pe
 
 > **For a faithful replication you have two honest choices:** (a) reproduce these gaps exactly
 > (matches today's behavior) and document them, or (b) close them by adding `requireListAccess`
-> to the ⚠️ rows. The base spec reflects (a). The acceptance test in §11 ("another user cannot
-> read or mutate your personal list") **passes only because** personal-list reads in the UI go
-> through the gated `getTasksForListView`; the ungated `getTask`/`getComments`/etc. would leak a
-> personal task's contents to any signed-in user who knows the id. Decide deliberately.
+> to the ⚠️ rows. The base spec reflects (a); **§16 is the consolidated path to (b).** The
+> acceptance criterion in §14 ("another user cannot read or mutate your personal list") **holds only
+> for the list-scoped UI path** because personal-list reads go through the gated
+> `getTasksForListView`; the ungated `getTask`/`getComments`/etc. would leak a personal task's
+> contents to any signed-in user who knows the id. Decide deliberately.
 
 ### 15.4 Data-integrity constraints: enforced vs. gaps
 
@@ -1975,18 +2095,38 @@ read/delete are bucket-wide (see §3.10). `comments` is the model to copy for pe
   `custom_field_defs.id` of the task's list, nor type-checked against the def.
 - `time_estimate`, recurrence `interval`/`day_of_month` ranges are only loosely guarded in the UI.
 
-➕ **RECOMMENDED** (DB-side examples):
-```sql
--- same-list status (composite FK):
-alter table public.statuses add unique (id, list_id);
-alter table public.tasks add constraint tasks_status_same_list
-  foreign key (status_id, list_id) references public.statuses(id, list_id) on delete set null;
--- same-list parent:
-alter table public.tasks add constraint tasks_parent_same_list
-  foreign key (parent_id, list_id) references public.tasks(id, list_id) on delete cascade; -- needs unique(id,list_id) on tasks
-```
-…plus a recursive `BEFORE INSERT/UPDATE` trigger or server check for cycles, and a server-side
-validation that custom-field keys/values match the list's defs.
+➕ **RECOMMENDED** — but mind the footguns:
+
+> ⚠️ **A composite FK with `ON DELETE SET NULL` is unsafe here.** `foreign key (status_id, list_id)
+> references statuses(id, list_id) on delete set null` would, when a status is deleted, try to NULL
+> **both** referencing columns — including `list_id`, which is `NOT NULL` → the delete errors out.
+> `MATCH SIMPLE` (the default) only skips the check when *all* FK columns are NULL, so partial-null
+> tricks don't help either. **Do not use a composite FK for the same-list status invariant.**
+> Prefer a **trigger or server-side validation** instead:
+>
+> ```sql
+> -- same-list status, enforced by trigger (keeps status_id nullable + list_id NOT NULL intact):
+> create or replace function public.tg_task_status_same_list()
+> returns trigger language plpgsql as $$
+> begin
+>   if new.status_id is not null and not exists (
+>     select 1 from public.statuses s where s.id = new.status_id and s.list_id = new.list_id
+>   ) then
+>     raise exception 'status % does not belong to list %', new.status_id, new.list_id;
+>   end if;
+>   return new;
+> end; $$;
+> create trigger task_status_same_list before insert or update of status_id, list_id
+>   on public.tasks for each row execute function public.tg_task_status_same_list();
+> ```
+>
+> The same applies to `deleteStatus(reassignTo)` (validate `reassignTo` shares the list — easiest in
+> the server action or the same RPC) and to the **same-list parent** rule. A composite FK for the
+> parent *can* work with `on delete cascade` (cascade nulls nothing), but it requires a
+> `unique (id, list_id)` on `tasks` and careful handling when a task moves lists; a `BEFORE` trigger
+> that also walks the ancestor chain is simpler and additionally gives you **cycle prevention**
+> (§15.9) in one place. Custom-field key/value validity (key ∈ the list's defs, value matches the
+> def type) should likewise be a server-side check on `setTaskFieldValue`/`updateTask`.
 
 ### 15.5 Transaction boundaries for multi-step operations
 
@@ -2252,6 +2392,83 @@ These are deliberate scope choices in the current build — call them out rather
   framer-motion animations. Add: focus trap + return focus, ARIA roles on custom menus, visible
   focus rings everywhere (most interactive elements already use `focus-visible:ring`), text labels
   alongside color, and a reduced-motion guard.
+
+---
+
+## 16. Recommended Production Mode (ship-safe profile)
+
+> **Why this section exists.** §15 documents *faithful current behavior* (including gaps) so a
+> replica can match Haven OS exactly. This section is the opposite lens: the **minimum changes to
+> make the system safe to expose to real, mutually-distrusting users.** Build the base spec first
+> (§1–§14 = "faithful mode"); then apply this checklist to reach "ship-safe mode." Every item here
+> is **➕ NOT in the current codebase** — it is the recommended delta. Ordered by priority.
+
+**Read this as: "faithful mode" = reproduce §1–§15 as-is. "Ship-safe mode" = faithful mode + the
+deltas below.** Where §15 says "current behavior is X (⚠️)", the corresponding fix lives here.
+
+### P0 — Authorization & data exposure (do before any multi-tenant launch)
+1. **Close the action access gates (§15.3).** Add `requireListAccess(listId, "editor")` (or
+   `"viewer"` for reads) to every ⚠️ action: `getTask`, `getTasksWithHierarchy`, `getComments`,
+   `getChecklists`, `getWatchers`, `getTaskActivity`, `getTaskTimeTotal`, `getTaskAttachments`,
+   `getActiveTimer`, `duplicateTask`, `reorderTask(s)`, status CRUD, field-def CRUD,
+   `setTaskFieldValue`, `addAssignee`/`removeAssignee`/`setPrimaryAssignee`, watcher CRUD,
+   checklist CRUD, time CRUD, `createComment`/`addComment`, attachment CRUD, `createFolder`/
+   `updateFolder`/`deleteFolder`. For child rows, resolve the parent task's `list_id` first, then
+   gate. Scope `delete`/`stop` of time entries and attachments to the owner (or list admin).
+2. **Harden RLS as defense-in-depth (§15.1/§15.2).** Replace the permissive policies on the Work
+   tables with policies that call `public.user_has_list_access(auth.uid(), <list_id>, '<level>')`
+   (the function already ships — §3.8). Join through `tasks` for child tables. This makes the
+   "clients never touch Supabase directly" assumption no longer load-bearing.
+3. **Fix the `task_assignees` UPDATE-policy bug (§15.2).** Add
+   `create policy "ta update auth" on public.task_assignees for update using (auth.uid() is not null)`
+   (or a list-scoped predicate) so `setPrimaryAssignee` works under RLS.
+4. **Harden the attachment bucket (§3.10).** Scope `select`/`delete` to objects whose
+   `task_attachments.storage_path` belongs to a task on a list the caller can access; scope `delete`
+   to the uploader (first path segment) or list admin; set `allowed_mime_types`; sanitize
+   `file.name` before building the storage path.
+
+### P1 — Integrity & correctness
+5. **Same-list invariants via triggers/validation (§15.4).** Enforce status/parent belong to the
+   task's list, and `reassignTo` belongs to the list, with `BEFORE` triggers or server checks
+   (**not** an `ON DELETE SET NULL` composite FK — see the §15.4 footgun note).
+6. **Cycle prevention for subtasks (§15.9).** Before reparenting (DnD and `updateTask({parent_id})`),
+   walk the ancestor chain and refuse if the active task is an ancestor of the target; ideally also
+   a DB trigger.
+7. **One active timer per user (§15.6).** Add the partial unique index
+   `create unique index time_entries_one_active_per_user on public.time_entries(user_id) where ended_at is null;`
+   and have `startTimer` catch the unique violation.
+8. **Custom-field value validation (§15.4/§15.11).** On `setTaskFieldValue`/`updateTask`, verify the
+   key is a real `custom_field_defs.id` of the task's list and the value matches the def type/options.
+
+### P2 — Atomicity & consistency
+9. **Transactionize multi-step ops (§15.5).** Move into single `security definer` RPCs:
+   personal-list creation (insert + seed statuses + owner membership, with
+   `on conflict (personal_owner_id) do nothing` to also fix the first-visit race, §15.6); `createList`
+   (insert + seed); `deleteStatus` (reassign + delete, with a row lock); the batch reorders
+   (`reorderTasks`/`reorderStatuses`/`reorderFieldDefs` as one bulk `update … from (values …)`);
+   and completion + recurrence rollover as one transaction so a recurring task never ends up
+   "completed but not rolled forward."
+10. **Normalize cache invalidation (§15.7).** Introduce one helper
+    (`revalidateWork()` → `revalidatePath("/work","layout")` + `revalidatePath("/my-tasks")`) and
+    call it from **every** mutation, including the ClickUp-parity CRUD that today only revalidates
+    `/work`.
+11. **Owner gets admin on their own list (§3.3b GAP).** Have `tg_auto_add_list_creator` insert
+    `access_level='admin'` for owners (or have `createList` upsert the owner grant like
+    `getOrCreatePersonalList` does), so post-0023 list creators aren't stuck at `editor`.
+
+### P3 — UX/feature completeness & scale
+12. **Archive UI + restore (§15.10).** Add an archive affordance (row/drawer) and a restore path;
+    decide whether archiving a parent cascades to subtasks.
+13. **Wire the bulk-bar placeholders (§15.13).** Implement `Assign` and `Tag` (currently no-ops).
+14. **Validation polish (§15.11).** Server-side title length/non-empty checks; tag normalization;
+    mention-id verification.
+15. **Scale (§15.15).** Push global-view filtering/pagination into SQL (`range()`); add list
+    virtualization beyond ~1k rows; consider Supabase Realtime for live multi-user updates.
+16. **Accessibility (§15.16).** Focus trap + restore on the detail modal; ARIA roles on the custom
+    priority/assignee menus; non-color status/priority signals; `prefers-reduced-motion` guard.
+
+> **Definition of done for ship-safe mode:** P0 + P1 complete and the §15.14 test plan's
+> cross-user/by-id leakage tests (items 2–3) and concurrency tests (items 14–15) **pass**.
 
 ---
 
