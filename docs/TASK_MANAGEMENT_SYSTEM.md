@@ -1,14 +1,29 @@
 # Haven OS — Task Management System: Master Replication Document
 
-> **Purpose.** This is a complete, self-contained specification of the "My Tasks" / Work
-> task-management module as built in Haven OS. It is written so that another engineer (or AI
-> agent) can reproduce the **exact** functionality, data model, and UI/UX in a different
-> project. Nothing here is hand-wavy — every table, column, trigger, server action, component,
-> prop, keyboard shortcut, animation, and design token is documented with real values.
+> **Purpose.** This is a self-contained specification of the "My Tasks" / Work task-management
+> module as built in Haven OS, written so another engineer (or AI agent) can reproduce the
+> functionality, data model, and UI/UX in a different project.
 >
 > The canonical entry point is the route `app/(app)/my-tasks/page.tsx`, but that page is a thin
 > shell over a shared, ClickUp-parity engine that lives in `lib/work/*` (server) and
 > `components/work/*` (client). Replicating "My Tasks" means replicating that engine.
+>
+> **How to read this document.** Sections 1–13 describe the system. **Section 15 ("Accuracy,
+> Security & Operational Addenda") is mandatory reading before you ship** — it documents the
+> real security posture (RLS is intentionally permissive; access is enforced in server actions,
+> with gaps), exact RLS policies, data-integrity constraints that are *not* enforced today,
+> transaction/concurrency behavior, validation, archival, and a test plan. Where this document
+> says something "should" be enforced but isn't, it is flagged **⚠️ GAP** (a real
+> characteristic of the current code) or **➕ RECOMMENDED** (a suggested addition that is *not*
+> in the codebase today). The base spec documents **actual current behavior**; recommendations
+> are always marked.
+>
+> **Core security assumption (read this first):** the entire access model assumes **all writes
+> and sensitive reads go through these Next.js Server Actions, and end-user clients never talk
+> to Supabase directly** (no anon-key client queries from the browser for Work data). Database
+> RLS is deliberately loose (reads mostly `using(true)`, writes `auth.uid() is not null`); it is
+> a backstop against anonymous access, **not** a per-row authorization layer. If you expose the
+> Supabase client to browsers, this model is unsafe — see §15.1.
 
 ---
 
@@ -28,6 +43,23 @@
 12. [Design System: Tokens, Tailwind, Primitives](#12-design-system-tokens-tailwind-primitives)
 13. [Interaction Patterns (DnD, keyboard, optimistic updates)](#13-interaction-patterns)
 14. [Step-by-Step Replication Checklist](#14-step-by-step-replication-checklist)
+15. [Accuracy, Security & Operational Addenda (mandatory)](#15-accuracy-security--operational-addenda-mandatory)
+    - 15.1 Security model & assumptions
+    - 15.2 Exact RLS policies (every table + storage)
+    - 15.3 Per-action access-gating matrix (current vs. recommended)
+    - 15.4 Data-integrity constraints: enforced vs. gaps
+    - 15.5 Transaction boundaries for multi-step operations
+    - 15.6 Concurrency & race handling
+    - 15.7 Cache invalidation (normalized, accurate)
+    - 15.8 `duplicateTask` exact copy semantics
+    - 15.9 Subtask depth & DnD cycle prevention
+    - 15.10 Archived & restore behavior
+    - 15.11 Validation rules (actual vs. recommended)
+    - 15.12 Environment & setup
+    - 15.13 Known intentional limitations
+    - 15.14 Test plan
+    - 15.15 Performance & scale assumptions
+    - 15.16 Mobile & accessibility (scope note)
 
 ---
 
@@ -161,9 +193,30 @@ create table public.spaces (
 -- trigger spaces_set_updated_at before update -> tg_set_updated_at()
 ```
 
-**folders** — same shape with `space_id uuid not null references spaces on delete cascade`.
+**folders** (exact DDL)
 
-**lists**
+```sql
+create table public.folders (
+  id          uuid primary key default gen_random_uuid(),
+  space_id    uuid not null references public.spaces(id) on delete cascade,
+  name        text not null,
+  "order"     integer not null default 0,
+  archived_at timestamptz,
+  created_by  uuid references public.profiles(id),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+alter table public.folders enable row level security;
+create policy "folders read all"   on public.folders for select using (true);
+create policy "folders insert auth" on public.folders for insert with check (auth.uid() is not null);
+create policy "folders update auth" on public.folders for update using (auth.uid() is not null);
+create policy "folders delete auth" on public.folders for delete using (auth.uid() is not null);
+create trigger folders_set_updated_at before update on public.folders
+  for each row execute function public.tg_set_updated_at();
+```
+
+**lists** (as created in 0002; `type` added in 0006, `space_id` made nullable + `personal_owner_id`
+added in 0010 — final effective DDL)
 
 ```sql
 create table public.lists (
@@ -176,8 +229,21 @@ create table public.lists (
   archived_at timestamptz,
   created_by  uuid references public.profiles(id),
   created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
+  updated_at  timestamptz not null default now(),
+  -- added by migration 0006:
+  type        text not null default 'shared',
+  constraint  lists_type_check check (type in ('private','shared','public')),
+  -- added by migration 0010:
+  personal_owner_id uuid references public.profiles(id) on delete cascade,
+  constraint  lists_space_or_owner_chk check (space_id is not null or personal_owner_id is not null)
 );
+alter table public.lists enable row level security;
+create policy "lists read all"   on public.lists for select using (true);
+create policy "lists insert auth" on public.lists for insert with check (auth.uid() is not null);
+create policy "lists update auth" on public.lists for update using (auth.uid() is not null);
+create policy "lists delete auth" on public.lists for delete using (auth.uid() is not null);
+create trigger lists_set_updated_at before update on public.lists
+  for each row execute function public.tg_set_updated_at();
 ```
 
 **statuses** (per-list, ordered, categorised)
@@ -250,10 +316,32 @@ create table public.task_assignees (
   assigned_at timestamptz not null default now(),
   primary key (task_id, profile_id)
 );
--- NOTE: a `role` column ('primary' | 'secondary') is referenced by actions
---       (addAssignee/setPrimaryAssignee) — add `role text not null default 'secondary'`.
+-- added by migration 0006 (role/sort_order are real columns, not notes):
+alter table public.task_assignees add column role       text    not null default 'secondary'; -- 'primary'|'secondary'
+alter table public.task_assignees add column sort_order integer not null default 0;
 
-create function public.tg_sync_assignee_ids() ...  -- on insert/delete recomputes tasks.assignee_ids
+alter table public.task_assignees enable row level security;
+create policy "ta read all"   on public.task_assignees for select using (true);
+create policy "ta insert auth" on public.task_assignees for insert with check (auth.uid() is not null);
+create policy "ta delete auth" on public.task_assignees for delete using (auth.uid() is not null);
+-- NOTE: there is NO update policy on task_assignees, yet setPrimaryAssignee() issues UPDATEs
+--       on `role`. ⚠️ GAP — add an "update auth" policy or those writes fail under RLS.
+
+-- Keeps the denormalised tasks.assignee_ids array in sync (security definer):
+create function public.tg_sync_assignee_ids() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if (tg_op = 'INSERT') then
+    update public.tasks set assignee_ids =
+      array(select profile_id from public.task_assignees where task_id = new.task_id)
+      where id = new.task_id;
+  elsif (tg_op = 'DELETE') then
+    update public.tasks set assignee_ids =
+      array(select profile_id from public.task_assignees where task_id = old.task_id)
+      where id = old.task_id;
+  end if;
+  return null;
+end; $$;
 create trigger task_assignees_sync after insert or delete on public.task_assignees
   for each row execute function public.tg_sync_assignee_ids();
 ```
@@ -298,6 +386,98 @@ create table public.space_members (
   added_at   timestamptz not null default now(),
   primary key (space_id, profile_id)
 );
+alter table public.space_members enable row level security;
+create policy "sm read all"   on public.space_members for select using (true);
+create policy "sm insert auth" on public.space_members for insert with check (auth.uid() is not null);
+create policy "sm update auth" on public.space_members for update using (auth.uid() is not null);
+create policy "sm delete auth" on public.space_members for delete using (auth.uid() is not null);
+
+-- Auto-add the space creator as 'admin' on insert:
+create function public.tg_auto_add_space_creator() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.created_by is not null then
+    insert into public.space_members (space_id, profile_id, role)
+    values (new.id, new.created_by, 'admin') on conflict do nothing;
+  end if;
+  return new;
+end; $$;
+create trigger space_auto_add_creator after insert on public.spaces
+  for each row execute function public.tg_auto_add_space_creator();
+```
+
+Migration 0023 later adds a CHECK constraint: `space_members_role_chk check (role in ('admin','member','viewer'))`.
+
+### 3.3b Lists `type`, list members, watchers (migration 0006 — `0006_task_lists_tendwell.sql`)
+
+> **This migration was previously under-documented. It creates `list_members` and `task_watchers`,
+> adds `lists.type` (§3.2), adds `task_assignees.role`/`sort_order` (§3.2), and wires two
+> auto-membership triggers.** Exact DDL:
+
+**list_members** (the per-list access grant table — central to the access model in §5)
+
+```sql
+create table public.list_members (
+  list_id     uuid not null references public.lists(id) on delete cascade,
+  profile_id  uuid not null references public.profiles(id) on delete cascade,
+  role        text not null default 'member',   -- 'owner' | 'member'  (legacy; drives assignee color)
+  color       text not null default '#6366f1',
+  added_by    uuid references public.profiles(id) on delete set null,
+  added_at    timestamptz not null default now(),
+  primary key (list_id, profile_id)
+);
+alter table public.list_members enable row level security;
+-- NOTE: list_members read is gated to signed-in users (NOT using(true)):
+create policy "lm read all"   on public.list_members for select using (auth.uid() is not null);
+create policy "lm insert auth" on public.list_members for insert with check (auth.uid() is not null);
+create policy "lm update auth" on public.list_members for update using (auth.uid() is not null);
+create policy "lm delete auth" on public.list_members for delete using (auth.uid() is not null);
+
+-- access_level added by migration 0023:
+alter table public.list_members add column access_level text not null default 'editor';
+alter table public.list_members add constraint list_members_access_level_chk
+  check (access_level in ('viewer','editor','admin'));
+
+-- Auto-add the list creator as an 'owner' member on insert:
+create function public.tg_auto_add_list_creator() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.created_by is not null then
+    insert into public.list_members (list_id, profile_id, role, added_by)
+    values (new.id, new.created_by, 'owner', new.created_by) on conflict do nothing;
+  end if;
+  return new;
+end; $$;
+create trigger list_auto_add_creator after insert on public.lists
+  for each row execute function public.tg_auto_add_list_creator();
+```
+
+> ⚠️ **GAP (legacy `role` vs. `access_level`):** the auto-add trigger sets `role='owner'` but does
+> **not** set `access_level` (defaults to `'editor'`). The 0023 backfill (`role='owner' →
+> access_level='admin'`) only runs once at migration time, so **lists created after 0023 give their
+> creator `access_level='editor'`, not `'admin'`**. `getListAccessLevel` mitigates this by treating
+> `role==='owner'` as `'admin'` when `access_level` is null — but it is **not** null here (it's
+> `'editor'`), so a list creator may end up with editor (not admin) on their own list. ➕ RECOMMENDED:
+> have the trigger insert `access_level='admin'` for owners, or have `createList` upsert the owner
+> grant explicitly (as `getOrCreatePersonalList` does).
+
+**task_watchers**
+
+```sql
+create table public.task_watchers (
+  task_id    uuid not null references public.tasks(id) on delete cascade,
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  added_at   timestamptz not null default now(),
+  primary key (task_id, profile_id)
+);
+alter table public.task_watchers enable row level security;
+create policy "tw read all"   on public.task_watchers for select using (auth.uid() is not null);
+create policy "tw insert auth" on public.task_watchers for insert with check (auth.uid() is not null);
+create policy "tw delete auth" on public.task_watchers for delete using (auth.uid() is not null);
+
+create index idx_list_members_profile on public.list_members(profile_id);
+create index idx_task_watchers_task    on public.task_watchers(task_id);
+create index idx_task_watchers_profile on public.task_watchers(profile_id);
 ```
 
 ### 3.4 List-view indexes (migration 0008)
@@ -443,27 +623,69 @@ create index tasks_recurring_idx on public.tasks ((recurrence_rule is not null))
 
 ### 3.8 Granular list access (migration 0023 — `0023_work_access_controls.sql`)
 
+> `list_members` itself is created in **migration 0006** (§3.3b), not 0002/0003. Migration 0023
+> adds `access_level`, constrains `space_members.role`, adds per-user indexes, and ships two SQL
+> helper functions that mirror the TypeScript access logic (used by RPC callers / future RLS).
+
 ```sql
 alter table public.list_members add column access_level text not null default 'editor';
 alter table public.list_members add constraint list_members_access_level_chk
   check (access_level in ('viewer','editor','admin'));
--- backfill: owners -> admin
-create index list_members_profile_id_idx on public.list_members (profile_id);
+update public.list_members set access_level='admin' where role='owner' and access_level='editor';
+
+alter table public.space_members add constraint space_members_role_chk
+  check (role in ('admin','member','viewer'));
+
+create index list_members_profile_id_idx  on public.list_members  (profile_id);
+create index space_members_profile_id_idx on public.space_members (profile_id);
 ```
 
-> **list_members** itself is created in migration 0002/0003 region. Final effective shape:
-> ```sql
-> list_members(
->   list_id uuid references lists on delete cascade,
->   profile_id uuid references profiles on delete cascade,
->   role text default 'member',          -- 'owner' | 'member' (legacy, drives assignee color)
->   access_level text default 'editor',  -- 'viewer' | 'editor' | 'admin' (the real gate)
->   color text default '#6366f1',
->   added_by uuid references profiles,
->   added_at timestamptz default now(),
->   primary key (list_id, profile_id)
-> )
-> ```
+**SQL access helpers (the DB-side mirror of §5):**
+
+```sql
+create function public.work_access_rank(level text) returns int language sql immutable as $$
+  select case lower(coalesce(level,''))
+    when 'admin' then 3 when 'editor' then 2 when 'member' then 2 when 'viewer' then 1 else 0 end;
+$$;
+
+-- Returns true if (user, list) has >= p_min_level. Walks: super_admin → personal owner →
+-- explicit list_members grant → inherited space_members grant → shared/public + team fallback.
+create function public.user_has_list_access(p_user_id uuid, p_list_id uuid, p_min_level text default 'viewer')
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare v_role text; v_space_id uuid; v_list_type text; v_personal_owner uuid;
+        v_required int := work_access_rank(p_min_level); v_have int := 0;
+begin
+  if p_user_id is null then return false; end if;
+  select role into v_role from public.profiles where id = p_user_id;
+  if v_role = 'super_admin' then return true; end if;
+  select space_id, type, personal_owner_id into v_space_id, v_list_type, v_personal_owner
+    from public.lists where id = p_list_id;
+  if not found then return false; end if;
+  if v_personal_owner is not null then return v_personal_owner = p_user_id; end if;
+  select work_access_rank(access_level) into v_have from public.list_members
+    where list_id = p_list_id and profile_id = p_user_id limit 1;
+  if v_have >= v_required then return true; end if;
+  if v_space_id is not null then
+    select work_access_rank(role) into v_have from public.space_members
+      where space_id = v_space_id and profile_id = p_user_id limit 1;
+    if v_have >= v_required then return true; end if;
+  end if;
+  if v_list_type in ('shared','public') then
+    if v_space_id is null then return v_required <= 2; end if;  -- editor+
+    declare v_privacy text;
+    begin
+      select privacy into v_privacy from public.spaces where id = v_space_id;
+      if v_privacy = 'team' then return v_required <= 2; end if;
+    end;
+  end if;
+  return false;
+end; $$;
+grant execute on function public.user_has_list_access(uuid,uuid,text) to authenticated;
+```
+
+> ⚠️ Note: `user_has_list_access` exists but **the server actions do NOT call it** — they
+> re-implement the same logic in TypeScript (`getListAccessLevel`, §5.4). It is, however, the
+> ready-made building block if you decide to harden RLS (§15.1).
 
 ### 3.9 Full-text search (migration 0031 — used by the global view, not /my-tasks)
 
@@ -482,16 +704,78 @@ create trigger ... on public.comments ...;   -- recomputes parent task's vector
 Query side uses `websearch_to_tsquery('english', term)` for terms ≥ 3 chars, falling back to
 `ilike` for 1–2 char queries.
 
+**notifications** (same migration 0031; backs the in-app notification center — **optional** for a
+pure `/my-tasks` replication, see §8):
+
+```sql
+create table public.notifications (
+  id           uuid primary key default gen_random_uuid(),
+  recipient_id uuid not null references public.profiles(id) on delete cascade,
+  actor_id     uuid references public.profiles(id) on delete set null,
+  kind         text not null,           -- 'task_assigned','task_status_changed','task_due_changed',
+                                         -- 'task_comment_added','task_completed',...
+  subject_type text not null,           -- 'task' | 'property' | 'system'
+  subject_id   uuid,                     -- nullable for system-wide pings
+  subject_url  text,                     -- relative deep-link URL
+  title        text not null,
+  body         text,
+  metadata     jsonb not null default '{}'::jsonb,
+  read_at      timestamptz,
+  created_at   timestamptz not null default now()
+);
+alter table public.notifications enable row level security;
+-- These policies ARE properly per-row (unlike the Work tables):
+create policy "notifications read own"   on public.notifications for select using (recipient_id = auth.uid());
+create policy "notifications update own"  on public.notifications for update using (recipient_id = auth.uid());
+create policy "notifications insert auth" on public.notifications for insert with check (auth.uid() is not null);
+create policy "notifications delete own"  on public.notifications for delete using (recipient_id = auth.uid());
+```
+
 ### 3.10 Storage bucket (attachments) — `supabase/storage/task-attachments-bucket.sql`
+
+**Current (as shipped) — private 10 MB bucket, but the object policies are too broad:**
 
 ```sql
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('task-attachments','task-attachments', false, 10485760, null)  -- private, 10MB
+values ('task-attachments','task-attachments', false, 10485760, null)  -- private, 10MB, any mime
 on conflict (id) do update set file_size_limit = excluded.file_size_limit, public = excluded.public;
 
--- RLS on storage.objects: any signed-in user may insert/select/delete within bucket 'task-attachments'.
--- storage_path convention written by uploadAttachment(): "{userId}/{taskId}/{timestamp}_{filename}"
+create policy "task-attachments upload auth" on storage.objects for insert
+  with check (bucket_id = 'task-attachments' and auth.uid() is not null);
+create policy "task-attachments read auth"   on storage.objects for select
+  using (bucket_id = 'task-attachments' and auth.uid() is not null);
+create policy "task-attachments delete auth" on storage.objects for delete
+  using (bucket_id = 'task-attachments' and auth.uid() is not null);
 ```
+
+> 🔴 **SECURITY GAP (confirmed):** these policies let **any signed-in user read or delete *any*
+> object in the bucket**, regardless of which task/list it belongs to. The bucket is private (no
+> public URL), but cross-tenant read/delete is possible for authenticated users. The
+> `storage_path` convention is `"{userId}/{taskId}/{timestamp}_{filename}"`, so the *uploader's*
+> id is the first path segment — usable to at least scope **delete** to the owner.
+>
+> ➕ **RECOMMENDED hardened policies** (scope read/delete; ideally also check list access via the
+> `tasks`/`task_attachments` join so only people with list access can read):
+>
+> ```sql
+> -- delete only your own uploads (first path segment = uploader id)
+> create policy "task-attachments delete own" on storage.objects for delete
+>   using (bucket_id='task-attachments' and (storage.foldername(name))[1] = auth.uid()::text);
+>
+> -- read only objects attached to a task on a list you can access
+> create policy "task-attachments read scoped" on storage.objects for select
+>   using (
+>     bucket_id='task-attachments' and exists (
+>       select 1 from public.task_attachments ta
+>       join public.tasks t on t.id = ta.task_id
+>       where ta.storage_path = storage.objects.name
+>         and public.user_has_list_access(auth.uid(), t.list_id, 'viewer')
+>     )
+>   );
+> ```
+>
+> Also ➕ RECOMMENDED: set `allowed_mime_types` instead of `null`, and sanitize `file.name` before
+> building the path (today it is interpolated raw — see §15.11).
 
 ---
 
@@ -739,9 +1023,11 @@ visibleSpaceIds(): string[] | null   // null = "everything" (super admin); used 
 
 > File: `lib/work/actions.ts` (`"use server"`). Helpers: `db()` returns the Supabase server
 > client (throws if unconfigured); `currentUserId()` throws `"Not authenticated"` if no session.
-> **Every mutating action ends with** `revalidatePath("/work","layout")` + `revalidatePath("/my-tasks")`
-> (the ClickUp-parity CRUD added later uses `revalidatePath("/work")` only — keep this in mind if
-> you want `/my-tasks` to refresh after, e.g., a status rename; add the `/my-tasks` revalidation).
+> Cache invalidation is **not uniform** — see the authoritative table in **§15.7**. In short:
+> the core space/folder/list/task/member CRUD revalidates both `/work` (layout) and `/my-tasks`;
+> the later ClickUp-parity CRUD (statuses, custom fields, checklists, time, comments,
+> attachments) revalidates **only** `/work`, so `/my-tasks` will not auto-refresh after those
+> until the next full load. This is a real inconsistency, not a doc simplification.
 
 ### 6.1 Spaces / Folders / Lists
 
@@ -797,7 +1083,7 @@ visibleSpaceIds(): string[] | null   // null = "everything" (super admin); used 
 | `getTasksWithHierarchy(listId)` | `=> FlatTask[]` | builds a tree and flattens depth-first with `depth` |
 | `createTask(input)` | `=> Task` | editor-gated; if no `status_id`, auto-assigns first `todo` status; appends at max order within (list, parent) |
 | **`updateTask(id, input)`** | `=> void` | editor-gated; see completion + recurrence + notifications below |
-| `duplicateTask(taskId)` | `=> Task` | copies most fields, title + " (copy)", appends |
+| `duplicateTask(taskId)` | `=> Task` | shallow copy — see §15.8 for the exact field list and what is **not** copied (subtasks, comments, checklists, attachments, assignees, watchers, recurrence). ⚠️ **no access gate** (§15.3) |
 | `deleteTask(id)` | editor-gated hard delete (cascades subtasks/comments/etc.) |
 | `reorderTask(taskId, newParentId, newOrder)` | single move/reparent |
 | `reorderTasks(updates[])` | batch `{id, order, parent_id?}` in parallel |
@@ -1457,9 +1743,12 @@ droppable: each sortable **task row** (`id=<taskId>`), each **group zone** (`id=
 or `"group:__none__"`), and each row's **nest zone** (`id="nest:<taskId>"`). On drag end (ignore if
 no `over` or `active===over`):
 
-1. **`over` starts with `nest:`** → set the active task's `parent_id` to that target (refuse self).
-   Optimistically bump the target's `subtask_count`, set `parent_id`, expand the target, then
-   `updateTask(activeId, {parent_id})`. Roll back + toast on failure.
+1. **`over` starts with `nest:`** → set the active task's `parent_id` to that target. The **only**
+   guard is `targetTaskId === activeId` (refuse nesting into self). ⚠️ **GAP:** there is **no
+   deeper cycle check** — nesting a parent under its own descendant is not prevented client-side,
+   and the DB has no cycle constraint either (see §15.4/§15.9). Optimistically bump the target's
+   `subtask_count`, set `parent_id`, expand the target, then `updateTask(activeId, {parent_id})`.
+   Roll back + toast on failure.
 2. **`over` starts with `group:`** → cross-group status change. Compute target status id
    (`__none__`→null); no-op if unchanged. Optimistically set `status_id/status/completed_at`, then
    `updateTask(activeId, {status_id, completed_at?})`. Roll back + toast on failure.
@@ -1542,6 +1831,427 @@ Build in this order; each step is independently testable.
 - Detail drawer tabs (Details/Checklist/Comments/Activity/Time) all function; recurrence config saves
   and a completed recurring task reopens on its next due date in the first "to do" status.
 - Everything is access-gated: another user cannot read or mutate your personal list.
+
+---
+
+## 15. Accuracy, Security & Operational Addenda (mandatory)
+
+> This section documents **actual current behavior**, including weaknesses. Items marked
+> **⚠️ GAP** are real characteristics of the shipped code. Items marked **➕ RECOMMENDED** are
+> suggested additions that are **not** in the codebase today — do not assume they exist.
+
+### 15.1 Security model & assumptions
+
+- **Trust boundary.** Authorization for Work data lives in the **server actions**, not the
+  database. RLS is a coarse anonymous-vs-authenticated gate only (most reads `using(true)`;
+  writes `with check (auth.uid() is not null)`). The notifications table is the **only** Work-area
+  table with true per-row RLS (`recipient_id = auth.uid()`).
+- **Hard assumption:** browsers/clients **never** query Supabase directly for Work data — they
+  call server actions. If you ship an anon-key client that reads `tasks`/`comments`/etc. from the
+  browser, **any signed-in user can read/modify all of it**, because RLS won't stop them.
+- **Super admin bypass:** `profiles.role = 'super_admin'` short-circuits every access check to
+  `admin`.
+- **Personal-list privacy** is enforced in `getListAccessLevel` (and the SQL mirror
+  `user_has_list_access`): a list with `personal_owner_id` is accessible **only** to that owner.
+  This is the load-bearing rule for "My Tasks" privacy. The DB `lists` RLS does **not** enforce
+  it — so again, only safe if reads go through server actions.
+- ➕ **RECOMMENDED hardening** if you want defense-in-depth: replace the permissive policies on
+  `tasks/comments/checklists/checklist_items/time_entries/task_activity/task_attachments/
+  task_assignees/task_watchers/statuses/custom_field_defs` with policies that call
+  `public.user_has_list_access(auth.uid(), <list_id>, '<level>')` (join through `tasks` for the
+  child tables). The function already exists (§3.8).
+
+### 15.2 Exact RLS policies (every table + storage)
+
+> Policy *names* and predicates as shipped. "auth" = `auth.uid() is not null`. Unless noted,
+> tables `enable row level security`.
+
+| Table | SELECT | INSERT (with check) | UPDATE (using) | DELETE (using) |
+|---|---|---|---|---|
+| `spaces` | `true` | auth | auth | auth |
+| `folders` | `true` | auth | auth | auth |
+| `lists` | `true` | auth | auth | auth |
+| `statuses` | `true` | auth | auth | auth |
+| `custom_field_defs` | `true` | auth | auth | auth |
+| `tasks` | `true` | auth | auth | auth |
+| `task_assignees` | `true` | auth | — *(none)* ⚠️ | auth |
+| `task_watchers` | auth | auth | — | auth |
+| `comments` | `true` | `auth.uid() = author_id` | `auth.uid() = author_id` | `auth.uid() = author_id` |
+| `checklists` | `true` | auth | auth | auth |
+| `checklist_items` | `true` | auth | auth | auth |
+| `time_entries` | `true` | auth | auth | auth |
+| `task_activity` | `true` | auth | auth | auth |
+| `task_attachments` | `true` | auth | auth | auth |
+| `space_members` | `true` | auth | auth | auth |
+| `list_members` | auth | auth | auth | auth |
+| `notifications` | `recipient_id = auth.uid()` | auth | `recipient_id = auth.uid()` | `recipient_id = auth.uid()` |
+| `storage.objects` (bucket `task-attachments`) | auth ⚠️ too broad | auth | — | auth ⚠️ too broad |
+
+⚠️ Two concrete RLS bugs to carry over knowingly (or fix): (1) `task_assignees` has **no UPDATE
+policy** but `setPrimaryAssignee` UPDATEs `role` → those writes fail under RLS; (2) storage
+read/delete are bucket-wide (see §3.10). `comments` is the model to copy for per-row ownership.
+
+### 15.3 Per-action access-gating matrix (current vs. recommended)
+
+> "Session" = requires a logged-in user (via `currentUserId()`), but performs **no list/space
+> authorization**. "RLS-only" = the action does not even call `currentUserId()`; it relies purely
+> on RLS. ⚠️ marks an authorization gap relative to what the data sensitivity warrants.
+
+**Reads**
+
+| Action | Current gate | ⚠️ / ➕ |
+|---|---|---|
+| `getSpaces`, `getSpaceTree` | visibility-filtered in JS | ok |
+| `getList`, `getStatuses`, `getCustomFieldDefs`, `getTasks`, `getTasksForListView`, `getListMembers` | `hasListAccess(viewer)` | ok |
+| `getSpaceMembers` | `requireSpaceAccess(viewer)` | ok |
+| `getGlobalTasks` / `…Paginated` | JS visibility filter | ok |
+| `getTask` | **RLS-only** (no check) | ⚠️ returns any task to any session → ➕ add `hasListAccess(viewer)` |
+| `getTasksWithHierarchy` | **RLS-only** | ⚠️ ➕ add `hasListAccess(viewer)` |
+| `getComments` | **RLS-only** | ⚠️ ➕ gate by parent task's list |
+| `getChecklists` | **RLS-only** | ⚠️ ➕ gate by parent task's list |
+| `getWatchers` | **RLS-only** | ⚠️ ➕ gate |
+| `getTaskActivity` | **RLS-only** | ⚠️ ➕ gate |
+| `getTaskTimeTotal` | **RLS-only** | ⚠️ ➕ gate |
+| `getTaskAttachments` | **RLS-only** | ⚠️ ➕ gate |
+| `getActiveTimer(userId)` | **RLS-only**, takes a userId arg | ⚠️ caller-supplied id; ➕ derive from session |
+| `getMembers` | **RLS-only** | returns **all** profiles to any session — by design (assignee picker), but consider scoping |
+
+**Mutations**
+
+| Action | Current gate | ⚠️ / ➕ |
+|---|---|---|
+| `createTask`, `updateTask`, `deleteTask`, `setTaskStatusByCategory` | `requireListAccess(editor)` | ok |
+| `updateList`, `deleteList`, `updateListType`, `addListMember`, `removeListMember`, `updateListMemberAccessLevel` | `requireListAccess(admin)` | ok |
+| `updateListMemberColor` | `requireListAccess(editor)` | ok |
+| `createList` | `requireSpaceAccess(member)` if space-anchored | ok |
+| `createSpace` | Session | any user may create a space (by design) |
+| `updateSpace`, `deleteSpace`, space-member CRUD, `updateSpacePrivacy` | `requireSpaceAccess(admin)` | ok |
+| `createFolder` | Session | ⚠️ ➕ `requireSpaceAccess(member)` |
+| `updateFolder`, `deleteFolder` | **RLS-only** | ⚠️ ➕ space admin |
+| `duplicateTask` | Session | ⚠️ no list check; can clone any task you can name |
+| `reorderTask`, `reorderTasks` | **RLS-only** | ⚠️ ➕ `requireListAccess(editor)` |
+| `createStatus`, `updateStatus`, `deleteStatus`, `reorderStatuses` | Session | ⚠️ ➕ `requireListAccess(admin/editor)` |
+| `createFieldDef`, `updateFieldDef`, `deleteFieldDef`, `reorderFieldDefs`, `createCustomFieldDef` | Session (`createCustomFieldDef` is **RLS-only**) | ⚠️ ➕ `requireListAccess(editor)` |
+| `setTaskFieldValue` | Session | ⚠️ ➕ gate by task's list |
+| `addAssignee` | Session | ⚠️ ➕ gate by task's list |
+| `removeAssignee`, `setPrimaryAssignee` | **RLS-only** | ⚠️ (+ `setPrimaryAssignee` blocked by missing UPDATE policy, §15.2) |
+| `addWatcher`, `removeWatcher` | **RLS-only** | ⚠️ ➕ gate |
+| `createComment`, `addComment` | Session (insert RLS enforces `author_id`) | ⚠️ no list check |
+| `deleteComment` | Session + author-scoped `delete … eq(author_id)` | ok (author only) |
+| checklist CRUD (`createChecklist`…`reorderChecklistItems`) | Session | ⚠️ ➕ gate by task's list |
+| time CRUD (`startTimer`, `stopTimer`, `addManualTimeEntry`, `deleteTimeEntry`) | Session | ⚠️ ➕ gate; `delete/stop` not owner-scoped |
+| `uploadAttachment`, `deleteAttachment` | Session | ⚠️ ➕ gate by task's list; `delete` not owner-scoped |
+
+> **For a faithful replication you have two honest choices:** (a) reproduce these gaps exactly
+> (matches today's behavior) and document them, or (b) close them by adding `requireListAccess`
+> to the ⚠️ rows. The base spec reflects (a). The acceptance test in §11 ("another user cannot
+> read or mutate your personal list") **passes only because** personal-list reads in the UI go
+> through the gated `getTasksForListView`; the ungated `getTask`/`getComments`/etc. would leak a
+> personal task's contents to any signed-in user who knows the id. Decide deliberately.
+
+### 15.4 Data-integrity constraints: enforced vs. gaps
+
+**Enforced today (DB level):**
+- `lists_type_check` (`type in private|shared|public`); `lists_space_or_owner_chk`
+  (a list must have a space or a personal owner); `lists_personal_owner_unique` (one personal
+  list per user).
+- `list_members_access_level_chk`, `space_members_role_chk`.
+- FK cascades: deleting a list cascades statuses/custom_field_defs/tasks; deleting a task cascades
+  subtasks (`parent_id … on delete cascade`), assignees, watchers, comments, checklists (→ items),
+  time_entries, activity, attachments. Deleting a status sets dependent `tasks.status_id` to NULL
+  (`on delete set null`).
+- `tasks.completed_at` correctness vs. status category (trigger `tg_update_task_completed_at`).
+- `tasks.assignee_ids` ↔ `task_assignees` consistency (trigger `tg_sync_assignee_ids`).
+
+**NOT enforced (⚠️ GAP) — neither DB constraints nor server validation prevent these:**
+- A task's `status_id` may reference a status from a **different list**. `createTask`/rollover pick
+  a same-list status, but `updateTask({status_id})` and `setTaskFieldValue` do **not** verify the
+  status belongs to the task's list.
+- `deleteStatus(id, reassignTo)` does **not** verify `reassignTo` belongs to the same list.
+- A task's `parent_id` may reference a task in a **different list**; the list view simply won't
+  render such a "subtask". No constraint stops it.
+- **Subtask cycles** (A→B→A) are not prevented (DnD only refuses self; see §15.9).
+- A custom-field **value** key (`tasks.custom_fields[fieldDefId]`) is not validated to be a real
+  `custom_field_defs.id` of the task's list, nor type-checked against the def.
+- `time_estimate`, recurrence `interval`/`day_of_month` ranges are only loosely guarded in the UI.
+
+➕ **RECOMMENDED** (DB-side examples):
+```sql
+-- same-list status (composite FK):
+alter table public.statuses add unique (id, list_id);
+alter table public.tasks add constraint tasks_status_same_list
+  foreign key (status_id, list_id) references public.statuses(id, list_id) on delete set null;
+-- same-list parent:
+alter table public.tasks add constraint tasks_parent_same_list
+  foreign key (parent_id, list_id) references public.tasks(id, list_id) on delete cascade; -- needs unique(id,list_id) on tasks
+```
+…plus a recursive `BEFORE INSERT/UPDATE` trigger or server check for cycles, and a server-side
+validation that custom-field keys/values match the list's defs.
+
+### 15.5 Transaction boundaries for multi-step operations
+
+> ⚠️ **There are no explicit DB transactions anywhere in `actions.ts`.** Every step is a separate
+> network round-trip via the Supabase client. Each multi-step op is therefore **non-atomic** and
+> can leave partial state if it fails midway. Documented behavior + recommendation per op:
+
+| Operation | Steps (in order) | Failure mode today | ➕ RECOMMENDED |
+|---|---|---|---|
+| `getOrCreatePersonalList` | (1) `select` existing → (2) `insert` list → (3) `rpc seed_default_statuses` → (4) `upsert` owner `list_members` | if (3)/(4) fail, the list exists with no statuses/owner row; concurrent first-visits race (see §15.6) | wrap (2)+(3)+(4) in a Postgres function (`security definer`) called via one `rpc` |
+| `createList` | `insert` list → `rpc seed_default_statuses` | list without statuses on partial failure | same — single RPC |
+| `deleteStatus(id, reassignTo)` | `count` tasks → `update` tasks.status_id=reassignTo → `delete` status | if delete fails after reassign, tasks moved but old status lingers; race if a task is created on the old status between count and delete | single RPC with `for update` lock |
+| `reorderTasks(updates)` | `Promise.all` of N independent `update`s | partial reorder on any failure (some rows updated, some not) | single RPC doing a bulk `update … from (values …)` in one statement |
+| `reorderStatuses` / `reorderFieldDefs` / `reorderChecklistItems` | `Promise.all` of N `update`s | same partial-update risk | bulk update RPC |
+| recurrence rollover | (inside `updateTask`) update task done → **separate** `rolloverRecurringTask` read+update | if rollover throws it's swallowed (logged) — task is completed but **not** rolled forward | fold rollover into the same RPC/transaction as completion |
+| `duplicateTask` | read src → read max order → insert copy | copy is shallow (no children) regardless; not atomic but single insert so low risk | n/a unless deep-copy added |
+| `uploadAttachment` | storage `upload` → `insert` metadata; on insert error → storage `remove` (manual compensating action) | best-effort rollback already present; if `remove` also fails, an orphan object remains | keep compensating delete; add a periodic orphan sweep |
+| `addAssignee` | `upsert` join row (+ trigger syncs array) (+ fire-and-forget notify) | array sync is a trigger (atomic with the upsert); notify is best-effort | ok |
+
+### 15.6 Concurrency & race handling
+
+- **Personal-list first-visit race.** Two simultaneous first requests can both pass the
+  `select … maybeSingle()` and both attempt `insert`. The **partial unique index**
+  `lists_personal_owner_unique (personal_owner_id) where personal_owner_id is not null` makes the
+  second insert fail with a unique violation — but `getOrCreatePersonalList` does **not** catch it,
+  so the losing request throws. ➕ RECOMMENDED: catch the unique-violation and re-`select`, or move
+  the whole thing into an `insert … on conflict (personal_owner_id) do nothing returning *` RPC.
+- **Concurrent reorder writes.** `reorderTasks` writes `order=index` per row with no locking;
+  two clients dragging at once can interleave and produce inconsistent ordering (last-writer-wins
+  per row). Orders are plain integers with no uniqueness, so it self-heals on next load but can
+  briefly look wrong. ➕ consider fractional ordering or a server-sequenced bulk update.
+- **One active timer per user.** Enforced **only** in `startTimer` (it `select`s for an open entry
+  first). ⚠️ Two concurrent `startTimer` calls can both pass the check and create two open
+  entries. ➕ RECOMMENDED partial unique index:
+  ```sql
+  create unique index time_entries_one_active_per_user
+    on public.time_entries(user_id) where ended_at is null;
+  ```
+- **Status/completion vs. rollover.** Completion update and rollover are sequential; a client that
+  re-reads between them can momentarily see the task completed before it reopens. The
+  `recurrence_count` cap is checked against the row read inside rollover, so a double-complete
+  could double-advance. ➕ fold into one transaction (see §15.5).
+- **Optimistic UI** assumes the action succeeds; on throw it rolls back local state and toasts
+  (§13.2). It does **not** reconcile against concurrent edits by others until the next
+  `revalidatePath`-driven refresh.
+
+### 15.7 Cache invalidation (normalized, accurate)
+
+Actual `revalidatePath` calls per action group:
+
+| Action group | Revalidates |
+|---|---|
+| Spaces, folders, lists, `getOrCreatePersonalList`, tasks core (`create/update/delete/duplicate/reorderTask(s)`), assignees, watchers, `createComment`, space-member & list-member CRUD | `revalidatePath("/work","layout")` **and** `revalidatePath("/my-tasks")` |
+| Statuses CRUD (`createStatus/updateStatus/deleteStatus/reorderStatuses`), custom-field defs CRUD, `setTaskFieldValue`, checklists, time tracking, `addComment`/`deleteComment`, attachments | `revalidatePath("/work")` **only** |
+| `createStatus`/`createFieldDef` etc. specifically | `revalidatePath("/work")` (no `,"layout"`, no `/my-tasks`) |
+
+⚠️ **Consequence:** renaming a status, adding a custom field, toggling a checklist item, logging
+time, or adding an attachment **will not refresh `/my-tasks`** on the next server render (the page
+keeps stale server data until a full reload). The client view stays correct only because it also
+mutates local state optimistically. ➕ RECOMMENDED: standardize a single helper, e.g.
+`revalidateWork()` that calls `revalidatePath("/work","layout")` + `revalidatePath("/my-tasks")`,
+and call it from **every** mutation.
+
+### 15.8 `duplicateTask` exact copy semantics
+
+`duplicateTask(taskId)` inserts **one** new task row with these fields copied from the source:
+
+`list_id, status_id, parent_id, title (+ " (copy)"), description, priority, due_date, start_date,
+time_estimate, custom_fields, tags`, plus `order = maxOrder+1` within `(list_id, parent_id)` and
+`created_by = currentUser`.
+
+**NOT copied (⚠️ confirm against expectations):** `assignee_ids`/`task_assignees`, `task_watchers`,
+`comments`, `checklists` + items, `time_entries`, `task_attachments`, `task_activity`,
+`recurrence_rule`/`recurrence_count` (the copy is **non-recurring**), `completed_at`/`archived_at`
+(implicitly null on a fresh insert). Subtasks of the source are **not** cloned — duplicating a
+parent yields a childless copy. ➕ RECOMMENDED if deep-duplicate is desired: do it in an RPC that
+also copies children + checklists.
+
+### 15.9 Subtask depth & DnD cycle prevention
+
+- **Data model** allows arbitrary nesting depth (`tasks.parent_id` self-FK; `getTasksWithHierarchy`
+  builds an N-level tree with `depth`).
+- **The list view (`/my-tasks`) renders only ONE level of subtasks.** `getTasksForListView`
+  attaches a single `subtask_list` (direct children) to each top-level task; the table renders
+  parents at `depth=0` and their direct children at `depth=1`. Grandchildren exist in the DB but
+  are **not shown** in this view (they'd appear as top-level rows only if their parent is itself a
+  top-level task — which it isn't). So effective UI nesting = **1 level**.
+- **Cycle prevention:** the DnD nest handler only checks `targetTaskId === activeId`. ⚠️ There is
+  **no** check preventing nesting a task under one of its own descendants, and **no** DB cycle
+  constraint. A cycle would orphan rows from the list view (they'd stop appearing as top-level) but
+  is otherwise unguarded. ➕ RECOMMENDED: before reparenting, walk `parent_id` upward from the
+  target and refuse if `activeId` is encountered; ideally also enforce via a DB trigger.
+
+### 15.10 Archived & restore behavior
+
+- `spaces`, `folders`, `lists`, `tasks` each have a nullable `archived_at`.
+- **Reads filter archived out by default.** `getSpaces`/`getSpaceTree`/list queries use
+  `is("archived_at", null)`. `getTasksForListView` and `getTasks` filter `archived_at is null`
+  (the latter accepts `{includeArchived:true}` to include them; the list view never passes it).
+  So **archived tasks do not appear in My Tasks.**
+- **There is no dedicated archive/unarchive/restore action.** `archived_at` is part of
+  `UpdateTaskInput`, so a task is archived/restored by calling `updateTask(id, {archived_at: <ts>})`
+  / `{archived_at: null}`. There is **no UI affordance** for this on `/my-tasks` today (no archive
+  button in the row/drawer). ⚠️ GAP if archiving is a desired feature — it must be added.
+- **Subtasks of an archived parent:** subtasks are independent rows; archiving the parent does not
+  archive children (no cascade on `archived_at`). But since the list view only shows non-archived
+  top-level tasks and their direct children, archiving a parent removes the whole branch from view;
+  the children remain non-archived in the DB.
+- `getGlobalTasks` honors `include_archived`; deletion (`deleteTask`) is a **hard** delete (cascade),
+  not an archive.
+
+### 15.11 Validation rules (actual vs. recommended)
+
+**Actual (today):**
+- **Titles:** client trims; create/update refuse empty/whitespace-only on the client
+  (`title.trim()`), and only save on change. Server `createTask` does **not** re-validate length or
+  emptiness (relies on `title text not null` — an empty string would still insert if called
+  directly). No max length.
+- **Tags:** free-form strings added via `prompt()` (drawer) — `tag.trim()`, no format/charset/length
+  rules, duplicates possible.
+- **Custom fields:** client coerces by widget (`parseFloat` for numeric, ISO for date, arrays for
+  multi/labels). No server-side shape/type validation against the field def.
+- **Attachments:** 10 MB enforced by the **bucket** (`file_size_limit`); MIME unrestricted
+  (`allowed_mime_types = null`). **Filename is not sanitized** — `uploadAttachment` builds
+  `${userId}/${taskId}/${Date.now()}_${file.name}` with the raw name. ⚠️ path-injection / odd-char
+  risk.
+- **Numbers/dates:** recurrence `interval` clamped `>=1` client-side; `day_of_month` 1–31 via input
+  attrs; `addManualTimeEntry` rejects non-positive duration **server-side** (the one explicit server
+  validation). `startTimer` rejects a second concurrent timer (server check, race-prone §15.6).
+- **Mentions:** `@[Name](id)` tokens are not validated to be real user ids on save.
+
+➕ **RECOMMENDED** (do not claim these exist): server-side title length cap + non-empty check; tag
+normalization (lowercase, max length, dedupe, charset allow-list); custom-field server validation
+against the def (type + option membership); filename sanitization
+(`name.replace(/[^a-zA-Z0-9._-]/g,"_")`) + `allowed_mime_types`; verifying mention ids.
+
+### 15.12 Environment & setup
+
+- **Env vars** (resolved in `lib/supabase/config.ts` → `getSupabaseConfig()`): the public Supabase
+  URL + anon key (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) for the SSR/browser
+  client; a **service-role key** (server-only) for the admin client used by `getPermissions` to
+  auto-create a `profiles` row. See `.env.example` in the repo for the authoritative list.
+- **Supabase clients:** `lib/supabase/server.ts` builds a cookie-bound `createServerClient`
+  (`@supabase/ssr`) per request; returns `null` if unconfigured (every action's `db()` throws
+  `"Supabase not configured"` in that case). There is also an admin (service-role) client used
+  outside the Work module.
+- **Postgres extensions required:** `pgcrypto`/`gen_random_uuid` (UUID defaults) and, for search,
+  `pg_trgm` (migration 0031). `tsvector` is built-in.
+- **Storage:** create the `task-attachments` bucket (private, 10 MB) and its policies (§3.10)
+  before attachments work.
+- **Migrations:** apply `0001 → 0011`, `0023`, and (optional) `0031` + the storage SQL, in order.
+  The minimum set for `/my-tasks`: 0001, 0002, 0003, 0006, 0008, 0009, 0010, 0011, 0023.
+- **Auth:** any Supabase Auth provider; `requireUser()` redirects to `/login`. A `profiles` row per
+  auth user is required (auto-created by `getPermissions`).
+
+### 15.13 Known intentional limitations
+
+These are deliberate scope choices in the current build — call them out rather than treat as bugs:
+- **One level of visible subtask nesting** in the list view (§15.9), despite an N-level data model.
+- **No transactions / no optimistic-concurrency control** (§15.5/§15.6) — acceptable for a
+  low-contention internal tool.
+- **RLS is a coarse gate; authorization lives in server actions** (§15.1) — a deliberate tradeoff
+  predicated on "clients never touch Supabase directly."
+- **`people` custom field is display-only** (no picker). `Assign`/`Tag` buttons in the bulk bar are
+  **placeholders** (no handlers).
+- **Bulk actions** issue N independent `updateTask` calls (`Promise.all`), not a batch endpoint.
+- **No board/calendar/Gantt view on `/my-tasks`** — list view only. (A separate global board view
+  exists; out of scope here.)
+- **Cache-invalidation inconsistency** (§15.7) is known.
+- **Recurrence** reuses the same row (no per-occurrence history); "anchor=completion" computes from
+  the completion timestamp.
+- **Notifications** are best-effort and never block; the whole subsystem can be removed.
+
+### 15.14 Test plan
+
+> Reproduce these as automated (Playwright/RTL + Supabase test project) and manual checks.
+
+**Auth & access**
+1. New user → `/my-tasks` auto-creates a private personal list with 5 seeded statuses; empty state shows.
+2. User B cannot see User A's personal list in any list-scoped read (`getTasksForListView` returns `[]`).
+3. ⚠️ Regression guard for the §15.3 gaps: assert whether `getTask`/`getComments` leak across users —
+   pick the behavior you intend and lock it with a test.
+4. Viewer-level member cannot create/update/delete tasks (editor required); non-admin cannot
+   delete the list or manage members.
+
+**Tasks CRUD & list view**
+5. Add task via button, `n`, and per-group add row; appears under correct status group.
+6. Inline title edit (double-click), priority change, assignee add/remove, due-date set/clear,
+   custom-field edit per type — all persist after reload.
+7. Status change to done/closed mutes the row + sets `completed_at`; moving back clears it (verify
+   the DB trigger value, not just UI).
+8. Delete (row context menu + drawer) and duplicate; verify §15.8 copy semantics exactly.
+
+**Drag & drop**
+9. Reorder within a group persists `order`. Cross-group drag changes status. Drag onto a chevron
+   nests as subtask (depth 1). Self-nest refused. ⚠️ Cycle attempt (nest parent under its child) —
+   assert intended behavior (currently unguarded).
+
+**Subtasks & hierarchy**
+10. Add subtask inline; parent count `{done}/{total}` updates; expand/collapse works. Confirm a
+    grandchild is not rendered in the list view (§15.9).
+
+**Recurrence**
+11. Set each pattern (daily/weekly w/ weekdays/monthly w/ day-of-month/yearly), each anchor, each
+    end condition. Complete a recurring task → it reopens at next due date in the first `todo`
+    status, `recurrence_count` increments, checklists/comments/watchers persist. `ends:after` stops
+    at N. `ends:on` stops past the date. Month-end clamping for day 31 in short months.
+
+**Detail drawer tabs**
+12. Details save/cancel for description; checklist add/toggle/edit/delete + progress bar; comments
+    add/delete + `@`-mention insert and render; activity logs status changes; time start/stop (live
+    tick), manual entry (rejects non-positive duration), delete entry, total recompute.
+
+**Bulk & keyboard**
+13. Multi-select (checkbox, shift-range, ⌘A), bulk status/priority/due-date/delete with toasts.
+    Keyboard: `n`, `/`, `Esc` cascade, `↑/↓`, `Space`, drawer `1–5`.
+
+**Concurrency (where feasible)**
+14. Two parallel `startTimer` → assert only one open entry (will FAIL today → drives the §15.6 index).
+15. Parallel first-visit `getOrCreatePersonalList` → exactly one list, no unhandled throw (drives the
+    on-conflict fix).
+
+**Cache**
+16. Rename a status / add a custom field, then hard-reload `/my-tasks` → confirm whether it reflects
+    (documents the §15.7 gap).
+
+### 15.15 Performance & scale assumptions
+
+- **Designed for personal/team lists in the hundreds of tasks, not tens of thousands.**
+  `getTasksForListView` fetches **all** rows of the list (parents + subtasks) in one query and does
+  grouping/sorting/filtering **in-memory on the client**. There is no pagination or virtualization
+  in the list view — every row is in the DOM. Expect smooth behavior to ~500–1,000 tasks/list;
+  beyond that, add windowing (e.g. `@tanstack/react-virtual`) and server-side grouping.
+- **Assignee resolution** is one batched `profiles` query per fetch (good — avoids N+1).
+- **Global view** uses `getGlobalTasksPaginated`, but pagination is applied **after** fetching all
+  visible rows and filtering in JS (`getGlobalTasks` returns everything, then `.slice`) — i.e.
+  `page_size` limits render, not the query. ⚠️ This does not scale; ➕ push filters + `range()` into
+  the SQL for large datasets.
+- **Indexes present** cover the common access paths (`tasks(list_id)`, `(list_id,parent_id)`,
+  `status_id`, `due_date`, GIN on `assignee_ids`, list/space member by profile, FTS GIN). Add
+  composite/covering indexes if you move grouping server-side.
+- **Realtime:** not used — freshness relies on `revalidatePath` + optimistic updates. ➕ Supabase
+  Realtime subscriptions would be the upgrade path for multi-user live updates.
+
+### 15.16 Mobile & accessibility (scope note)
+
+> The current implementation is **desktop-first** and only partially mobile/a11y-complete. This is
+> a deliberate scope boundary; the items below are an honest status + the bar to clear for
+> production parity (mostly ➕ RECOMMENDED, not present today).
+
+- **Responsive:** the table relies on horizontal scroll on narrow viewports (fixed-width columns,
+  sticky title column). Inputs use `text-base` on mobile (16px) to prevent iOS zoom. The detail
+  "drawer" is a centered modal that goes near-full-screen on small screens
+  (`max-h-[96vh] p-2`). There is **no** dedicated mobile card layout, swipe gestures, or
+  bottom-sheet. ➕ Provide a stacked/card view < `md`.
+- **Keyboard:** rich shortcuts exist for the list view and drawer (§11.1/§11.9). DnD has a
+  `KeyboardSensor` (dnd-kit) so reordering is keyboard-operable.
+- **Accessibility gaps (➕ RECOMMENDED):** the detail modal does **not** implement a focus trap or
+  restore focus on close, and the backdrop click is the primary dismiss; Radix `Popover`/`Tabs`
+  bring their own ARIA, but the custom dropdowns (priority, assignee in the row) are
+  ad-hoc `<button>` menus without `role="menu"`/`aria-activedescendant`. Color is sometimes the
+  only signal (priority dots, status). No explicit `prefers-reduced-motion` handling for the
+  framer-motion animations. Add: focus trap + return focus, ARIA roles on custom menus, visible
+  focus rings everywhere (most interactive elements already use `focus-visible:ring`), text labels
+  alongside color, and a reduced-motion guard.
 
 ---
 
