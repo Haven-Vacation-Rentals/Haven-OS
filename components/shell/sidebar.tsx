@@ -13,6 +13,7 @@ import {
   Target,
   ShieldAlert,
   ClipboardList,
+  ClipboardCheck,
   Bot,
   Megaphone,
   PenSquare,
@@ -52,7 +53,16 @@ function buildSections(flags: {
     { label: "Project Management", href: "/work", icon: FolderKanban },
     { label: "Properties", href: "/properties", icon: Home },
     { label: "Onboarding", href: "/onboarding", icon: ClipboardList },
-    { label: "Lost Items", href: "/operations/lost-items", icon: PackageSearch },
+    {
+      label: "Clean Transition",
+      href: "/operations/clean-transition",
+      icon: ClipboardCheck,
+    },
+    {
+      label: "Lost Items",
+      href: "/operations/lost-items",
+      icon: PackageSearch,
+    },
   ];
 
   const adminItems: NavItem[] = [];
@@ -64,7 +74,12 @@ function buildSections(flags: {
     });
   }
   if (flags.canAgents) {
-    adminItems.push({ label: "Agents", href: "/agents", icon: Bot, badge: "Beta" });
+    adminItems.push({
+      label: "Agents",
+      href: "/agents",
+      icon: Bot,
+      badge: "Beta",
+    });
   }
   if (flags.canHr) {
     adminItems.push({ label: "HR", href: "/hr", icon: ShieldAlert });
@@ -266,9 +281,7 @@ export function Sidebar({
         aria-hidden={!mobileOpen}
         className={cn(
           "md:hidden fixed inset-0 z-50 bg-black/40 transition-opacity",
-          mobileOpen
-            ? "opacity-100"
-            : "pointer-events-none opacity-0",
+          mobileOpen ? "opacity-100" : "pointer-events-none opacity-0",
         )}
         onClick={() => setMobileOpen(false)}
       />
@@ -285,7 +298,10 @@ export function Sidebar({
         {navContent}
       </aside>
 
-      <HavenAssistant open={assistantOpen} onClose={() => setAssistantOpen(false)} />
+      <HavenAssistant
+        open={assistantOpen}
+        onClose={() => setAssistantOpen(false)}
+      />
     </>
   );
 }
