@@ -1,6 +1,8 @@
 import { CleanTransitionView } from "@/components/clean-transitions/clean-transition-view";
+import { buttonVariants } from "@/components/ui/button";
 import { requireUser } from "@/lib/auth/user";
 import { getCleanTransitionData } from "@/lib/clean-transitions/actions";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +21,13 @@ export default async function CleanTransitionPage() {
             New property cleaning details and price changes for approval
           </p>
         </div>
+        <Link
+          href="/clean-transition/intake"
+          target="_blank"
+          className={buttonVariants({ variant: "secondary", size: "md" })}
+        >
+          Share Intake Form
+        </Link>
       </div>
 
       <CleanTransitionView
