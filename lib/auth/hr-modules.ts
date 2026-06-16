@@ -6,6 +6,7 @@ export const HR_MODULES = [
   "people",
   "hiring",
   "surveys",
+  "compensation",
   "policies",
   "procedures",
 ] as const;
@@ -15,6 +16,7 @@ export const HR_MODULE_LABELS: Record<HrModule, string> = {
   people: "People",
   hiring: "Hiring",
   surveys: "Surveys",
+  compensation: "Compensation",
   policies: "Policies",
   procedures: "Procedures",
 };

@@ -8,7 +8,15 @@ import {
   visibleEmployeeIds,
 } from "@/lib/auth/permissions";
 import type { HrModule } from "@/lib/auth/hr-modules";
-import { Users, Briefcase, FileText, ClipboardList, Lock, MessageSquare } from "lucide-react";
+import {
+  Users,
+  Briefcase,
+  FileText,
+  ClipboardList,
+  Lock,
+  MessageSquare,
+  DollarSign,
+} from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +43,7 @@ export default async function HrLayout({ children }: { children: React.ReactNode
   const hasHiring = moduleSet.has("hiring");
   const hasSurveys =
     moduleSet.has("surveys") || (surveyIds !== null && surveyIds.length > 0);
+  const hasCompensation = moduleSet.has("compensation");
   const hasPolicies = moduleSet.has("policies");
   const hasProcedures = moduleSet.has("procedures");
 
@@ -58,6 +67,13 @@ export default async function HrLayout({ children }: { children: React.ReactNode
         {hasHiring && <HrTab href="/hr/hiring" label="Hiring" icon={Briefcase} />}
         {hasSurveys && (
           <HrTab href="/hr/surveys" label="Surveys" icon={MessageSquare} />
+        )}
+        {hasCompensation && (
+          <HrTab
+            href="/hr/compensation"
+            label="Compensation"
+            icon={DollarSign}
+          />
         )}
         {hasPolicies && <HrTab href="/hr/policies" label="Policies" icon={FileText} />}
         {hasProcedures && (
