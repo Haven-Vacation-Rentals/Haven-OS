@@ -23,6 +23,8 @@ export type DbCompensationForm = {
   title: string;
   description: string;
   status: CompensationFormStatus;
+  allow_booked_meetings: boolean;
+  allow_closed_deals: boolean;
   meeting_payout_amount: number;
   deal_commission_percent: number;
   created_by: string | null;

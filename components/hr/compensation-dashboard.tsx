@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import type { ReactNode } from "react";
 import {
   CheckCircle2,
   Copy,
@@ -59,6 +60,8 @@ export function CompensationDashboard({
   const [description, setDescription] = useState(
     "Log booked meetings and closed deals for payout review.",
   );
+  const [allowBookedMeetings, setAllowBookedMeetings] = useState(true);
+  const [allowClosedDeals, setAllowClosedDeals] = useState(true);
   const [meetingPayout, setMeetingPayout] = useState("25");
   const [dealPercent, setDealPercent] = useState("3");
   const [error, setError] = useState<string | null>(null);
@@ -78,12 +81,18 @@ export function CompensationDashboard({
 
   const createForm = () => {
     setError(null);
+    if (!allowBookedMeetings && !allowClosedDeals) {
+      setError("Turn on booked meetings, closed deals, or both.");
+      return;
+    }
     startTransition(async () => {
       try {
         await createCompensationForm({
           title,
           description,
           status: "active",
+          allow_booked_meetings: allowBookedMeetings,
+          allow_closed_deals: allowClosedDeals,
           meeting_payout_amount: Number(meetingPayout) || 0,
           deal_commission_percent: Number(dealPercent) || 0,
         });
@@ -115,40 +124,71 @@ export function CompensationDashboard({
       <section className="rounded-card border border-border bg-surface p-4 shadow-card">
         <div className="mb-3 flex items-center gap-2">
           <DollarSign className="h-4 w-4 text-muted-foreground" />
-          <h3 className="font-heading text-[15px] font-bold">Forms</h3>
+          <h3 className="font-heading text-[15px] font-bold">
+            Booked Meetings or Closed Deals
+          </h3>
         </div>
         {forms.length === 0 ? (
           <div className="flex flex-col gap-3">
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.2fr_1.8fr_120px_120px_auto]">
-              <Input value={title} onChange={(e) => setTitle(e.target.value)} />
-              <Input
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={meetingPayout}
-                onChange={(e) => setMeetingPayout(e.target.value)}
-                aria-label="Meeting payout"
-              />
-              <Input
-                type="number"
-                min="0"
-                step="0.001"
-                value={dealPercent}
-                onChange={(e) => setDealPercent(e.target.value)}
-                aria-label="Deal commission percent"
-              />
-              <Button onClick={createForm} disabled={pending}>
-                <Plus className="h-4 w-4" />
-                Create
-              </Button>
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1.5fr_auto]">
+              <Field label="Form name">
+                <Input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </Field>
+              <Field label="Form description">
+                <Input
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </Field>
+              <div className="flex items-end">
+                <Button onClick={createForm} disabled={pending}>
+                  <Plus className="h-4 w-4" />
+                  Create
+                </Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <ActivitySetup
+                checked={allowBookedMeetings}
+                onCheckedChange={setAllowBookedMeetings}
+                title="Booked meetings"
+                description="Sales reps can log meetings they booked."
+              >
+                <Field label="Dollar amount paid per booked meeting">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={meetingPayout}
+                    onChange={(e) => setMeetingPayout(e.target.value)}
+                    disabled={!allowBookedMeetings}
+                  />
+                </Field>
+              </ActivitySetup>
+              <ActivitySetup
+                checked={allowClosedDeals}
+                onCheckedChange={setAllowClosedDeals}
+                title="Closed deals"
+                description="Sales reps can log closed deals for commission."
+              >
+                <Field label="Commission percentage paid on closed deal value">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    value={dealPercent}
+                    onChange={(e) => setDealPercent(e.target.value)}
+                    disabled={!allowClosedDeals}
+                  />
+                </Field>
+              </ActivitySetup>
             </div>
             <p className="text-[12px] text-muted-foreground">
-              Default values are meeting payout in dollars and closed deal
-              commission percent.
+              Turn on booked meetings, closed deals, or both. The dollar fields
+              determine the estimated payout shown on the public form.
             </p>
           </div>
         ) : (
@@ -216,6 +256,12 @@ function FormRow({
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(form.title);
+  const [allowBookedMeetings, setAllowBookedMeetings] = useState(
+    form.allow_booked_meetings,
+  );
+  const [allowClosedDeals, setAllowClosedDeals] = useState(
+    form.allow_closed_deals,
+  );
   const [meetingPayout, setMeetingPayout] = useState(
     String(form.meeting_payout_amount),
   );
@@ -233,9 +279,15 @@ function FormRow({
   };
 
   const save = () => {
+    if (!allowBookedMeetings && !allowClosedDeals) {
+      alert("Turn on booked meetings, closed deals, or both.");
+      return;
+    }
     startTransition(async () => {
       await updateCompensationForm(form.id, {
         title,
+        allow_booked_meetings: allowBookedMeetings,
+        allow_closed_deals: allowClosedDeals,
         meeting_payout_amount: Number(meetingPayout) || 0,
         deal_commission_percent: Number(dealPercent) || 0,
       });
@@ -280,26 +332,51 @@ function FormRow({
             </span>
           </div>
           {editing ? (
-            <div className="mt-2 grid max-w-[420px] grid-cols-2 gap-2">
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={meetingPayout}
-                onChange={(e) => setMeetingPayout(e.target.value)}
-              />
-              <Input
-                type="number"
-                min="0"
-                step="0.001"
-                value={dealPercent}
-                onChange={(e) => setDealPercent(e.target.value)}
-              />
+            <div className="mt-3 grid max-w-[680px] grid-cols-1 gap-3 md:grid-cols-2">
+              <ActivitySetup
+                checked={allowBookedMeetings}
+                onCheckedChange={setAllowBookedMeetings}
+                title="Booked meetings"
+                description="Allow reps to submit booked meetings."
+              >
+                <Field label="Dollar amount paid per booked meeting">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={meetingPayout}
+                    onChange={(e) => setMeetingPayout(e.target.value)}
+                    disabled={!allowBookedMeetings}
+                  />
+                </Field>
+              </ActivitySetup>
+              <ActivitySetup
+                checked={allowClosedDeals}
+                onCheckedChange={setAllowClosedDeals}
+                title="Closed deals"
+                description="Allow reps to submit closed deals."
+              >
+                <Field label="Commission percentage paid on closed deal value">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    value={dealPercent}
+                    onChange={(e) => setDealPercent(e.target.value)}
+                    disabled={!allowClosedDeals}
+                  />
+                </Field>
+              </ActivitySetup>
             </div>
           ) : (
             <div className="mt-1 text-[12px] text-muted-foreground">
-              ${form.meeting_payout_amount.toFixed(2)} per meeting ·{" "}
-              {form.deal_commission_percent}% of closed deal value
+              {form.allow_booked_meetings
+                ? `$${form.meeting_payout_amount.toFixed(2)} per meeting`
+                : "Booked meetings off"}
+              {" · "}
+              {form.allow_closed_deals
+                ? `${form.deal_commission_percent}% of closed deal value`
+                : "Closed deals off"}
             </div>
           )}
         </div>
@@ -430,6 +507,59 @@ function Metric({ label, value }: { label: string; value: string }) {
         {label}
       </div>
       <div className="font-heading text-[16px] font-bold">{value}</div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-[12px] font-medium">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function ActivitySetup({
+  checked,
+  onCheckedChange,
+  title,
+  description,
+  children,
+}: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`rounded-md border p-3 transition-colors ${
+        checked ? "border-accent/60 bg-accent-soft/60" : "border-border bg-surface-alt/30"
+      }`}
+    >
+      <label className="flex cursor-pointer items-start gap-3">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onCheckedChange(e.target.checked)}
+          className="mt-1 h-4 w-4"
+        />
+        <span>
+          <span className="block text-[13px] font-semibold">{title}</span>
+          <span className="block text-[12px] text-muted-foreground">
+            {description}
+          </span>
+        </span>
+      </label>
+      <div className="mt-3">{children}</div>
     </div>
   );
 }

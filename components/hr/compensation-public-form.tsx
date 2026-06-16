@@ -16,7 +16,9 @@ export function CompensationPublicForm({
   form: DbCompensationForm;
 }) {
   const [activityType, setActivityType] =
-    useState<CompensationActivityType>("booked_meeting");
+    useState<CompensationActivityType>(
+      form.allow_booked_meetings ? "booked_meeting" : "closed_deal",
+    );
   const [repName, setRepName] = useState("");
   const [repEmail, setRepEmail] = useState("");
   const [accountName, setAccountName] = useState("");
@@ -44,6 +46,12 @@ export function CompensationPublicForm({
       return setError("Email looks invalid");
     }
     if (!accountName.trim()) return setError("Account name is required");
+    if (activityType === "booked_meeting" && !form.allow_booked_meetings) {
+      return setError("This form is not accepting booked meetings");
+    }
+    if (activityType === "closed_deal" && !form.allow_closed_deals) {
+      return setError("This form is not accepting closed deals");
+    }
     if (activityType === "closed_deal" && Number(dealValue) <= 0) {
       return setError("Deal value is required for closed deals");
     }
@@ -93,20 +101,26 @@ export function CompensationPublicForm({
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-5">
       <div className="rounded-card border border-border bg-surface p-4">
-        <h3 className="font-heading text-[14px] font-bold">Submission type</h3>
+        <h3 className="font-heading text-[14px] font-bold">
+          Booked Meetings or Closed Deals
+        </h3>
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <TypeOption
-            checked={activityType === "booked_meeting"}
-            title="Booked meeting"
-            detail={`$${form.meeting_payout_amount.toFixed(2)} payout`}
-            onChange={() => setActivityType("booked_meeting")}
-          />
-          <TypeOption
-            checked={activityType === "closed_deal"}
-            title="Closed deal"
-            detail={`${form.deal_commission_percent}% commission`}
-            onChange={() => setActivityType("closed_deal")}
-          />
+          {form.allow_booked_meetings ? (
+            <TypeOption
+              checked={activityType === "booked_meeting"}
+              title="Booked meeting"
+              detail={`$${form.meeting_payout_amount.toFixed(2)} payout`}
+              onChange={() => setActivityType("booked_meeting")}
+            />
+          ) : null}
+          {form.allow_closed_deals ? (
+            <TypeOption
+              checked={activityType === "closed_deal"}
+              title="Closed deal"
+              detail={`${form.deal_commission_percent}% commission`}
+              onChange={() => setActivityType("closed_deal")}
+            />
+          ) : null}
         </div>
       </div>
 

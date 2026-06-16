@@ -96,6 +96,8 @@ function revalidateCompensation() {
 function normaliseForm(row: DbCompensationForm): DbCompensationForm {
   return {
     ...row,
+    allow_booked_meetings: row.allow_booked_meetings ?? true,
+    allow_closed_deals: row.allow_closed_deals ?? true,
     meeting_payout_amount: toMoney(row.meeting_payout_amount),
     deal_commission_percent: toMoney(row.deal_commission_percent),
   };
@@ -213,6 +215,8 @@ export async function createCompensationForm(input: {
   title: string;
   description?: string;
   status?: CompensationFormStatus;
+  allow_booked_meetings?: boolean;
+  allow_closed_deals?: boolean;
   meeting_payout_amount?: number;
   deal_commission_percent?: number;
 }): Promise<DbCompensationForm> {
@@ -229,6 +233,8 @@ export async function createCompensationForm(input: {
       title,
       description: input.description?.trim() ?? "",
       status: isFormStatus(input.status) ? input.status : "draft",
+      allow_booked_meetings: input.allow_booked_meetings ?? true,
+      allow_closed_deals: input.allow_closed_deals ?? true,
       meeting_payout_amount: Math.max(0, toMoney(input.meeting_payout_amount)),
       deal_commission_percent: Math.max(
         0,
@@ -249,6 +255,8 @@ export async function updateCompensationForm(
     title: string;
     description: string;
     status: CompensationFormStatus;
+    allow_booked_meetings: boolean;
+    allow_closed_deals: boolean;
     meeting_payout_amount: number;
     deal_commission_percent: number;
   }>,
@@ -265,6 +273,12 @@ export async function updateCompensationForm(
     patch.description = input.description.trim();
   }
   if (isFormStatus(input.status)) patch.status = input.status;
+  if (typeof input.allow_booked_meetings === "boolean") {
+    patch.allow_booked_meetings = input.allow_booked_meetings;
+  }
+  if (typeof input.allow_closed_deals === "boolean") {
+    patch.allow_closed_deals = input.allow_closed_deals;
+  }
   if (input.meeting_payout_amount !== undefined) {
     patch.meeting_payout_amount = Math.max(0, toMoney(input.meeting_payout_amount));
   }
@@ -361,6 +375,15 @@ export async function submitCompensationResponse(input: {
     const activeForm = form ? normaliseForm(form as DbCompensationForm) : null;
     if (!activeForm || activeForm.status !== "active") {
       return { ok: false, error: "This form is not accepting responses" };
+    }
+    if (
+      input.activity_type === "booked_meeting" &&
+      !activeForm.allow_booked_meetings
+    ) {
+      return { ok: false, error: "This form is not accepting booked meetings" };
+    }
+    if (input.activity_type === "closed_deal" && !activeForm.allow_closed_deals) {
+      return { ok: false, error: "This form is not accepting closed deals" };
     }
 
     const dealValue =
