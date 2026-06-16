@@ -26,6 +26,7 @@ export type DbCompensationForm = {
   allow_booked_meetings: boolean;
   allow_closed_deals: boolean;
   meeting_payout_amount: number;
+  closed_deal_payout_amount: number;
   deal_commission_percent: number;
   created_by: string | null;
   created_at: string;
@@ -43,6 +44,7 @@ export type DbCompensationSubmission = {
   contact_name: string | null;
   activity_date: string | null;
   meeting_datetime: string | null;
+  deal_count: number | null;
   deal_value: number | null;
   payout_amount: number;
   notes: string;

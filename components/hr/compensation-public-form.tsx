@@ -25,7 +25,7 @@ export function CompensationPublicForm({
   const [contactName, setContactName] = useState("");
   const [activityDate, setActivityDate] = useState("");
   const [meetingDatetime, setMeetingDatetime] = useState("");
-  const [dealValue, setDealValue] = useState("");
+  const [dealCount, setDealCount] = useState("1");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -35,7 +35,8 @@ export function CompensationPublicForm({
   const estimatedPayout =
     activityType === "booked_meeting"
       ? form.meeting_payout_amount
-      : ((Number(dealValue) || 0) * form.deal_commission_percent) / 100;
+      : (Math.max(1, Math.floor(Number(dealCount) || 1)) *
+          form.closed_deal_payout_amount);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,8 +53,8 @@ export function CompensationPublicForm({
     if (activityType === "closed_deal" && !form.allow_closed_deals) {
       return setError("This form is not accepting closed deals");
     }
-    if (activityType === "closed_deal" && Number(dealValue) <= 0) {
-      return setError("Deal value is required for closed deals");
+    if (activityType === "closed_deal" && Number(dealCount) <= 0) {
+      return setError("Number of closed deals is required");
     }
 
     submittingRef.current = true;
@@ -69,7 +70,7 @@ export function CompensationPublicForm({
           contact_name: contactName,
           activity_date: activityDate,
           meeting_datetime: meetingDatetime,
-          deal_value: Number(dealValue) || 0,
+          deal_count: Math.max(1, Math.floor(Number(dealCount) || 1)),
           notes,
           user_agent:
             typeof navigator !== "undefined" ? navigator.userAgent : undefined,
@@ -117,7 +118,7 @@ export function CompensationPublicForm({
             <TypeOption
               checked={activityType === "closed_deal"}
               title="Closed deal"
-              detail={`${form.deal_commission_percent}% commission`}
+              detail={`$${form.closed_deal_payout_amount.toFixed(2)} per deal`}
               onChange={() => setActivityType("closed_deal")}
             />
           ) : null}
@@ -165,13 +166,13 @@ export function CompensationPublicForm({
               />
             </Field>
           ) : (
-            <Field label="Deal value" required>
+            <Field label="Number of closed deals" required>
               <Input
                 type="number"
-                min="0"
-                step="0.01"
-                value={dealValue}
-                onChange={(e) => setDealValue(e.target.value)}
+                min="1"
+                step="1"
+                value={dealCount}
+                onChange={(e) => setDealCount(e.target.value)}
               />
             </Field>
           )}

@@ -99,6 +99,9 @@ function normaliseForm(row: DbCompensationForm): DbCompensationForm {
     allow_booked_meetings: row.allow_booked_meetings ?? true,
     allow_closed_deals: row.allow_closed_deals ?? true,
     meeting_payout_amount: toMoney(row.meeting_payout_amount),
+    closed_deal_payout_amount: toMoney(
+      row.closed_deal_payout_amount ?? row.deal_commission_percent,
+    ),
     deal_commission_percent: toMoney(row.deal_commission_percent),
   };
 }
@@ -108,6 +111,10 @@ function normaliseSubmission(
 ): DbCompensationSubmission {
   return {
     ...row,
+    deal_count:
+      row.deal_count === null || row.deal_count === undefined
+        ? null
+        : Math.max(1, Math.floor(Number(row.deal_count) || 1)),
     deal_value: row.deal_value === null ? null : toMoney(row.deal_value),
     payout_amount: toMoney(row.payout_amount),
   };
@@ -218,6 +225,7 @@ export async function createCompensationForm(input: {
   allow_booked_meetings?: boolean;
   allow_closed_deals?: boolean;
   meeting_payout_amount?: number;
+  closed_deal_payout_amount?: number;
   deal_commission_percent?: number;
 }): Promise<DbCompensationForm> {
   await requireHrModule("compensation");
@@ -236,6 +244,10 @@ export async function createCompensationForm(input: {
       allow_booked_meetings: input.allow_booked_meetings ?? true,
       allow_closed_deals: input.allow_closed_deals ?? true,
       meeting_payout_amount: Math.max(0, toMoney(input.meeting_payout_amount)),
+      closed_deal_payout_amount: Math.max(
+        0,
+        toMoney(input.closed_deal_payout_amount ?? input.deal_commission_percent),
+      ),
       deal_commission_percent: Math.max(
         0,
         toMoney(input.deal_commission_percent),
@@ -258,6 +270,7 @@ export async function updateCompensationForm(
     allow_booked_meetings: boolean;
     allow_closed_deals: boolean;
     meeting_payout_amount: number;
+    closed_deal_payout_amount: number;
     deal_commission_percent: number;
   }>,
 ): Promise<void> {
@@ -281,6 +294,12 @@ export async function updateCompensationForm(
   }
   if (input.meeting_payout_amount !== undefined) {
     patch.meeting_payout_amount = Math.max(0, toMoney(input.meeting_payout_amount));
+  }
+  if (input.closed_deal_payout_amount !== undefined) {
+    patch.closed_deal_payout_amount = Math.max(
+      0,
+      toMoney(input.closed_deal_payout_amount),
+    );
   }
   if (input.deal_commission_percent !== undefined) {
     patch.deal_commission_percent = Math.max(
@@ -345,6 +364,7 @@ export async function submitCompensationResponse(input: {
   contact_name?: string;
   activity_date?: string;
   meeting_datetime?: string;
+  deal_count?: number;
   deal_value?: number;
   notes?: string;
   user_agent?: string;
@@ -386,14 +406,18 @@ export async function submitCompensationResponse(input: {
       return { ok: false, error: "This form is not accepting closed deals" };
     }
 
+    const dealCount =
+      input.activity_type === "closed_deal"
+        ? Math.max(1, Math.floor(Number(input.deal_count) || 1))
+        : null;
     const dealValue =
       input.activity_type === "closed_deal"
-        ? Math.max(0, toMoney(input.deal_value))
+        ? activeForm.closed_deal_payout_amount
         : null;
     const payout =
       input.activity_type === "booked_meeting"
         ? activeForm.meeting_payout_amount
-        : toMoney(((dealValue ?? 0) * activeForm.deal_commission_percent) / 100);
+        : toMoney((dealValue ?? 0) * (dealCount ?? 1));
 
     const row = {
       form_id: activeForm.id,
@@ -407,6 +431,7 @@ export async function submitCompensationResponse(input: {
         input.activity_type === "booked_meeting"
           ? input.meeting_datetime || null
           : null,
+      deal_count: dealCount,
       deal_value: dealValue,
       payout_amount: payout,
       notes: input.notes?.trim() ?? "",

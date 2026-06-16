@@ -63,7 +63,7 @@ export function CompensationDashboard({
   const [allowBookedMeetings, setAllowBookedMeetings] = useState(true);
   const [allowClosedDeals, setAllowClosedDeals] = useState(true);
   const [meetingPayout, setMeetingPayout] = useState("25");
-  const [dealPercent, setDealPercent] = useState("3");
+  const [dealPayout, setDealPayout] = useState("100");
   const [error, setError] = useState<string | null>(null);
 
   const totals = useMemo(() => {
@@ -94,7 +94,7 @@ export function CompensationDashboard({
           allow_booked_meetings: allowBookedMeetings,
           allow_closed_deals: allowClosedDeals,
           meeting_payout_amount: Number(meetingPayout) || 0,
-          deal_commission_percent: Number(dealPercent) || 0,
+          closed_deal_payout_amount: Number(dealPayout) || 0,
         });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -172,15 +172,15 @@ export function CompensationDashboard({
                 checked={allowClosedDeals}
                 onCheckedChange={setAllowClosedDeals}
                 title="Closed deals"
-                description="Sales reps can log closed deals for commission."
+                description="Sales reps can log one or more closed deals."
               >
-                <Field label="Commission percentage paid on closed deal value">
+                <Field label="Dollar amount paid per closed deal">
                   <Input
                     type="number"
                     min="0"
-                    step="0.001"
-                    value={dealPercent}
-                    onChange={(e) => setDealPercent(e.target.value)}
+                    step="0.01"
+                    value={dealPayout}
+                    onChange={(e) => setDealPayout(e.target.value)}
                     disabled={!allowClosedDeals}
                   />
                 </Field>
@@ -265,8 +265,8 @@ function FormRow({
   const [meetingPayout, setMeetingPayout] = useState(
     String(form.meeting_payout_amount),
   );
-  const [dealPercent, setDealPercent] = useState(
-    String(form.deal_commission_percent),
+  const [dealPayout, setDealPayout] = useState(
+    String(form.closed_deal_payout_amount),
   );
   const [transitioning, startTransition] = useTransition();
   const publicUrl = canonicalUrl(`/sales-comp/${form.slug}`);
@@ -289,7 +289,7 @@ function FormRow({
         allow_booked_meetings: allowBookedMeetings,
         allow_closed_deals: allowClosedDeals,
         meeting_payout_amount: Number(meetingPayout) || 0,
-        deal_commission_percent: Number(dealPercent) || 0,
+        closed_deal_payout_amount: Number(dealPayout) || 0,
       });
       setEditing(false);
     });
@@ -356,13 +356,13 @@ function FormRow({
                 title="Closed deals"
                 description="Allow reps to submit closed deals."
               >
-                <Field label="Commission percentage paid on closed deal value">
+                <Field label="Dollar amount paid per closed deal">
                   <Input
                     type="number"
                     min="0"
-                    step="0.001"
-                    value={dealPercent}
-                    onChange={(e) => setDealPercent(e.target.value)}
+                    step="0.01"
+                    value={dealPayout}
+                    onChange={(e) => setDealPayout(e.target.value)}
                     disabled={!allowClosedDeals}
                   />
                 </Field>
@@ -375,7 +375,7 @@ function FormRow({
                 : "Booked meetings off"}
               {" · "}
               {form.allow_closed_deals
-                ? `${form.deal_commission_percent}% of closed deal value`
+                ? `$${form.closed_deal_payout_amount.toFixed(2)} per closed deal`
                 : "Closed deals off"}
             </div>
           )}
@@ -465,7 +465,7 @@ function SubmissionRow({
           : "—"}
       </td>
       <td className="px-2 py-3 text-right align-top">
-        {row.deal_value !== null ? `$${row.deal_value.toFixed(2)}` : "—"}
+        {row.deal_count ? `${row.deal_count} × $${(row.deal_value ?? 0).toFixed(2)}` : "—"}
       </td>
       <td className="px-2 py-3 text-right align-top font-semibold">
         ${row.payout_amount.toFixed(2)}
