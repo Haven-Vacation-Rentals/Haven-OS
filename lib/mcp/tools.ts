@@ -14,6 +14,15 @@ import {
   LOST_ITEM_STATUSES,
   type LostItemStatus,
 } from "@/lib/lost-items/types";
+import {
+  bulkUpsertWorkOrdersRaw,
+  getCostsSummary,
+} from "@/lib/operations/work-orders/actions";
+import {
+  WORK_ORDER_ROLES,
+  type WorkOrderRole,
+  type CreateWorkOrderInput,
+} from "@/lib/operations/work-orders/types";
 import { hasListAccessFor } from "@/lib/api-tokens/access";
 import type { McpTool, McpToolCallResult } from "./types";
 
@@ -47,6 +56,11 @@ function asPosInt(v: unknown, fallback: number, max: number): number {
   const n = typeof v === "number" ? v : parseInt(String(v ?? ""), 10);
   if (!Number.isFinite(n) || n <= 0) return fallback;
   return Math.min(Math.floor(n), max);
+}
+
+function asNum(v: unknown): number | undefined {
+  const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
+  return Number.isFinite(n) ? n : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -670,6 +684,202 @@ const listContentSpacesTool: McpTool = {
 };
 
 // ---------------------------------------------------------------------------
+// Operations Costs (work orders)
+// ---------------------------------------------------------------------------
+
+const uploadWorkOrderCostsTool: McpTool = {
+  name: "upload_work_order_costs",
+  title: "Upload work order costs",
+  description:
+    "Batch-upload completed work orders into the Operations Costs dashboard. Each entry records who did the job (a maintenance tech or runner), what was charged to the client/owner (revenue), and what the worker is paid (labor cost). The dashboard computes profit (charged - paid) per employee per day. Provide `external_ref` (your stable work-order id) to make re-uploads idempotent — a matching ref updates the existing row instead of creating a duplicate. Use this to push a whole day's completed work orders in one call.",
+  scope: "operations:write",
+  inputSchema: {
+    type: "object",
+    properties: {
+      work_orders: {
+        type: "array",
+        minItems: 1,
+        maxItems: 500,
+        description: "The completed work orders to record.",
+        items: {
+          type: "object",
+          properties: {
+            employee_name: {
+              type: "string",
+              description: "Who completed the work order (required).",
+            },
+            employee_role: {
+              type: "string",
+              enum: [...WORK_ORDER_ROLES],
+              default: "maintenance_tech",
+              description:
+                "The worker's role for filtering: maintenance_tech, runner, or other.",
+            },
+            amount_charged: {
+              type: "number",
+              minimum: 0,
+              description: "Revenue billed to the client/owner (required).",
+            },
+            amount_paid: {
+              type: "number",
+              minimum: 0,
+              description: "What the worker is paid for it / labor cost (required).",
+            },
+            work_date: {
+              type: "string",
+              format: "date",
+              description:
+                "Business day (YYYY-MM-DD). Defaults to today (US Eastern) if omitted.",
+            },
+            title: {
+              type: "string",
+              description: "Short label, e.g. 'HVAC filter swap'.",
+            },
+            description: { type: "string" },
+            property_name: {
+              type: "string",
+              description:
+                "Property name — matched to the property database when it exists.",
+            },
+            external_ref: {
+              type: "string",
+              description:
+                "Your stable id for this work order. Enables idempotent re-uploads.",
+            },
+            notes: { type: "string" },
+          },
+          required: ["employee_name", "amount_charged", "amount_paid"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["work_orders"],
+    additionalProperties: false,
+  },
+  async handler(args, ctx) {
+    const raw = Array.isArray(args.work_orders) ? args.work_orders : [];
+    if (raw.length === 0) {
+      return err("work_orders must be a non-empty array");
+    }
+
+    const inputs: CreateWorkOrderInput[] = [];
+    for (const item of raw) {
+      if (!item || typeof item !== "object") {
+        return err("Each work order must be an object");
+      }
+      const o = item as Record<string, unknown>;
+      const employee_name = asString(o.employee_name);
+      if (!employee_name) return err("Each work order needs an employee_name");
+      const amount_charged = asNum(o.amount_charged);
+      const amount_paid = asNum(o.amount_paid);
+      if (amount_charged === undefined || amount_paid === undefined) {
+        return err(
+          `Work order for "${employee_name}" needs numeric amount_charged and amount_paid`,
+        );
+      }
+      const role = asString(o.employee_role);
+      inputs.push({
+        employee_name,
+        employee_role: (WORK_ORDER_ROLES as readonly string[]).includes(
+          role ?? "",
+        )
+          ? (role as WorkOrderRole)
+          : "maintenance_tech",
+        amount_charged,
+        amount_paid,
+        work_date: asString(o.work_date) ?? null,
+        title: asString(o.title) ?? null,
+        description: asString(o.description) ?? null,
+        property_name: asString(o.property_name) ?? null,
+        external_ref: asString(o.external_ref) ?? null,
+        notes: asString(o.notes) ?? null,
+      });
+    }
+
+    const res = await bulkUpsertWorkOrdersRaw(
+      inputs,
+      { created_by: ctx.actor.id, source: "agent_upload" },
+      ctx.admin,
+    );
+    if (!res.ok) return err(res.error);
+
+    const summary = `Uploaded ${res.created + res.updated} work order(s): ${res.created} new, ${res.updated} updated${
+      res.errors.length ? `, ${res.errors.length} failed` : ""
+    }.`;
+    return ok(
+      { created: res.created, updated: res.updated, errors: res.errors },
+      summary,
+    );
+  },
+};
+
+const getOperationsCostsSummaryTool: McpTool = {
+  name: "get_operations_costs_summary",
+  title: "Get Operations Costs summary",
+  description:
+    "Return the Operations Costs rollup for a single day (default today) or a date range: total charged (revenue), total paid out (labor cost), total profit, margin, and a per-employee profit breakdown. Optionally filter by role (maintenance_tech / runner) or a specific employee name.",
+  scope: "operations:read",
+  inputSchema: {
+    type: "object",
+    properties: {
+      date: {
+        type: "string",
+        format: "date",
+        description: "Single business day (YYYY-MM-DD). Defaults to today.",
+      },
+      from: {
+        type: "string",
+        format: "date",
+        description: "Range start (YYYY-MM-DD). Use with `to` instead of `date`.",
+      },
+      to: {
+        type: "string",
+        format: "date",
+        description: "Range end (YYYY-MM-DD).",
+      },
+      role: {
+        type: "string",
+        enum: [...WORK_ORDER_ROLES, "all"],
+        description: "Filter by worker role.",
+      },
+      employee: {
+        type: "string",
+        description: "Filter to a single employee by name.",
+      },
+    },
+    additionalProperties: false,
+  },
+  async handler(args, ctx) {
+    const date = asString(args.date);
+    const from = asString(args.from);
+    const to = asString(args.to);
+    const role = asString(args.role);
+    const employee = asString(args.employee);
+
+    const summary = await getCostsSummary(
+      {
+        date: !from && !to ? date ?? undefined : undefined,
+        from: from ?? undefined,
+        to: to ?? undefined,
+        role: (WORK_ORDER_ROLES as readonly string[]).includes(role ?? "")
+          ? (role as WorkOrderRole)
+          : "all",
+        employee: employee ?? "all",
+      },
+      ctx.admin,
+    );
+
+    const t = summary.totals;
+    const text = `${t.orders} work order(s) across ${t.employees} employee(s): charged ${usd(t.charged)}, paid ${usd(t.paid)}, profit ${usd(t.profit)} (${Math.round(t.margin * 100)}% margin).`;
+    return ok(summary, text);
+  },
+};
+
+function usd(n: number): string {
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -681,6 +891,8 @@ export const MCP_TOOLS: McpTool[] = [
   listLostItemsTool,
   createLostItemTool,
   updateLostItemStatusTool,
+  uploadWorkOrderCostsTool,
+  getOperationsCostsSummaryTool,
   listContentSpacesTool,
   listContentIdeasTool,
   createContentIdeaTool,
