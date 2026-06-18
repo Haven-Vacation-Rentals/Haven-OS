@@ -16,6 +16,8 @@ export type ApiScope =
   | "work:write"
   | "lost-items:read"
   | "lost-items:write"
+  | "operations:read"
+  | "operations:write"
   | "properties:read"
   | "properties:write"
   | "content:read"
@@ -69,6 +71,18 @@ export const API_SCOPE_CATALOG: ApiScopeInfo[] = [
     scope: "lost-items:write",
     label: "Write Lost Items",
     description: "Create / update / comment / set status on Lost Items cases.",
+  },
+  {
+    scope: "operations:read",
+    label: "Read Operations Costs",
+    description:
+      "Read the Operations Costs dashboard — daily / historical work-order profit rollups.",
+  },
+  {
+    scope: "operations:write",
+    label: "Write Operations Costs",
+    description:
+      "Upload completed work orders (employee, charged, paid) to the Operations Costs dashboard.",
   },
   {
     scope: "properties:read",

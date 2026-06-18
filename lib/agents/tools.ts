@@ -17,6 +17,7 @@
 import * as work from "@/lib/work/actions";
 import * as props from "@/lib/properties/actions";
 import * as lostItems from "@/lib/lost-items/actions";
+import * as workOrders from "@/lib/operations/work-orders/actions";
 import * as scorecard from "@/lib/scorecard/actions";
 import * as hr from "@/lib/hr/actions";
 import * as roleQuestions from "@/lib/hr/application-questions";
@@ -44,6 +45,11 @@ import type {
 } from "@/lib/work/types";
 import type { PropertyUpdateInput } from "@/lib/properties/types";
 import type { LostItemStatus } from "@/lib/lost-items/types";
+import {
+  WORK_ORDER_ROLES,
+  type WorkOrderRole,
+  type CreateWorkOrderInput,
+} from "@/lib/operations/work-orders/types";
 import type {
   OnboardingProjectStatus,
   OnboardingTaskStatus,
@@ -2947,6 +2953,120 @@ export const TOOLS: ToolDef[] = [
   },
 
   // =========================================================================
+  // OPERATIONS — COSTS (work-order profitability)
+  // =========================================================================
+  {
+    name: "upload_work_order_costs",
+    description:
+      "Upload completed work orders into the Operations Costs dashboard (/operations/costs). Each entry records who did the job (maintenance tech or runner), what was charged to the client/owner, and what the worker is paid — the dashboard computes profit (charged - paid) per employee per day. Pass `external_ref` (a stable id from the source system) to make re-uploads idempotent: a matching ref updates the row instead of duplicating it. Use this to push a day's completed work orders in one call.",
+    input_schema: {
+      type: "object",
+      properties: {
+        work_orders: {
+          type: "array",
+          description: "Completed work orders to record.",
+          items: {
+            type: "object",
+            properties: {
+              employee_name: { type: "string" },
+              employee_role: {
+                type: "string",
+                enum: [...WORK_ORDER_ROLES],
+                description: "maintenance_tech, runner, or other.",
+              },
+              amount_charged: {
+                type: "number",
+                description: "Revenue billed to the client/owner.",
+              },
+              amount_paid: {
+                type: "number",
+                description: "What the worker is paid (labor cost).",
+              },
+              work_date: {
+                type: "string",
+                description: "Business day YYYY-MM-DD (defaults to today).",
+              },
+              title: { type: "string" },
+              property_name: { type: "string" },
+              external_ref: { type: "string" },
+              notes: { type: "string" },
+            },
+            required: ["employee_name", "amount_charged", "amount_paid"],
+          },
+        },
+      },
+      required: ["work_orders"],
+    },
+    execute: async (input, ctx) => {
+      const raw = arr<Record<string, unknown>>(input.work_orders) ?? [];
+      if (raw.length === 0) throw new Error("work_orders must be a non-empty array");
+      const inputs: CreateWorkOrderInput[] = raw.map((o) => {
+        const employee_name = s(o.employee_name);
+        if (!employee_name) throw new Error("Each work order needs employee_name");
+        const amount_charged = n(o.amount_charged);
+        const amount_paid = n(o.amount_paid);
+        if (amount_charged === undefined || amount_paid === undefined) {
+          throw new Error(
+            `Work order for "${employee_name}" needs numeric amount_charged and amount_paid`,
+          );
+        }
+        const role = s(o.employee_role);
+        return {
+          employee_name,
+          employee_role: (WORK_ORDER_ROLES as readonly string[]).includes(
+            role ?? "",
+          )
+            ? (role as WorkOrderRole)
+            : "maintenance_tech",
+          amount_charged,
+          amount_paid,
+          work_date: s(o.work_date) ?? null,
+          title: s(o.title) ?? null,
+          property_name: s(o.property_name) ?? null,
+          external_ref: s(o.external_ref) ?? null,
+          notes: s(o.notes) ?? null,
+        };
+      });
+      const res = await workOrders.bulkUpsertWorkOrdersRaw(inputs, {
+        created_by: ctx.userId,
+        source: "agent_upload",
+      });
+      if (!res.ok) throw new Error(res.error);
+      return { created: res.created, updated: res.updated, errors: res.errors };
+    },
+  },
+  {
+    name: "get_operations_costs_summary",
+    description:
+      "Return the Operations Costs rollup for a day (default today) or a date range: total charged (revenue), total paid (labor cost), total profit, margin, and a per-employee breakdown. Filter by role (maintenance_tech / runner) or a single employee name. Use for 'how did we do today?' / 'how profitable is <tech>?' questions.",
+    input_schema: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "Single day YYYY-MM-DD (defaults to today)." },
+        from: { type: "string", description: "Range start YYYY-MM-DD." },
+        to: { type: "string", description: "Range end YYYY-MM-DD." },
+        role: { type: "string", enum: [...WORK_ORDER_ROLES, "all"] },
+        employee: { type: "string", description: "Filter to one employee by name." },
+      },
+      required: [],
+    },
+    execute: async (input) => {
+      const from = s(input.from);
+      const to = s(input.to);
+      const role = s(input.role);
+      return workOrders.getCostsSummary({
+        date: !from && !to ? s(input.date) : undefined,
+        from,
+        to,
+        role: (WORK_ORDER_ROLES as readonly string[]).includes(role ?? "")
+          ? (role as WorkOrderRole)
+          : "all",
+        employee: s(input.employee) ?? "all",
+      });
+    },
+  },
+
+  // =========================================================================
   // SYSTEM
   // =========================================================================
   {
@@ -2998,6 +3118,7 @@ You have tools that give you live read + write access across the entire Haven OS
 - **Properties (PDM)** — the property master database. You can list, read, update any field (status, tier, account manager, access codes, etc.), and archive properties.
 - **Scorecard** — the Northstar weekly KPI tracker. You can read current + historical months, update cell values/targets/status (green/yellow/red), seed new months, and archive closed months.
 - **Lost Items (Operations)** — left-behind item cases. Use \`list_lost_items\`, \`get_lost_item\`, \`create_lost_item\` (when a guest reports something they left), \`update_lost_item\` (logistics/shipping/links), \`set_lost_item_status\` to move through the pipeline (Pending Pickup → Picked Up → Delivered → Completed; \`failed\` is the terminal state for unrecoverable cases), \`assign_lost_item\`, \`add_lost_item_comment\`, \`complete_lost_item\`, \`get_lost_item_stats\`. The pipeline tracks the cleaning company picking up the item and returning it to the guest. Optional fields: \`slack_thread_url\`, \`conversation_url\` for cross-linking.
+- **Operations Costs (Operations)** — daily work-order profitability at \`/operations/costs\`. When you have access to the day's completed work orders (who did each job — a maintenance tech or runner — what was charged to the client/owner, and what the worker is paid), call \`upload_work_order_costs\` to push them in one batch. Always include a stable \`external_ref\` per work order when the source system has one so re-runs update rather than duplicate. The dashboard computes profit (charged − paid) per employee per day and keeps history you can filter by tech or runner. Use \`get_operations_costs_summary\` to report "how did we do today?" or "how profitable is <tech>?" — it returns totals (charged / paid / profit / margin) plus a per-employee breakdown.
 - **Onboarding** — property onboarding projects with templated tasks + checklists. Full control: create or delete projects; update every project field (status, owner info, target/actual open dates, slack channel, folder URL, notes); add / update / delete / restatus tasks; edit any task field (title, description, department, due date, assignee, key-date flag); add / toggle / delete checklist items. Use \`list_onboarding_projects_with_stats\` for rollup views (progress, blockers, next key date, overdue) and \`get_onboarding_tree\` when you need specific task_ids to update.
 - **HR** (module-gated) — employees, performance reviews, issues/write-ups, roles, candidates, policy/procedure docs, and team surveys. HR access is split into modules (People, Hiring, Surveys, Policies, Procedures); each module is granted independently. Per-module calls are also row-level filtered by department/employee/per-survey grants. A user with only the Surveys module can manage surveys but cannot see employees or candidates.
 - **HR Surveys** — author flexible per-survey forms (short_text, long_text, single_choice, multi_choice, rating, yes_no), activate them to expose a public landing page at \`<site>/survey/<slug>\`, and read aggregated results (avg rating, choice counts, yes/no, text samples). Workflow: call \`create_hr_survey\` with a \`questions\` array (defaults to draft). To go live, set status='active' on creation or via \`set_hr_survey_status\`. Surface the share link via \`get_hr_survey_share_link\`. Use \`get_hr_survey_summary\` for "how's it going?" questions. Use \`add_hr_survey_question\` / \`update_hr_survey_question\` to iterate after creation — these are safe on live surveys. To retire a question on a live survey use \`archive_hr_survey_question\` (the public form hides it but historical answers stay intact); \`delete_hr_survey_question\` does this automatically when responses already exist. Use \`delete_hr_survey_response\` to soft-delete an individual submission (kept for audit, hidden from results) and \`restore_hr_survey_response\` to bring it back.

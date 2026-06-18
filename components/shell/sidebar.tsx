@@ -19,6 +19,7 @@ import {
   PenSquare,
   Magnet,
   PackageSearch,
+  Coins,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -62,6 +63,11 @@ function buildSections(flags: {
       label: "Lost Items",
       href: "/operations/lost-items",
       icon: PackageSearch,
+    },
+    {
+      label: "Operations Costs",
+      href: "/operations/costs",
+      icon: Coins,
     },
   ];
 

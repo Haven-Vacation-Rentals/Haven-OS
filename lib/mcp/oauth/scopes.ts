@@ -21,6 +21,8 @@ export const MCP_OAUTH_SCOPES: ApiScope[] = [
   "tasks:write",
   "lost-items:read",
   "lost-items:write",
+  "operations:read",
+  "operations:write",
   "content:read",
   "content:write",
 ];
@@ -33,6 +35,10 @@ export const MCP_OAUTH_SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   "tasks:write": "Create, update, and complete tasks on your behalf.",
   "lost-items:read": "View Lost Items cases.",
   "lost-items:write": "Create and update Lost Items cases.",
+  "operations:read":
+    "View the Operations Costs dashboard (work-order profit rollups).",
+  "operations:write":
+    "Upload completed work orders (employee, charged, paid) to Operations Costs.",
   "content:read": "Read Content Studio topics and articles.",
   "content:write": "Create and update Content Studio topics and articles.",
   // The remaining ApiScope keys are not exposed via OAuth, but we
