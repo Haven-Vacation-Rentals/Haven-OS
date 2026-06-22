@@ -15,6 +15,7 @@ import {
   Search,
   ClipboardList,
   ClipboardCheck,
+  BookOpen,
   Calendar,
   AlertTriangle,
   CircleDot,
@@ -156,6 +157,15 @@ export function ProjectsDirectory({ projects }: Props) {
             <ClipboardCheck className="h-4 w-4" />
             Clean Transition
           </Link>
+          <a
+            href="/knowledge"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-[13px] font-semibold text-foreground/80 transition-colors hover:bg-surface-alt hover:text-foreground"
+          >
+            <BookOpen className="h-4 w-4" />
+            Knowledge Base
+          </a>
         </div>
 
         {/* Status filter chips */}
