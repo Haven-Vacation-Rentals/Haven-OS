@@ -32,7 +32,10 @@ import {
   type CompensationSubmissionWithForm,
 } from "@/lib/hr/compensation-types";
 
-const STATUS_TONE: Record<CompensationFormStatus, "neutral" | "success" | "warn"> = {
+const STATUS_TONE: Record<
+  CompensationFormStatus,
+  "neutral" | "success" | "warn"
+> = {
   draft: "neutral",
   active: "success",
   closed: "warn",
@@ -56,6 +59,7 @@ export function CompensationDashboard({
   submissions: CompensationSubmissionWithForm[];
 }) {
   const [pending, startTransition] = useTransition();
+  const [showCreator, setShowCreator] = useState(forms.length === 0);
   const [title, setTitle] = useState("Sales compensation form");
   const [description, setDescription] = useState(
     "Log booked meetings and closed deals for payout review.",
@@ -96,6 +100,14 @@ export function CompensationDashboard({
           meeting_payout_amount: Number(meetingPayout) || 0,
           closed_deal_payout_amount: Number(dealPayout) || 0,
         });
+        setTitle("Sales compensation form");
+        setDescription(
+          "Log booked meetings and closed deals for payout review.",
+        );
+        setAllowBookedMeetings(true);
+        setAllowClosedDeals(true);
+        setMeetingPayout("25");
+        setDealPayout("100");
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -122,82 +134,127 @@ export function CompensationDashboard({
       </div>
 
       <section className="rounded-card border border-border bg-surface p-4 shadow-card">
-        <div className="mb-3 flex items-center gap-2">
-          <DollarSign className="h-4 w-4 text-muted-foreground" />
-          <h3 className="font-heading text-[15px] font-bold">
-            Booked Meetings or Closed Deals
-          </h3>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <h3 className="font-heading text-[15px] font-bold">
+              Booked Meetings or Closed Deals
+            </h3>
+          </div>
+          {forms.length > 0 && !showCreator ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setError(null);
+                setShowCreator(true);
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New form
+            </Button>
+          ) : null}
         </div>
-        {forms.length === 0 ? (
-          <div className="flex flex-col gap-3">
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1.5fr_auto]">
-              <Field label="Form name">
-                <Input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                />
-              </Field>
-              <Field label="Form description">
-                <Input
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                />
-              </Field>
-              <div className="flex items-end">
-                <Button onClick={createForm} disabled={pending}>
-                  <Plus className="h-4 w-4" />
-                  Create
-                </Button>
+        <div className="flex flex-col gap-4">
+          {showCreator ? (
+            <div className="flex flex-col gap-3 rounded-md border border-dashed border-border bg-surface-alt/30 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h4 className="font-heading text-[14px] font-bold">
+                    New compensation form
+                  </h4>
+                  <p className="text-[12px] text-muted-foreground">
+                    Create a separate public link for another sales rep or team.
+                  </p>
+                </div>
+                {forms.length > 0 ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setError(null);
+                      setShowCreator(false);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                ) : null}
               </div>
-            </div>
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              <ActivitySetup
-                checked={allowBookedMeetings}
-                onCheckedChange={setAllowBookedMeetings}
-                title="Booked meetings"
-                description="Sales reps can log meetings they booked."
-              >
-                <Field label="Dollar amount paid per booked meeting">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1.5fr_auto]">
+                <Field label="Form name">
                   <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={meetingPayout}
-                    onChange={(e) => setMeetingPayout(e.target.value)}
-                    disabled={!allowBookedMeetings}
+                    value={title}
+                    placeholder="Sales rep compensation form"
+                    onChange={(e) => setTitle(e.target.value)}
                   />
                 </Field>
-              </ActivitySetup>
-              <ActivitySetup
-                checked={allowClosedDeals}
-                onCheckedChange={setAllowClosedDeals}
-                title="Closed deals"
-                description="Sales reps can log one or more closed deals."
-              >
-                <Field label="Dollar amount paid per closed deal">
+                <Field label="Form description">
                   <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={dealPayout}
-                    onChange={(e) => setDealPayout(e.target.value)}
-                    disabled={!allowClosedDeals}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
                   />
                 </Field>
-              </ActivitySetup>
+                <div className="flex items-end">
+                  <Button onClick={createForm} disabled={pending}>
+                    <Plus className="h-4 w-4" />
+                    Create
+                  </Button>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                <ActivitySetup
+                  checked={allowBookedMeetings}
+                  onCheckedChange={setAllowBookedMeetings}
+                  title="Booked meetings"
+                  description="Sales reps can log meetings they booked."
+                >
+                  <Field label="Dollar amount paid per booked meeting">
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={meetingPayout}
+                      onChange={(e) => setMeetingPayout(e.target.value)}
+                      disabled={!allowBookedMeetings}
+                    />
+                  </Field>
+                </ActivitySetup>
+                <ActivitySetup
+                  checked={allowClosedDeals}
+                  onCheckedChange={setAllowClosedDeals}
+                  title="Closed deals"
+                  description="Sales reps can log one or more closed deals."
+                >
+                  <Field label="Dollar amount paid per closed deal">
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={dealPayout}
+                      onChange={(e) => setDealPayout(e.target.value)}
+                      disabled={!allowClosedDeals}
+                    />
+                  </Field>
+                </ActivitySetup>
+              </div>
+              <p className="text-[12px] text-muted-foreground">
+                Turn on booked meetings, closed deals, or both. The dollar
+                fields determine the estimated payout shown on the public form.
+              </p>
             </div>
-            <p className="text-[12px] text-muted-foreground">
-              Turn on booked meetings, closed deals, or both. The dollar fields
-              determine the estimated payout shown on the public form.
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {forms.map((form) => (
-              <FormRow key={form.id} form={form} pending={pending} />
-            ))}
-          </div>
-        )}
+          ) : null}
+          {forms.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              {forms.map((form) => (
+                <FormRow key={form.id} form={form} pending={pending} />
+              ))}
+            </div>
+          ) : showCreator ? null : (
+            <div className="rounded-md border border-dashed border-border bg-surface-alt/30 px-4 py-8 text-center text-sm text-muted-foreground">
+              No compensation forms have been created yet.
+            </div>
+          )}
+        </div>
         {error ? (
           <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12px] text-red-600 dark:text-red-400">
             {error}
@@ -391,16 +448,28 @@ function FormRow({
             Open
           </a>
           <Button variant="outline" size="sm" onClick={copy}>
-            {copied ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? (
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
             {copied ? "Copied" : "Copy"}
           </Button>
           {editing ? (
-            <Button size="sm" onClick={save} disabled={transitioning || pending}>
+            <Button
+              size="sm"
+              onClick={save}
+              disabled={transitioning || pending}
+            >
               <Save className="h-3.5 w-3.5" />
               Save
             </Button>
           ) : (
-            <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEditing(true)}
+            >
               Edit
             </Button>
           )}
@@ -465,7 +534,9 @@ function SubmissionRow({
           : "—"}
       </td>
       <td className="px-2 py-3 text-right align-top">
-        {row.deal_count ? `${row.deal_count} × $${(row.deal_value ?? 0).toFixed(2)}` : "—"}
+        {row.deal_count
+          ? `${row.deal_count} × $${(row.deal_value ?? 0).toFixed(2)}`
+          : "—"}
       </td>
       <td className="px-2 py-3 text-right align-top font-semibold">
         ${row.payout_amount.toFixed(2)}
@@ -511,13 +582,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="flex flex-col gap-1 text-[12px] font-medium">
       <span>{label}</span>
@@ -542,7 +607,9 @@ function ActivitySetup({
   return (
     <div
       className={`rounded-md border p-3 transition-colors ${
-        checked ? "border-accent/60 bg-accent-soft/60" : "border-border bg-surface-alt/30"
+        checked
+          ? "border-accent/60 bg-accent-soft/60"
+          : "border-border bg-surface-alt/30"
       }`}
     >
       <label className="flex cursor-pointer items-start gap-3">
