@@ -12,6 +12,8 @@ import {
   FileText,
   Sparkles,
   Search,
+  Megaphone,
+  Magnet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -73,6 +75,20 @@ export function CommandPalette() {
       group: "Navigate",
       icon: Home,
       action: go("/properties"),
+    },
+    {
+      id: "nav-client-pitches",
+      label: "Client Pitches / Sendable owner pages",
+      group: "Navigate",
+      icon: Megaphone,
+      action: go("/sales/pitches"),
+    },
+    {
+      id: "nav-lead-forms",
+      label: "Lead Forms / Landing pages",
+      group: "Navigate",
+      icon: Magnet,
+      action: go("/gtm/lead-magnets"),
     },
     {
       id: "nav-people",

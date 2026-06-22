@@ -107,8 +107,8 @@ function buildSections(flags: {
     sections.push({
       heading: "GTM",
       items: [
-        { label: "Pitches", href: "/sales/pitches", icon: Megaphone },
-        { label: "Lead Magnets", href: "/gtm/lead-magnets", icon: Magnet },
+        { label: "Client Pitches", href: "/sales/pitches", icon: Megaphone },
+        { label: "Lead Forms", href: "/gtm/lead-magnets", icon: Magnet },
         { label: "Content Studio", href: "/content", icon: PenSquare },
       ],
     });

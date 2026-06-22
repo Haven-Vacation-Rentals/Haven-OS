@@ -32,6 +32,11 @@ export type CurrentPermissions = {
   is_admin_or_above: boolean;
 };
 
+const OWNER_EMAILS = new Set([
+  "jack@havenvacationrentals.com",
+  "jack13zoppa@gmail.com",
+]);
+
 async function db() {
   const supabase = await createClient();
   if (!supabase) throw new Error("Supabase not configured");
@@ -72,6 +77,7 @@ export const getPermissions = cache(async (): Promise<CurrentPermissions> => {
   // one on the fly via the service-role admin client. This guarantees
   // the user shows up in the Settings users list and gets a default
   // 'user' role on every subsequent permission check.
+  const email = user.email?.toLowerCase() ?? null;
   let role: HavenUserRole =
     (profile?.role as HavenUserRole | undefined) ?? "user";
   if (!profile) {
@@ -100,6 +106,22 @@ export const getPermissions = cache(async (): Promise<CurrentPermissions> => {
     } catch (e) {
       console.error("getPermissions: ensure-profile failed", e);
       // Keep role='user' default; the user is still recognized.
+    }
+  }
+
+  // Jack is the owner/operator. If his profile row was created after the
+  // original admin seed migrations (or through an external invite), repair the
+  // DB role immediately so admin-gated UI and RLS-backed sales/GTM queries work.
+  if (email && OWNER_EMAILS.has(email) && role !== "super_admin") {
+    try {
+      const admin = getAdminClient();
+      await admin
+        .from("profiles")
+        .update({ role: "super_admin" })
+        .eq("id", user.id);
+      role = "super_admin";
+    } catch (e) {
+      console.error("getPermissions: owner role repair failed", e);
     }
   }
 
