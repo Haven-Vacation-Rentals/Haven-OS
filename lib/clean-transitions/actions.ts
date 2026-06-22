@@ -159,7 +159,7 @@ export async function createCleanTransitionSubmission(
       });
     if (error) return { ok: false, error: error.message };
 
-    revalidatePath("/operations/clean-transition");
+    revalidatePath("/onboarding/clean-transition");
     return { ok: true };
   } catch (err) {
     return {
@@ -196,7 +196,7 @@ export async function reviewCleanTransitionSubmission(
       .eq("id", input.id);
     if (error) return { ok: false, error: error.message };
 
-    revalidatePath("/operations/clean-transition");
+    revalidatePath("/onboarding/clean-transition");
     return { ok: true };
   } catch (err) {
     return {

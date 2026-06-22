@@ -14,6 +14,7 @@ import Link from "next/link";
 import {
   Search,
   ClipboardList,
+  ClipboardCheck,
   Calendar,
   AlertTriangle,
   CircleDot,
@@ -148,6 +149,13 @@ export function ProjectsDirectory({ projects }: Props) {
             />
           </div>
           <ViewToggle value={view} onChange={setView} />
+          <Link
+            href="/onboarding/clean-transition"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-[13px] font-semibold text-foreground/80 transition-colors hover:bg-surface-alt hover:text-foreground"
+          >
+            <ClipboardCheck className="h-4 w-4" />
+            Clean Transition
+          </Link>
         </div>
 
         {/* Status filter chips */}

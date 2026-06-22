@@ -56,7 +56,7 @@ function buildSections(flags: {
     { label: "Onboarding", href: "/onboarding", icon: ClipboardList },
     {
       label: "Clean Transition",
-      href: "/operations/clean-transition",
+      href: "/onboarding/clean-transition",
       icon: ClipboardCheck,
     },
     {
