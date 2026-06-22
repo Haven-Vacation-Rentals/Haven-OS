@@ -7,10 +7,12 @@ import {
   Copy,
   DollarSign,
   ExternalLink,
+  Filter,
   PauseCircle,
   PlayCircle,
   Plus,
   Save,
+  X,
 } from "lucide-react";
 import { format, formatDistanceToNowStrict } from "date-fns";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +53,59 @@ const SUBMISSION_TONE: Record<
   rejected: "danger",
 };
 
+type TimelineFilter =
+  | "all"
+  | "this_month"
+  | "last_month"
+  | "last_3_months"
+  | "year_to_date"
+  | "custom";
+
+type PayoutTotals = {
+  count: number;
+  pending: number;
+  approved: number;
+  paid: number;
+  rejected: number;
+  total: number;
+};
+
+type RepOption = {
+  key: string;
+  label: string;
+  email: string | null;
+};
+
+type MonthlyRepSummary = PayoutTotals & {
+  key: string;
+  monthKey: string;
+  monthLabel: string;
+  repName: string;
+  repEmail: string | null;
+  lastSubmittedAt: string;
+};
+
+const EMPTY_TOTALS: PayoutTotals = {
+  count: 0,
+  pending: 0,
+  approved: 0,
+  paid: 0,
+  rejected: 0,
+  total: 0,
+};
+
+const TIMELINE_LABELS: Record<TimelineFilter, string> = {
+  all: "All time",
+  this_month: "This month",
+  last_month: "Last month",
+  last_3_months: "Last 3 months",
+  year_to_date: "Year to date",
+  custom: "Custom dates",
+};
+
+const SELECT_CLASS =
+  "h-9 rounded-md border border-border bg-surface px-2 text-sm";
+
 export function CompensationDashboard({
   forms,
   submissions,
@@ -69,19 +124,53 @@ export function CompensationDashboard({
   const [meetingPayout, setMeetingPayout] = useState("25");
   const [dealPayout, setDealPayout] = useState("100");
   const [error, setError] = useState<string | null>(null);
+  const [repFilter, setRepFilter] = useState("all");
+  const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>("all");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
 
   const totals = useMemo(() => {
-    return submissions.reduce(
-      (acc, row) => {
-        acc.count += 1;
-        if (row.status === "pending") acc.pending += row.payout_amount;
-        if (row.status === "approved") acc.approved += row.payout_amount;
-        if (row.status === "paid") acc.paid += row.payout_amount;
-        return acc;
-      },
-      { count: 0, pending: 0, approved: 0, paid: 0 },
+    return calculateTotals(submissions);
+  }, [submissions]);
+
+  const repOptions = useMemo(() => {
+    const reps = new Map<string, RepOption>();
+    for (const row of submissions) {
+      const key = getRepKey(row);
+      if (!reps.has(key)) {
+        reps.set(key, {
+          key,
+          label: row.rep_name.trim() || "Unknown rep",
+          email: row.rep_email?.trim() || null,
+        });
+      }
+    }
+    return [...reps.values()].sort((a, b) =>
+      a.label.localeCompare(b.label, undefined, { sensitivity: "base" }),
     );
   }, [submissions]);
+
+  const filteredSubmissions = useMemo(() => {
+    return submissions.filter((row) => {
+      if (repFilter !== "all" && getRepKey(row) !== repFilter) return false;
+      return isInTimeline(row, timelineFilter, customStart, customEnd);
+    });
+  }, [customEnd, customStart, repFilter, submissions, timelineFilter]);
+
+  const filteredTotals = useMemo(() => {
+    return calculateTotals(filteredSubmissions);
+  }, [filteredSubmissions]);
+
+  const monthlySummaries = useMemo(() => {
+    return buildMonthlyRepSummaries(filteredSubmissions);
+  }, [filteredSubmissions]);
+
+  const resetFilters = () => {
+    setRepFilter("all");
+    setTimelineFilter("all");
+    setCustomStart("");
+    setCustomEnd("");
+  };
 
   const createForm = () => {
     setError(null);
@@ -268,7 +357,7 @@ export function CompensationDashboard({
             Logged responses
           </h3>
           <span className="text-[12px] text-muted-foreground">
-            {totals.count} total
+            {filteredTotals.count} of {totals.count} total
           </span>
         </div>
         {submissions.length === 0 ? (
@@ -276,31 +365,354 @@ export function CompensationDashboard({
             No compensation responses have been logged yet.
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[920px] text-left text-[13px]">
-              <thead className="border-b border-border text-[11px] uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th className="px-2 py-2 font-semibold">Rep</th>
-                  <th className="px-2 py-2 font-semibold">Type</th>
-                  <th className="px-2 py-2 font-semibold">Account</th>
-                  <th className="px-2 py-2 font-semibold">Date</th>
-                  <th className="px-2 py-2 text-right font-semibold">Deal</th>
-                  <th className="px-2 py-2 text-right font-semibold">Payout</th>
-                  <th className="px-2 py-2 font-semibold">Status</th>
-                  <th className="px-2 py-2 font-semibold">Submitted</th>
-                </tr>
-              </thead>
-              <tbody>
-                {submissions.map((row) => (
-                  <SubmissionRow key={row.id} row={row} pending={pending} />
-                ))}
-              </tbody>
-            </table>
+          <div className="flex flex-col gap-4">
+            <div className="rounded-md border border-border bg-surface-alt/30 p-3">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Filter className="h-4 w-4 text-muted-foreground" />
+                  <h4 className="font-heading text-[14px] font-bold">
+                    Payout filters
+                  </h4>
+                </div>
+                <Button variant="ghost" size="sm" onClick={resetFilters}>
+                  <X className="h-3.5 w-3.5" />
+                  Reset
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                <Field label="Sales rep">
+                  <select
+                    value={repFilter}
+                    onChange={(e) => setRepFilter(e.target.value)}
+                    className={SELECT_CLASS}
+                  >
+                    <option value="all">All sales reps</option>
+                    {repOptions.map((rep) => (
+                      <option key={rep.key} value={rep.key}>
+                        {rep.email ? `${rep.label} (${rep.email})` : rep.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Timeline">
+                  <select
+                    value={timelineFilter}
+                    onChange={(e) =>
+                      setTimelineFilter(e.target.value as TimelineFilter)
+                    }
+                    className={SELECT_CLASS}
+                  >
+                    {Object.entries(TIMELINE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                {timelineFilter === "custom" ? (
+                  <>
+                    <Field label="Start date">
+                      <Input
+                        type="date"
+                        value={customStart}
+                        onChange={(e) => setCustomStart(e.target.value)}
+                      />
+                    </Field>
+                    <Field label="End date">
+                      <Input
+                        type="date"
+                        value={customEnd}
+                        onChange={(e) => setCustomEnd(e.target.value)}
+                      />
+                    </Field>
+                  </>
+                ) : null}
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-5">
+                <Metric
+                  label="Responses"
+                  value={String(filteredTotals.count)}
+                />
+                <Metric
+                  label="Pending"
+                  value={formatMoney(filteredTotals.pending)}
+                />
+                <Metric
+                  label="Approved"
+                  value={formatMoney(filteredTotals.approved)}
+                />
+                <Metric label="Paid" value={formatMoney(filteredTotals.paid)} />
+                <Metric
+                  label="Total"
+                  value={formatMoney(filteredTotals.total)}
+                />
+              </div>
+              <p className="mt-2 text-[12px] text-muted-foreground">
+                Total excludes rejected submissions. Use Approved as the payout
+                amount ready for payroll and Paid as the amount already settled.
+              </p>
+            </div>
+
+            {monthlySummaries.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border bg-surface-alt/30 px-4 py-8 text-center text-sm text-muted-foreground">
+                No compensation responses match these filters.
+              </div>
+            ) : (
+              <>
+                <div className="rounded-md border border-border">
+                  <div className="border-b border-border px-3 py-2">
+                    <h4 className="font-heading text-[14px] font-bold">
+                      Monthly payout summary
+                    </h4>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[880px] text-left text-[13px]">
+                      <thead className="border-b border-border text-[11px] uppercase tracking-wide text-muted-foreground">
+                        <tr>
+                          <th className="px-3 py-2 font-semibold">Month</th>
+                          <th className="px-3 py-2 font-semibold">Rep</th>
+                          <th className="px-3 py-2 text-right font-semibold">
+                            Responses
+                          </th>
+                          <th className="px-3 py-2 text-right font-semibold">
+                            Pending
+                          </th>
+                          <th className="px-3 py-2 text-right font-semibold">
+                            Approved
+                          </th>
+                          <th className="px-3 py-2 text-right font-semibold">
+                            Paid
+                          </th>
+                          <th className="px-3 py-2 text-right font-semibold">
+                            Rejected
+                          </th>
+                          <th className="px-3 py-2 text-right font-semibold">
+                            Total
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monthlySummaries.map((summary) => (
+                          <tr
+                            key={summary.key}
+                            className="border-b border-border/60 last:border-0"
+                          >
+                            <td className="px-3 py-3 align-top font-medium">
+                              {summary.monthLabel}
+                            </td>
+                            <td className="px-3 py-3 align-top">
+                              <div className="font-medium">
+                                {summary.repName}
+                              </div>
+                              {summary.repEmail ? (
+                                <div className="text-[12px] text-muted-foreground">
+                                  {summary.repEmail}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td className="px-3 py-3 text-right align-top">
+                              {summary.count}
+                            </td>
+                            <td className="px-3 py-3 text-right align-top">
+                              {formatMoney(summary.pending)}
+                            </td>
+                            <td className="px-3 py-3 text-right align-top font-semibold">
+                              {formatMoney(summary.approved)}
+                            </td>
+                            <td className="px-3 py-3 text-right align-top">
+                              {formatMoney(summary.paid)}
+                            </td>
+                            <td className="px-3 py-3 text-right align-top">
+                              {formatMoney(summary.rejected)}
+                            </td>
+                            <td className="px-3 py-3 text-right align-top font-semibold">
+                              {formatMoney(summary.total)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[920px] text-left text-[13px]">
+                    <thead className="border-b border-border text-[11px] uppercase tracking-wide text-muted-foreground">
+                      <tr>
+                        <th className="px-2 py-2 font-semibold">Rep</th>
+                        <th className="px-2 py-2 font-semibold">Type</th>
+                        <th className="px-2 py-2 font-semibold">Account</th>
+                        <th className="px-2 py-2 font-semibold">Date</th>
+                        <th className="px-2 py-2 text-right font-semibold">
+                          Deal
+                        </th>
+                        <th className="px-2 py-2 text-right font-semibold">
+                          Payout
+                        </th>
+                        <th className="px-2 py-2 font-semibold">Status</th>
+                        <th className="px-2 py-2 font-semibold">Submitted</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSubmissions.map((row) => (
+                        <SubmissionRow
+                          key={row.id}
+                          row={row}
+                          pending={pending}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         )}
       </section>
     </div>
   );
+}
+
+function calculateTotals(rows: CompensationSubmissionWithForm[]): PayoutTotals {
+  return rows.reduce(
+    (acc, row) => {
+      acc.count += 1;
+      if (row.status === "pending") acc.pending += row.payout_amount;
+      if (row.status === "approved") acc.approved += row.payout_amount;
+      if (row.status === "paid") acc.paid += row.payout_amount;
+      if (row.status === "rejected") acc.rejected += row.payout_amount;
+      if (row.status !== "rejected") acc.total += row.payout_amount;
+      return acc;
+    },
+    { ...EMPTY_TOTALS },
+  );
+}
+
+function buildMonthlyRepSummaries(
+  rows: CompensationSubmissionWithForm[],
+): MonthlyRepSummary[] {
+  const summaries = new Map<string, MonthlyRepSummary>();
+
+  for (const row of rows) {
+    const monthKey = getMonthKey(row);
+    const repKey = getRepKey(row);
+    const key = `${monthKey}:${repKey}`;
+    const summary = summaries.get(key) ?? {
+      ...EMPTY_TOTALS,
+      key,
+      monthKey,
+      monthLabel: formatMonthLabel(monthKey),
+      repName: row.rep_name.trim() || "Unknown rep",
+      repEmail: row.rep_email?.trim() || null,
+      lastSubmittedAt: row.submitted_at,
+    };
+
+    summary.count += 1;
+    if (row.status === "pending") summary.pending += row.payout_amount;
+    if (row.status === "approved") summary.approved += row.payout_amount;
+    if (row.status === "paid") summary.paid += row.payout_amount;
+    if (row.status === "rejected") summary.rejected += row.payout_amount;
+    if (row.status !== "rejected") summary.total += row.payout_amount;
+    if (row.submitted_at > summary.lastSubmittedAt) {
+      summary.lastSubmittedAt = row.submitted_at;
+    }
+    summaries.set(key, summary);
+  }
+
+  return [...summaries.values()].sort((a, b) => {
+    if (a.monthKey !== b.monthKey) return b.monthKey.localeCompare(a.monthKey);
+    return a.repName.localeCompare(b.repName, undefined, {
+      sensitivity: "base",
+    });
+  });
+}
+
+function getRepKey(row: CompensationSubmissionWithForm): string {
+  const email = row.rep_email?.trim().toLowerCase();
+  if (email) return `email:${email}`;
+  return `name:${(row.rep_name.trim() || "Unknown rep").toLowerCase()}`;
+}
+
+function getSubmissionDate(row: CompensationSubmissionWithForm): Date {
+  if (row.activity_date) {
+    return new Date(`${row.activity_date}T00:00:00`);
+  }
+  return new Date(row.submitted_at);
+}
+
+function getMonthKey(row: CompensationSubmissionWithForm): string {
+  const date = getSubmissionDate(row);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${date.getFullYear()}-${month}`;
+}
+
+function formatMonthLabel(monthKey: string): string {
+  if (monthKey === "Unknown") return "Unknown";
+  return format(new Date(`${monthKey}-01T00:00:00`), "MMM yyyy");
+}
+
+function isInTimeline(
+  row: CompensationSubmissionWithForm,
+  timeline: TimelineFilter,
+  customStart: string,
+  customEnd: string,
+): boolean {
+  if (timeline === "all") return true;
+
+  const date = getSubmissionDate(row);
+  if (Number.isNaN(date.getTime())) return false;
+
+  if (timeline === "custom") {
+    const start = parseDateBoundary(customStart, false);
+    const end = parseDateBoundary(customEnd, true);
+    if (start && date < start) return false;
+    if (end && date > end) return false;
+    return true;
+  }
+
+  const now = new Date();
+  const end = endOfDay(now);
+  let start: Date;
+
+  if (timeline === "this_month") {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+  } else if (timeline === "last_month") {
+    start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return (
+      date >= start &&
+      date <= endOfDay(new Date(now.getFullYear(), now.getMonth(), 0))
+    );
+  } else if (timeline === "last_3_months") {
+    start = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+  } else {
+    start = new Date(now.getFullYear(), 0, 1);
+  }
+
+  return date >= start && date <= end;
+}
+
+function parseDateBoundary(value: string, end: boolean): Date | null {
+  if (!value) return null;
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  return end ? endOfDay(date) : date;
+}
+
+function endOfDay(date: Date): Date {
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    23,
+    59,
+    59,
+    999,
+  );
+}
+
+function formatMoney(value: number): string {
+  return `$${value.toFixed(2)}`;
 }
 
 function FormRow({
