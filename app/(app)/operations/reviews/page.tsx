@@ -196,10 +196,10 @@ export default async function OperationsReviewsPage({
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
             <KpiCard
-              label="Average"
-              value={summary.averageRating}
+              label="Average 5-star"
+              value={summary.averageRatingFive}
               icon={Star}
-              sub="Rating out of 10"
+              sub={`Raw Hostaway avg: ${summary.averageRatingTen}/10`}
               accent
             />
             <KpiCard
@@ -341,10 +341,7 @@ function ReviewsTable({ reviews }: { reviews: HostawayReview[] }) {
                 </td>
                 <td className="px-3 py-3">{review.guestName || "Unknown"}</td>
                 <td className="px-3 py-3">
-                  <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
-                    <Star className="h-3.5 w-3.5 fill-current text-amber-500" />
-                    {formatRating(review.rating)}
-                  </span>
+                  <RatingDisplay rating={review.rating} />
                 </td>
                 <td className="px-3 py-3">
                   <Badge tone={statusTone(review.status)} dot>
@@ -400,7 +397,8 @@ function summarizeReviews(reviews: HostawayReview[]) {
 
   return {
     count: reviews.length,
-    averageRating: average === null ? "—" : average.toFixed(1),
+    averageRatingFive: formatFiveStarRating(average),
+    averageRatingTen: formatTenPointRating(average),
     statuses: {
       published: countStatus(reviews, "published"),
       submitted: countStatus(reviews, "submitted"),
@@ -413,8 +411,26 @@ function countStatus(reviews: HostawayReview[], status: string): number {
   return reviews.filter((review) => review.status === status).length;
 }
 
-function formatRating(rating: number | null): string {
+function RatingDisplay({ rating }: { rating: number | null }) {
+  return (
+    <div className="flex flex-col gap-1 tabular-nums">
+      <span className="inline-flex items-center gap-1 font-semibold">
+        <Star className="h-3.5 w-3.5 fill-current text-amber-500" />
+        {formatFiveStarRating(rating)}
+      </span>
+      <span className="text-[11px] text-muted-foreground">
+        {formatTenPointRating(rating)}/10 raw
+      </span>
+    </div>
+  );
+}
+
+function formatTenPointRating(rating: number | null): string {
   return typeof rating === "number" ? rating.toFixed(1) : "—";
+}
+
+function formatFiveStarRating(rating: number | null): string {
+  return typeof rating === "number" ? `${(rating / 2).toFixed(1)}/5` : "—";
 }
 
 function formatDate(value: string | null): string {
