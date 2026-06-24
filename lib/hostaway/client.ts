@@ -145,19 +145,25 @@ type ListEnvelope<T> = {
   offset?: number;
 };
 
-/**
- * Fetches reviews with optional departure-date window. Returns guest→host
- * reviews by default (the ones you'd read to see how you're doing).
- */
-export async function getReviews(params: {
+type GetReviewsParams = {
   departureDateStart?: string; // Y-m-d
   departureDateEnd?: string; // Y-m-d
   type?: "guest-to-host" | "host-to-guest";
   statuses?: string | string[];
+  sortBy?: "id" | "guestName" | "arrivalDate" | "departureDate";
+  sortOrder?: "asc" | "desc";
   limit?: number;
   offset?: number;
   revalidate?: number | false;
-} = {}): Promise<HostawayReview[]> {
+};
+
+/**
+ * Fetches reviews with optional departure-date window. Returns guest→host
+ * reviews by default (the ones you'd read to see how you're doing).
+ */
+export async function getReviewsPage(
+  params: GetReviewsParams = {},
+): Promise<ListEnvelope<HostawayReview>> {
   const qp = new URLSearchParams();
   if (params.departureDateStart) qp.set("departureDateStart", params.departureDateStart);
   if (params.departureDateEnd) qp.set("departureDateEnd", params.departureDateEnd);
@@ -170,14 +176,19 @@ export async function getReviews(params: {
   }
   qp.set("limit", String(params.limit ?? 500));
   qp.set("offset", String(params.offset ?? 0));
-  // Sort by id desc so the most recently received reviews come first.
-  qp.set("sortBy", "id");
-  qp.set("sortOrder", "desc");
+  qp.set("sortBy", params.sortBy ?? "id");
+  qp.set("sortOrder", params.sortOrder ?? "desc");
 
-  const json = await request<ListEnvelope<HostawayReview>>(
+  return request<ListEnvelope<HostawayReview>>(
     `/reviews?${qp.toString()}`,
     { revalidate: params.revalidate ?? 60 },
   );
+}
+
+export async function getReviews(
+  params: GetReviewsParams = {},
+): Promise<HostawayReview[]> {
+  const json = await getReviewsPage(params);
   return json.result ?? [];
 }
 
