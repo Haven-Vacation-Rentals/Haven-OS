@@ -39,8 +39,8 @@ export const MCP_OAUTH_SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
     "View the Operations Costs dashboard (work-order profit rollups).",
   "operations:write":
     "Upload completed work orders (employee, charged, paid) to Operations Costs.",
-  "content:read": "Read Content Studio topics and articles.",
-  "content:write": "Create and update Content Studio topics and articles.",
+  "content:read": "Read Paid Advertising spaces and ad cards.",
+  "content:write": "Create and update Paid Advertising ad cards.",
   // The remaining ApiScope keys are not exposed via OAuth, but we
   // declare them here so the Record type stays exhaustive.
   "platform:full": "",

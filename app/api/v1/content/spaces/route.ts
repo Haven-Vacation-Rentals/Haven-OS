@@ -1,5 +1,5 @@
 /**
- * GET /api/v1/content/spaces — list Content Studio spaces.
+ * GET /api/v1/content/spaces — list Paid Advertising spaces.
  */
 
 import { NextResponse } from "next/server";

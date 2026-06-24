@@ -60,8 +60,8 @@ restrict further.
 | `lost-items:write`  | Create / update / comment / set status on Lost Items cases.                      |
 | `properties:read`   | List Haven properties.                                                           |
 | `properties:write`  | Create / update properties — admin role still required.                          |
-| `content:read`      | List Content Studio spaces, topics, and articles.                                |
-| `content:write`     | Create or update topics in Content Studio.                                       |
+| `content:read`      | List Paid Advertising spaces and ad cards.                                       |
+| `content:write`     | Create or update ad cards in Paid Advertising.                                   |
 | `hr:read`           | Read HR data — only honored if you already have an HR access grant.              |
 
 `platform:full` satisfies any scope check. Each scope check follows
@@ -121,13 +121,13 @@ PAT in the Authorization header.
 | `GET`  | `/api/v1/properties/[id]`       | `properties:read`    |                                    |
 | `PATCH`| `/api/v1/properties/[id]`       | `properties:write`   | Admin-or-above only.               |
 
-### Content Studio
+### Paid Advertising
 
 | Method | Path                                | Scope             | Notes                              |
 | ------ | ----------------------------------- | ----------------- | ---------------------------------- |
-| `GET`  | `/api/v1/content/spaces`            | `content:read`    | Content Studio spaces.             |
-| `GET`  | `/api/v1/content/topics?space_id=…` | `content:read`    | Topics, optional space filter.     |
-| `POST` | `/api/v1/content/topics`            | `content:write`   | Create a topic in a space.         |
+| `GET`  | `/api/v1/content/spaces`            | `content:read`    | Paid Advertising spaces.           |
+| `GET`  | `/api/v1/content/topics?space_id=…` | `content:read`    | Ad cards, optional space filter.   |
+| `POST` | `/api/v1/content/topics`            | `content:write`   | Create an ad card in a space.      |
 
 ### HR
 

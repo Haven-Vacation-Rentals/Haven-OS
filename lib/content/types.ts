@@ -1,18 +1,34 @@
 /**
- * Haven OS — Content Studio types.
+ * Haven OS — Paid Advertising (Content Studio) types.
  *
- * The Content Studio is an app-native space (not ClickUp-backed). It owns
- * the entire editorial workflow: topic backlog, research, briefs,
- * outlines, drafts, SEO/GEO scoring, agent chat, and the WordPress
- * publish queue.
+ * An app-native project space for paid ads. Each card is an ad idea that
+ * moves across a Kanban (Idea -> In Progress -> Draft -> Complete) while
+ * the team writes and customizes the ad script and creative brief. Not a
+ * blog: there is no SEO/GEO scoring or WordPress publishing here.
  */
 
-export type ContentPillar =
-  | "market_data"
-  | "revenue_strategy"
-  | "operations"
-  | "industry_insights"
-  | "haven_performance";
+/**
+ * The channel a paid ad runs on. Replaces the old blog "pillar" axis.
+ */
+export type AdChannel =
+  | "meta"
+  | "google"
+  | "tiktok"
+  | "youtube"
+  | "other";
+
+/**
+ * Creative format for an ad. Stored as free text on the article so the
+ * list stays flexible, but these are the common picks offered in the UI.
+ */
+export const AD_FORMATS = [
+  "Video (Reel)",
+  "Video (Story)",
+  "Static image",
+  "Carousel",
+  "UGC / Testimonial",
+  "Search text",
+] as const;
 
 export type ContentTopicStage =
   | "idea"
@@ -77,12 +93,12 @@ export type ContentPublishStatus =
 
 export type ContentAgentRole = "user" | "agent" | "system";
 
-export const PILLAR_LABELS: Record<ContentPillar, string> = {
-  market_data: "Market Data & Trends",
-  revenue_strategy: "Revenue Strategy",
-  operations: "Operations & Guest Experience",
-  industry_insights: "Industry Insights",
-  haven_performance: "Haven Performance & Case Studies",
+export const CHANNEL_LABELS: Record<AdChannel, string> = {
+  meta: "Meta (FB / IG)",
+  google: "Google",
+  tiktok: "TikTok",
+  youtube: "YouTube",
+  other: "Other",
 };
 
 export const STAGE_LABELS: Record<ContentTopicStage, string> = {
@@ -120,7 +136,7 @@ export interface ContentTopic {
   space_id: string;
   title: string;
   working_title: string | null;
-  pillar: ContentPillar;
+  channel: AdChannel;
   stage: ContentTopicStage;
   priority: ContentPriority;
   target_keyword: string | null;
@@ -143,9 +159,16 @@ export interface ContentArticle {
   meta_description: string;
   slug: string | null;
   hero_image_url: string | null;
+  /** The ad script — the main editor body. */
   body_md: string;
   outline_md: string;
   brief_md: string;
+  /** Creative brief fields surfaced alongside the script. */
+  hook: string;
+  primary_text: string;
+  cta: string;
+  ad_format: string;
+  budget: string;
   word_count: number;
   reading_time_min: number;
   seo_score: number | null;

@@ -39,11 +39,11 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
-  PILLAR_LABELS,
+  CHANNEL_LABELS,
   STAGE_LABELS,
   STAGE_ORDER,
+  type AdChannel,
   type ContentAssignee,
-  type ContentPillar,
   type ContentPriority,
   type ContentSpace,
   type ContentTopicStage,
@@ -88,7 +88,7 @@ export function TopicTracker({
   const [view, setView] = useState<View>("pipeline");
   const [createOpen, setCreateOpen] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
-  const [pillarFilter, setPillarFilter] = useState<ContentPillar | "all">("all");
+  const [channelFilter, setChannelFilter] = useState<AdChannel | "all">("all");
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("all");
   const [pendingDelete, setPendingDelete] = useState<TopicWithArticle | null>(
     null,
@@ -105,13 +105,13 @@ export function TopicTracker({
   const filtered = useMemo(() => {
     return board.filter((t) => {
       if (t.stage === "archived") return false;
-      if (pillarFilter !== "all" && t.pillar !== pillarFilter) return false;
+      if (channelFilter !== "all" && t.channel !== channelFilter) return false;
       if (ownerFilter === "unassigned" && t.owner_id) return false;
       if (ownerFilter !== "all" && ownerFilter !== "unassigned" && t.owner_id !== ownerFilter)
         return false;
       return true;
     });
-  }, [board, pillarFilter, ownerFilter]);
+  }, [board, channelFilter, ownerFilter]);
 
   const stats = useMemo(() => computeStats(filtered), [filtered]);
 
@@ -149,7 +149,7 @@ export function TopicTracker({
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
         <div className="flex flex-wrap items-center gap-2">
           <ViewToggle view={view} setView={setView} />
-          <PillarFilter value={pillarFilter} setValue={setPillarFilter} />
+          <ChannelFilter value={channelFilter} setValue={setChannelFilter} />
           <OwnerFilterSelect
             value={ownerFilter}
             setValue={setOwnerFilter}
@@ -159,11 +159,11 @@ export function TopicTracker({
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={() => setPasteOpen(true)}>
             <ClipboardPaste className="h-4 w-4" />
-            Import draft
+            Import script
           </Button>
           <Button variant="primary" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" />
-            New topic
+            New ad
           </Button>
         </div>
       </div>
@@ -354,21 +354,21 @@ function ViewToggle({
   );
 }
 
-function PillarFilter({
+function ChannelFilter({
   value,
   setValue,
 }: {
-  value: ContentPillar | "all";
-  setValue: (v: ContentPillar | "all") => void;
+  value: AdChannel | "all";
+  setValue: (v: AdChannel | "all") => void;
 }) {
   return (
     <select
       value={value}
-      onChange={(e) => setValue(e.target.value as ContentPillar | "all")}
+      onChange={(e) => setValue(e.target.value as AdChannel | "all")}
       className="h-8 rounded-md border border-border bg-surface px-2 text-[12px] font-medium text-foreground"
     >
-      <option value="all">All pillars</option>
-      {Object.entries(PILLAR_LABELS).map(([k, label]) => (
+      <option value="all">All channels</option>
+      {Object.entries(CHANNEL_LABELS).map(([k, label]) => (
         <option key={k} value={k}>
           {label}
         </option>
@@ -610,7 +610,7 @@ function TopicCard({
 }) {
   const target = topic.publish_target ?? topic.due_date;
   const dateLabel = topic.publish_target
-    ? `Publish ${formatDate(topic.publish_target)}`
+    ? `Launch ${formatDate(topic.publish_target)}`
     : topic.due_date
       ? `Due ${formatDate(topic.due_date)}`
       : "—";
@@ -648,11 +648,13 @@ function TopicCard({
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span>{PILLAR_LABELS[topic.pillar]}</span>
-          {topic.target_keyword ? (
+          <span className="rounded-full border border-border bg-surface-alt/60 px-1.5 py-0.5 font-semibold text-foreground/80">
+            {CHANNEL_LABELS[topic.channel]}
+          </span>
+          {topic.article?.ad_format ? (
             <>
               <span>·</span>
-              <span className="truncate">{topic.target_keyword}</span>
+              <span className="truncate">{topic.article.ad_format}</span>
             </>
           ) : null}
         </div>
@@ -666,10 +668,11 @@ function TopicCard({
             {overdue ? <AlertTriangle className="h-3 w-3" /> : null}
             {overdue ? `Overdue · ${dateLabel}` : dateLabel}
           </span>
-          <ScoreBadges
-            seo={topic.article?.seo_score ?? null}
-            geo={topic.article?.geo_score ?? null}
-          />
+          {topic.article?.budget ? (
+            <span className="font-semibold text-foreground/70">
+              {topic.article.budget}
+            </span>
+          ) : null}
         </div>
         <div className="flex items-center justify-between text-[11px]">
           <AssigneeChip owner={topic.owner} />
@@ -714,41 +717,6 @@ function AssigneeChip({ owner }: { owner: TopicWithArticle["owner"] }) {
   );
 }
 
-function ScoreBadges({
-  seo,
-  geo,
-}: {
-  seo: number | null;
-  geo: number | null;
-}) {
-  if (seo === null && geo === null) return null;
-  return (
-    <span className="flex items-center gap-1">
-      {seo !== null ? <ScorePill label="SEO" value={seo} /> : null}
-      {geo !== null ? <ScorePill label="GEO" value={geo} /> : null}
-    </span>
-  );
-}
-
-function ScorePill({ label, value }: { label: string; value: number }) {
-  const tone =
-    value >= 85
-      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200"
-      : value >= 65
-        ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
-        : "bg-haven-coral/15 text-haven-coral-700";
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-[10px] font-bold",
-        tone,
-      )}
-    >
-      {label} {value}
-    </span>
-  );
-}
-
 // ---------------------------------------------------------------------------
 
 function ListView({
@@ -763,14 +731,14 @@ function ListView({
       <table className="w-full text-[13px]">
         <thead className="bg-surface-alt/40 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
           <tr>
-            <th className="px-3 py-2 text-left">Topic</th>
-            <th className="px-3 py-2 text-left">Pillar</th>
+            <th className="px-3 py-2 text-left">Ad</th>
+            <th className="px-3 py-2 text-left">Channel</th>
             <th className="px-3 py-2 text-left">Stage</th>
             <th className="px-3 py-2 text-left">Assignee</th>
             <th className="px-3 py-2 text-left">Priority</th>
             <th className="px-3 py-2 text-left">Due</th>
-            <th className="px-3 py-2 text-left">Publish</th>
-            <th className="px-3 py-2 text-left">Scores</th>
+            <th className="px-3 py-2 text-left">Launch</th>
+            <th className="px-3 py-2 text-left">Budget</th>
             <th className="px-3 py-2" />
           </tr>
         </thead>
@@ -796,14 +764,14 @@ function ListView({
                       {t.title}
                     </span>
                   </div>
-                  {t.target_keyword ? (
+                  {t.article?.ad_format ? (
                     <div className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">
-                      kw: {t.target_keyword}
+                      {t.article.ad_format}
                     </div>
                   ) : null}
                 </td>
                 <td className="px-3 py-2 text-muted-foreground">
-                  {PILLAR_LABELS[t.pillar]}
+                  {CHANNEL_LABELS[t.channel]}
                 </td>
                 <td className="px-3 py-2">
                   <span
@@ -848,11 +816,8 @@ function ListView({
                 >
                   {t.publish_target ? formatDate(t.publish_target) : "—"}
                 </td>
-                <td className="px-3 py-2">
-                  <ScoreBadges
-                    seo={t.article?.seo_score ?? null}
-                    geo={t.article?.geo_score ?? null}
-                  />
+                <td className="px-3 py-2 text-muted-foreground">
+                  {t.article?.budget || "—"}
                 </td>
                 <td className="px-3 py-2 text-right">
                   <div className="flex items-center justify-end gap-2">
@@ -904,12 +869,12 @@ function DeleteTopicDialog({
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Delete this topic?</DialogTitle>
+          <DialogTitle>Delete this ad?</DialogTitle>
           <DialogDescription>
             {topic ? (
               <>
-                "{topic.title}" and its draft, research, scorecards, and
-                publish history will be removed. This can't be undone.
+                "{topic.title}", its script, and its version history will be
+                removed. This can't be undone.
               </>
             ) : null}
           </DialogDescription>
@@ -960,7 +925,7 @@ function CalendarView({ topics }: { topics: TopicWithArticle[] }) {
       <div className="mb-3 flex items-center justify-between">
         <h3 className="font-heading text-base font-bold">{monthLabel}</h3>
         <span className="text-[11px] text-muted-foreground">
-          Items pinned to publish target (or due date if no publish target).
+          Ads pinned to launch date (or due date if no launch date set).
         </span>
       </div>
       <div className="grid grid-cols-7 gap-1 text-[11px] text-muted-foreground">
@@ -1019,15 +984,16 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-border bg-surface-alt/40 px-6 py-14 text-center">
       <h3 className="font-heading text-lg text-foreground">
-        No topics yet
+        No ads yet
       </h3>
       <p className="max-w-md text-[13px] text-muted-foreground">
-        Add a topic to start the editorial pipeline. Drag cards across
-        Idea → In Progress → Draft → Complete as work moves through it.
+        Add an ad idea to start the pipeline. Drag cards across
+        Idea → In Progress → Draft → Complete as each one moves from
+        concept to launch.
       </p>
       <Button variant="outline" onClick={onCreate}>
         <Plus className="h-4 w-4" />
-        New topic
+        New ad
       </Button>
     </div>
   );

@@ -3,7 +3,7 @@
 Haven OS exposes a hosted **Model Context Protocol** endpoint so Claude
 (claude.ai or Claude Code) can read and write into the parts of the
 operating system Jack & the team use most: **Tasks**, **Lost Items**,
-and the **Content Studio / GTM content tracker**.
+and **Paid Advertising** (the paid-ads project tracker).
 
 The endpoint speaks MCP over Streamable HTTP / JSON-RPC 2.0. There is no
 local proxy or stdio bridge — Claude connects directly over HTTPS, with
@@ -111,10 +111,10 @@ its owner cannot.
 | `list_lost_items`             | `lost-items:read` | List Lost Items cases, optionally filtered by status.                         |
 | `create_lost_item_case`       | `lost-items:write`| Open a new Lost Items case (item description, property, guest, photos).      |
 | `update_lost_item_status`     | `lost-items:write`| Move a case through `pending_pickup → picked_up → delivered → completed`.    |
-| `list_content_spaces`         | `content:read`    | List Content Studio spaces (parents of topics).                               |
-| `list_content_ideas`          | `content:read`    | List Content Studio topics, filterable by `space_id` and `stage`.             |
-| `create_content_idea`         | `content:write`   | Add a topic to a Content Studio space (defaults to stage=`idea`).             |
-| `update_content_status`       | `content:write`   | Move a topic through `idea → in_progress → draft → complete`.                 |
+| `list_content_spaces`         | `content:read`    | List Paid Advertising spaces (parents of ad cards).                           |
+| `list_content_ideas`          | `content:read`    | List Paid Advertising ad cards, filterable by `space_id` and `stage`.         |
+| `create_content_idea`         | `content:write`   | Add an ad card to a Paid Advertising space (defaults to stage=`idea`).        |
+| `update_content_status`       | `content:write`   | Move an ad through `idea → in_progress → draft → complete`.                   |
 
 Every tool ships with a full JSON Schema for its arguments, so Claude
 gets type information, enum values, and field descriptions inline.
@@ -127,7 +127,7 @@ Scopes match the existing `/api/v1` system:
   not selectable via the Claude OAuth consent screen.
 - `tasks:read` / `tasks:write` — Tasks tools.
 - `lost-items:read` / `lost-items:write` — Lost Items tools.
-- `content:read` / `content:write` — Content Studio tools.
+- `content:read` / `content:write` — Paid Advertising tools.
 - `me:read` — `get_me`.
 
 The Claude OAuth flow advertises and accepts only the granular

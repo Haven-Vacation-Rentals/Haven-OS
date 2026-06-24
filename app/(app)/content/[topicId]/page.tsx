@@ -5,17 +5,14 @@ import { ArrowLeft } from "lucide-react";
 import { canAccessSales } from "@/lib/auth/permissions";
 import {
   getTopic,
-  getLatestScores,
   listContentAssignees,
-  listPublishJobs,
-  getWordPressEnvStatus,
 } from "@/lib/content/actions";
 import { ArticleWorkspace } from "@/components/content/article-workspace";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Article — Content Studio — Haven OS",
+  title: "Ad — Paid Advertising — Haven OS",
 };
 
 export default async function ArticleWorkspacePage({
@@ -30,12 +27,7 @@ export default async function ArticleWorkspacePage({
   const topic = await getTopic(topicId);
   if (!topic || !topic.article) notFound();
 
-  const [scores, jobs, wp, assignees] = await Promise.all([
-    getLatestScores(topic.article.id),
-    listPublishJobs(topic.article.id),
-    getWordPressEnvStatus(),
-    listContentAssignees(),
-  ]);
+  const assignees = await listContentAssignees();
 
   return (
     <div className="flex flex-col gap-4">
@@ -45,16 +37,12 @@ export default async function ArticleWorkspacePage({
           className="flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          Back to Content Studio
+          Back to Paid Advertising
         </Link>
       </div>
       <ArticleWorkspace
         topic={topic}
         article={topic.article}
-        seo={scores.seo}
-        geo={scores.geo}
-        jobs={jobs}
-        wpConfigured={wp.configured}
         assignees={assignees}
       />
     </div>

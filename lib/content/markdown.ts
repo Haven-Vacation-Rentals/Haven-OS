@@ -1,10 +1,10 @@
 /**
- * Haven OS — Content Studio markdown helpers.
+ * Haven OS — Paid Advertising markdown helpers.
  *
- * The Content Studio stores articles as markdown (`body_md`). The
- * post editor renders that markdown as a sequence of semantic blocks
- * (true H1/H2/H3, paragraphs, lists, callouts) so Jack edits a real
- * blog post, not a textarea full of markdown. These helpers are the
+ * Ad scripts are stored as markdown (`body_md`). The script editor
+ * renders that markdown as a sequence of semantic blocks (true
+ * H1/H2/H3, paragraphs, lists, callouts) so the script reads cleanly,
+ * not as a textarea full of markdown. These helpers are the
  * round-trip bridge:
  *
  *   markdown string  ──parsePostBlocks──▶  PostBlock[]

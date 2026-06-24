@@ -490,21 +490,22 @@ const updateLostItemStatusTool: McpTool = {
 };
 
 // ---------------------------------------------------------------------------
-// Content Studio (GTM content tracker)
+// Paid Advertising (Content Studio — paid-ads project tracker)
 // ---------------------------------------------------------------------------
 
 const CONTENT_STAGES = ["idea", "in_progress", "draft", "complete", "archived"] as const;
+const AD_CHANNELS = ["meta", "google", "tiktok", "youtube", "other"] as const;
 
 const listContentIdeasTool: McpTool = {
   name: "list_content_ideas",
-  title: "List Content Studio topics",
+  title: "List paid-ad cards",
   description:
-    "List Content Studio topics (the GTM/blog content pipeline). Optionally filter by space_id or stage. Stages: idea → in_progress → draft → complete (plus archived).",
+    "List Paid Advertising cards (the paid-ads project pipeline). Optionally filter by space_id or stage. Stages: idea → in_progress → draft → complete (plus archived).",
   scope: "content:read",
   inputSchema: {
     type: "object",
     properties: {
-      space_id: { type: "string", description: "Filter by Content Studio space uuid." },
+      space_id: { type: "string", description: "Filter by Paid Advertising space uuid." },
       stage: { type: "string", enum: [...CONTENT_STAGES] },
       limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
     },
@@ -515,7 +516,7 @@ const listContentIdeasTool: McpTool = {
     let q = ctx.admin
       .from("content_topics")
       .select(
-        "id, space_id, title, working_title, pillar, stage, priority, target_keyword, due_date, owner_id, created_at, updated_at",
+        "id, space_id, title, working_title, channel, stage, priority, due_date, publish_target, owner_id, created_at, updated_at",
       )
       .order("priority", { ascending: false })
       .order("due_date", { ascending: true, nullsFirst: false })
@@ -526,41 +527,35 @@ const listContentIdeasTool: McpTool = {
     const { data, error } = await q;
     if (error) return err(error.message);
     const topics = data ?? [];
-    return ok({ topics }, `${topics.length} topic${topics.length === 1 ? "" : "s"}.`);
+    return ok({ topics }, `${topics.length} ad${topics.length === 1 ? "" : "s"}.`);
   },
 };
 
 const createContentIdeaTool: McpTool = {
   name: "create_content_idea",
-  title: "Create Content Studio topic",
+  title: "Create paid-ad card",
   description:
-    "Add a new topic to a Content Studio space. Defaults to stage='idea'. Use list_content_ideas without filters first to discover space_ids if you don't know one.",
+    "Add a new ad card to a Paid Advertising space. Defaults to stage='idea' and channel='meta'. Seeds an empty script + creative brief so the card opens cleanly. Use list_content_spaces first to discover space_ids if you don't know one.",
   scope: "content:write",
   inputSchema: {
     type: "object",
     properties: {
-      space_id: { type: "string", description: "Required. Content Studio space uuid." },
-      title: { type: "string", minLength: 1 },
-      pillar: {
+      space_id: { type: "string", description: "Required. Paid Advertising space uuid." },
+      title: { type: "string", minLength: 1, description: "The ad name." },
+      channel: {
         type: "string",
-        enum: [
-          "market_data",
-          "revenue_strategy",
-          "operations",
-          "industry_insights",
-          "haven_performance",
-        ],
-        description: "Optional content pillar / theme.",
+        enum: [...AD_CHANNELS],
+        description: "Ad channel. Defaults to 'meta'.",
       },
       priority: {
         type: "string",
         enum: ["urgent", "high", "medium", "low"],
       },
-      target_keyword: { type: "string" },
-      secondary_keywords: { type: "array", items: { type: "string" } },
-      due_date: { type: "string", format: "date" },
-      angle: { type: "string", description: "Optional editorial angle." },
+      due_date: { type: "string", format: "date", description: "Draft due date." },
+      angle: { type: "string", description: "Creative angle / offer." },
       hypothesis: { type: "string", description: "Optional hypothesis to test." },
+      ad_format: { type: "string", description: "e.g. 'Video (Reel)', 'Static image', 'Carousel'." },
+      budget: { type: "string", description: "e.g. '$50/day'." },
     },
     required: ["space_id", "title"],
     additionalProperties: false,
@@ -574,12 +569,10 @@ const createContentIdeaTool: McpTool = {
     const insert: Record<string, unknown> = {
       space_id: spaceId,
       title,
-      target_keyword: asString(args.target_keyword) ?? null,
-      secondary_keywords: asStringArray(args.secondary_keywords) ?? [],
       due_date: asString(args.due_date) ?? null,
       created_by: ctx.actor.id,
     };
-    if (asString(args.pillar)) insert.pillar = asString(args.pillar);
+    if (asString(args.channel)) insert.channel = asString(args.channel);
     if (asString(args.priority)) insert.priority = asString(args.priority);
     if (asString(args.angle)) insert.angle = asString(args.angle);
     if (asString(args.hypothesis)) insert.hypothesis = asString(args.hypothesis);
@@ -590,21 +583,32 @@ const createContentIdeaTool: McpTool = {
       .select("*")
       .single();
     if (error) return err(error.message);
-    return ok({ topic: data }, `Created content topic “${title}”.`);
+
+    // Seed an empty script + brief so the card opens in the workspace.
+    await ctx.admin.from("content_articles").insert({
+      topic_id: (data as { id: string }).id,
+      title,
+      body_md: "",
+      ad_format: asString(args.ad_format) ?? "",
+      budget: asString(args.budget) ?? "",
+    });
+
+    return ok({ topic: data }, `Created ad “${title}”.`);
   },
 };
 
 const updateContentStatusTool: McpTool = {
   name: "update_content_status",
-  title: "Update Content Studio topic status",
+  title: "Update paid-ad card",
   description:
-    "Update a content topic — most commonly its stage in the pipeline. Stage transitions: idea → in_progress → draft → complete, plus archived. Also accepts due_date, priority, and brief updates.",
+    "Update an ad card — most commonly its stage in the pipeline. Stage transitions: idea → in_progress → draft → complete, plus archived. Also accepts channel, due_date, priority, title, and angle.",
   scope: "content:write",
   inputSchema: {
     type: "object",
     properties: {
       topic_id: { type: "string" },
       stage: { type: "string", enum: [...CONTENT_STAGES] },
+      channel: { type: "string", enum: [...AD_CHANNELS] },
       priority: {
         type: "string",
         enum: ["urgent", "high", "medium", "low"],
@@ -612,7 +616,6 @@ const updateContentStatusTool: McpTool = {
       due_date: { type: "string", format: "date" },
       title: { type: "string" },
       angle: { type: "string" },
-      target_keyword: { type: "string" },
     },
     required: ["topic_id"],
     additionalProperties: false,
@@ -623,11 +626,11 @@ const updateContentStatusTool: McpTool = {
 
     const update: Record<string, unknown> = {};
     if (asString(args.stage)) update.stage = asString(args.stage);
+    if (asString(args.channel)) update.channel = asString(args.channel);
     if (asString(args.priority)) update.priority = asString(args.priority);
     if (typeof args.due_date !== "undefined") update.due_date = asString(args.due_date) ?? null;
     if (asString(args.title)) update.title = asString(args.title);
     if (typeof args.angle !== "undefined") update.angle = asString(args.angle) ?? null;
-    if (asString(args.target_keyword)) update.target_keyword = asString(args.target_keyword);
 
     if (Object.keys(update).length === 0) {
       return err("No fields to update.");
@@ -640,7 +643,7 @@ const updateContentStatusTool: McpTool = {
       .select("*")
       .single();
     if (error) return err(error.message);
-    return ok({ topic: data }, `Updated content topic ${topicId}.`);
+    return ok({ topic: data }, `Updated ad ${topicId}.`);
   },
 };
 
@@ -669,8 +672,8 @@ const getMeTool: McpTool = {
 // Quick lookup helper so Claude can find the right space without trying ids.
 const listContentSpacesTool: McpTool = {
   name: "list_content_spaces",
-  title: "List Content Studio spaces",
-  description: "List Content Studio spaces (used as parent containers for topics).",
+  title: "List Paid Advertising spaces",
+  description: "List Paid Advertising spaces (used as parent containers for ad cards).",
   scope: "content:read",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   async handler(_args, ctx) {

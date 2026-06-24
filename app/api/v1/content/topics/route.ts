@@ -30,12 +30,10 @@ export const GET = withApi({ scope: "content:read" }, async (req, ctx) => {
 interface CreateTopicBody {
   space_id?: string;
   title?: string;
-  pillar?: string;
+  channel?: string;
   priority?: string;
-  target_keyword?: string;
-  secondary_keywords?: string[];
   due_date?: string | null;
-  brief?: string | null;
+  angle?: string | null;
 }
 
 export const POST = withApi({ scope: "content:write" }, async (req, ctx) => {
@@ -44,15 +42,15 @@ export const POST = withApi({ scope: "content:write" }, async (req, ctx) => {
   if (!body.space_id) return jsonError(400, "space_id is required");
   if (!body.title?.trim()) return jsonError(400, "title is required");
 
+  const title = body.title.trim();
   const insert: Record<string, unknown> = {
     space_id: body.space_id,
-    title: body.title.trim(),
-    target_keyword: body.target_keyword ?? null,
-    secondary_keywords: body.secondary_keywords ?? [],
+    title,
     due_date: body.due_date ?? null,
+    angle: body.angle ?? null,
     created_by: ctx.actor.id,
   };
-  if (body.pillar) insert.pillar = body.pillar;
+  if (body.channel) insert.channel = body.channel;
   if (body.priority) insert.priority = body.priority;
 
   const { data, error } = await ctx.admin
@@ -61,5 +59,13 @@ export const POST = withApi({ scope: "content:write" }, async (req, ctx) => {
     .select("*")
     .single();
   if (error) return jsonError(500, error.message);
+
+  // Seed an empty script so the card opens in the workspace.
+  await ctx.admin.from("content_articles").insert({
+    topic_id: (data as { id: string }).id,
+    title,
+    body_md: "",
+  });
+
   return NextResponse.json({ topic: data }, { status: 201 });
 });
