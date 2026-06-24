@@ -14,7 +14,7 @@ The internal operating system for [Haven Vacation Rentals](https://havenvacation
 - **Tailwind v3.4** with Haven design tokens (Coral `#FF564E`, Charcoal `#424242`, Sage Mist `#EDF0EE`)
 - **Supabase** — Postgres, Auth (Google OAuth), Row-Level Security
 - **Vercel** for hosting + preview deployments
-- **Anthropic Claude** — Managed Agents for the HavenOS assistant and Content Studio
+- **Anthropic Claude** — Managed Agents for the HavenOS assistant
 
 ---
 
@@ -35,7 +35,7 @@ Sidebar layout, in order:
 ### GTM
 - **Sales Pitches** (`/sales`) — owner-facing pitch pages with draft/published flow.
 - **Lead Magnets** (`/gtm/lead-magnets`) — branded landing pages at `/lead-magnet/<slug>` for guides, checklists, calculators. Flexible content sections (rich text / bullets / FAQ / stats / CTA), configurable capture forms, expiring public slugs, submission tracking. Also supports a `html_document` section that renders an uploaded standalone HTML document full-screen inside a sandboxed iframe (`{ kind: "html_document", html: "<!DOCTYPE html>…" }`), for hosting custom one-off pages without forking the template.
-- **Content Studio** (`/content`) — Haven Homeowner Blog pipeline (see below).
+- **Paid Ads** (`/content`) — paid advertising project space (see below).
 
 ### Admin
 - **Northstar Scorecard** (`/scorecard`) — company KPIs.
@@ -45,18 +45,17 @@ Sidebar layout, in order:
 
 ---
 
-## Content Studio
+## Paid Advertising
 
-Editorial pipeline for the Haven Homeowner Blog at `/content`. A focused content strategy tracker — topics move through a Kanban from idea to publish, each one owned by a specific person and watched against deadlines.
+Paid-ads project space at `/content` (labeled **Paid Ads** in the nav). A Kanban tracker for paid advertising — each card is an ad idea that moves from concept to launch, owned by a specific person and watched against deadlines.
 
 - **Pipeline stages:** Idea → In Progress → Draft → Complete (drag-and-drop Kanban, list, and calendar views).
-- **Strategy metadata:** assignee, content pillar, target keyword, priority, due date, publish target. All visible on cards, in the list, and in the article header.
+- **Strategy metadata:** assignee, channel (Meta / Google / TikTok / YouTube / Other), priority, draft-due date, launch date. All visible on cards, in the list, and in the ad header.
 - **Status strip:** running counts per stage plus *Needs owner* and *Overdue* indicators across the filtered backlog.
-- **Filters:** by pillar and by assignee (including an *Unassigned* shortcut).
-- **Article workspace:** Post editor, SEO & GEO scorecard, and Publish (WordPress draft) tabs. Optimize-for-SEO is a one-click action in the header.
-- **Paste-draft import:** drop in markdown or plain text and the studio derives a topic skeleton (title, pillar, keyword) and seeds the post body.
-- **WordPress draft push:** when `HAVEN_WP_*` env vars are configured. Drafts only — never publishes directly.
-- See [`docs/CONTENT_STUDIO.md`](docs/CONTENT_STUDIO.md) for the data model and scoring details.
+- **Filters:** by channel and by assignee (including an *Unassigned* shortcut).
+- **Ad workspace:** a Script editor and a Creative brief tab (hook, primary text, CTA, format, budget).
+- **Paste-script import:** drop in markdown or plain text and the studio derives a card title and seeds the script body.
+- See [`docs/CONTENT_STUDIO.md`](docs/CONTENT_STUDIO.md) for the data model.
 
 ---
 
@@ -115,7 +114,7 @@ See [`docs/PERSONAL_ACCESS_TOKENS.md`](docs/PERSONAL_ACCESS_TOKENS.md) for the f
 Haven OS also exposes a **Model Context Protocol** endpoint at
 **`/api/mcp`** so Claude (claude.ai or Claude Code) can use Haven OS
 tools directly. Uses the same PAT for auth. Initial tools cover Tasks,
-Lost Items, and the Content Studio / GTM content tracker.
+Lost Items, and Paid Advertising (the paid-ads project tracker).
 
 See [`docs/HAVEN_OS_MCP.md`](docs/HAVEN_OS_MCP.md) for the tool catalog
 and connection instructions.
@@ -151,13 +150,8 @@ npm run lint        # next lint
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon (browser-safe) key. |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Server-only.** Privileged Supabase key — never expose to the browser. |
 | `NEXT_PUBLIC_APP_URL` | Canonical app URL. **Production:** `https://www.havenvros.com`. Leave blank on Preview so each deploy resolves itself via `VERCEL_URL`. |
-| `ANTHROPIC_API_KEY` | Anthropic API key for the HavenOS assistant + Content Studio agent calls. |
-| `CLAUDE_CONTENT_AGENT_ID` | Content Studio managed agent ID. Recommended: `agent_011CaT8cFgxnMar5p8jGrr4q`. Falls back to a local rule-based agent if unset. |
-| `CLAUDE_CONTENT_ENVIRONMENT_ID` | Optional companion environment for the Content Studio agent. |
+| `ANTHROPIC_API_KEY` | Anthropic API key for the HavenOS assistant. |
 | `HAVEN_LOST_ITEMS_API_KEY` | Shared secret for the external Lost Items API. Required for any non-Haven caller. |
-| `HAVEN_WP_URL` | WordPress site for Content Studio drafts (defaults to `https://havenvacationrentals.com`). |
-| `HAVEN_WP_USER` | WordPress user with draft permissions. |
-| `HAVEN_WP_APP_PASSWORD` | WordPress application password. Drafts only. |
 
 Other Claude Managed Agent IDs (HavenOS assistant, etc.) are tracked in Vercel env per environment.
 
@@ -248,7 +242,7 @@ app/
       lost-items/
     sales/             Sales Pitches
     gtm/lead-magnets/  Lead Magnet landing pages
-    content/           Content Studio
+    content/           Paid Advertising
     scorecard/         Northstar Scorecard
     agents/            Managed Agent registry
     hr/                People + Surveys

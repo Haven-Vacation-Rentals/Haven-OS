@@ -13,8 +13,8 @@ export default function ContentError({
     <ErrorFallback
       error={error}
       reset={reset}
-      title="Couldn't load Content Studio"
-      description="The content pipeline didn't come back from the server. Try again."
+      title="Couldn't load Paid Advertising"
+      description="The paid-ads pipeline didn't come back from the server. Try again."
     />
   );
 }

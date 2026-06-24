@@ -96,13 +96,13 @@ export const API_SCOPE_CATALOG: ApiScopeInfo[] = [
   },
   {
     scope: "content:read",
-    label: "Read Content Studio",
-    description: "List spaces / topics / articles in Content Studio.",
+    label: "Read Paid Advertising",
+    description: "List Paid Advertising spaces and ad cards.",
   },
   {
     scope: "content:write",
-    label: "Write Content Studio",
-    description: "Create or update topics / articles.",
+    label: "Write Paid Advertising",
+    description: "Create or update Paid Advertising ad cards.",
   },
   {
     scope: "hr:read",

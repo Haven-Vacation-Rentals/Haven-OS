@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Sparkles } from "lucide-react";
+import { Megaphone } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -16,10 +16,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { createTopic } from "@/lib/content/actions";
 import {
-  PILLAR_LABELS,
+  AD_FORMATS,
+  CHANNEL_LABELS,
   PRIORITY_LABELS,
+  type AdChannel,
   type ContentAssignee,
-  type ContentPillar,
   type ContentPriority,
 } from "@/lib/content/types";
 
@@ -40,30 +41,32 @@ export function CreateTopicDialog({
   const [pending, startTransition] = useTransition();
 
   const [title, setTitle] = useState("");
-  const [pillar, setPillar] = useState<ContentPillar>("market_data");
+  const [channel, setChannel] = useState<AdChannel>("meta");
   const [priority, setPriority] = useState<ContentPriority>("medium");
-  const [keyword, setKeyword] = useState("");
+  const [adFormat, setAdFormat] = useState("");
+  const [budget, setBudget] = useState("");
+  const [hook, setHook] = useState("");
   const [angle, setAngle] = useState("");
-  const [hypothesis, setHypothesis] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const [publishTarget, setPublishTarget] = useState("");
+  const [launchTarget, setLaunchTarget] = useState("");
   const [ownerId, setOwnerId] = useState<string>(SELF_OWNER);
 
   function reset() {
     setTitle("");
-    setPillar("market_data");
+    setChannel("meta");
     setPriority("medium");
-    setKeyword("");
+    setAdFormat("");
+    setBudget("");
+    setHook("");
     setAngle("");
-    setHypothesis("");
     setDueDate("");
-    setPublishTarget("");
+    setLaunchTarget("");
     setOwnerId(SELF_OWNER);
   }
 
   function submit() {
     if (!title.trim()) {
-      toast.error("Title is required");
+      toast.error("Ad name is required");
       return;
     }
     startTransition(async () => {
@@ -78,20 +81,21 @@ export function CreateTopicDialog({
       const result = await createTopic({
         space_id: spaceId,
         title: title.trim(),
-        pillar,
+        channel,
         priority,
-        target_keyword: keyword.trim() || undefined,
+        ad_format: adFormat || undefined,
+        budget: budget.trim() || undefined,
+        hook: hook.trim() || undefined,
         angle: angle.trim() || undefined,
-        hypothesis: hypothesis.trim() || undefined,
         due_date: dueDate || null,
-        publish_target: publishTarget || null,
+        publish_target: launchTarget || null,
         owner_id: ownerArg,
       });
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
-      toast.success("Topic created");
+      toast.success("Ad created");
       reset();
       onOpenChange(false);
       router.push(`/content/${result.data.id}` as never);
@@ -104,30 +108,30 @@ export function CreateTopicDialog({
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-haven-coral" />
-            New topic
+            <Megaphone className="h-4 w-4 text-haven-coral" />
+            New ad
           </DialogTitle>
           <DialogDescription>
-            Drop the working title and the angle. The studio will spin up a
-            draft article shell and the agent will help fill it in.
+            Drop the idea, pick a channel, and the studio spins up a script
+            shell you can write and customize.
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
-          <Field label="Working title">
+          <Field label="Ad name">
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Smoky Mountains Cabin Revenue Outlook"
+              placeholder="e.g. Gatlinburg Fall Getaway — Meta Reel"
             />
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Pillar">
+            <Field label="Channel">
               <Select
-                value={pillar}
-                onChange={(v) => setPillar(v as ContentPillar)}
-                options={Object.entries(PILLAR_LABELS).map(([v, l]) => ({
+                value={channel}
+                onChange={(v) => setChannel(v as AdChannel)}
+                options={Object.entries(CHANNEL_LABELS).map(([v, l]) => ({
                   value: v,
                   label: l,
                 }))}
@@ -141,6 +145,26 @@ export function CreateTopicDialog({
                   value: v,
                   label: l,
                 }))}
+              />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Format">
+              <Select
+                value={adFormat}
+                onChange={(v) => setAdFormat(v)}
+                options={[
+                  { value: "", label: "— Not set —" },
+                  ...AD_FORMATS.map((f) => ({ value: f, label: f })),
+                ]}
+              />
+            </Field>
+            <Field label="Budget">
+              <Input
+                value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+                placeholder="e.g. $50/day"
               />
             </Field>
           </div>
@@ -161,11 +185,11 @@ export function CreateTopicDialog({
             </select>
           </Field>
 
-          <Field label="Target keyword">
+          <Field label="Hook">
             <Input
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              placeholder="e.g. smoky mountains cabin rental income"
+              value={hook}
+              onChange={(e) => setHook(e.target.value)}
+              placeholder="The first 3 seconds — what stops the scroll?"
             />
           </Field>
 
@@ -173,31 +197,23 @@ export function CreateTopicDialog({
             <Input
               value={angle}
               onChange={(e) => setAngle(e.target.value)}
-              placeholder="What makes this post non-generic?"
-            />
-          </Field>
-
-          <Field label="Hypothesis">
-            <Input
-              value={hypothesis}
-              onChange={(e) => setHypothesis(e.target.value)}
-              placeholder="What's the operator-level take?"
+              placeholder="What's the creative angle / offer?"
             />
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Due date">
+            <Field label="Draft due">
               <Input
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
               />
             </Field>
-            <Field label="Publish target">
+            <Field label="Launch date">
               <Input
                 type="date"
-                value={publishTarget}
-                onChange={(e) => setPublishTarget(e.target.value)}
+                value={launchTarget}
+                onChange={(e) => setLaunchTarget(e.target.value)}
               />
             </Field>
           </div>
@@ -208,7 +224,7 @@ export function CreateTopicDialog({
             Cancel
           </Button>
           <Button variant="primary" onClick={submit} disabled={pending}>
-            {pending ? "Creating…" : "Create topic"}
+            {pending ? "Creating…" : "Create ad"}
           </Button>
         </DialogFooter>
       </DialogContent>

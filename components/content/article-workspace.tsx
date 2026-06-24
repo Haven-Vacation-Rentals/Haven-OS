@@ -1,17 +1,16 @@
 "use client";
 
 /**
- * Haven OS — Article workspace.
+ * Haven OS — Ad workspace.
  *
- * Single-column editor for a content topic. Tabs:
- *   Post — the live editor.
- *   SEO & GEO — scorecard.
- *   Publish — WordPress draft queue + history.
+ * Single-column editor for one ad card. Tabs:
+ *   Script        — the live script editor (PostCanvas).
+ *   Creative brief — hook, primary text, CTA, format, budget.
  *
- * Strategy metadata (assignee, stage, due date, publish target) lives
- * in the header so it stays visible while editing. The Content agent
- * panel is intentionally absent — Content Studio is a tracker + editor,
- * not an agent surface.
+ * Strategy metadata (assignee, stage, channel, draft due, launch date)
+ * lives in the header so it stays visible while writing. There is no
+ * SEO/GEO scoring or WordPress publishing — this is a paid-ads project
+ * space, not a blog.
  */
 
 import {
@@ -22,86 +21,64 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Sparkles,
-  CheckCircle2,
-  AlertTriangle,
-  Info,
+  Megaphone,
   Save,
-  Wand2,
   FileText,
-  Cloud,
-  ExternalLink,
+  ClipboardList,
   UserRound,
   CalendarClock,
+  Radio,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
-  optimizeArticleSeo,
-  queueWordPressDraft,
-  runArticleScorers,
   setTopicOwner,
   setTopicStage,
   updateArticle,
   updateTopic,
 } from "@/lib/content/actions";
 import {
+  AD_FORMATS,
+  CHANNEL_LABELS,
   STAGE_LABELS,
   STAGE_ORDER,
+  type AdChannel,
   type ContentArticle,
   type ContentAssignee,
-  type ContentCheck,
-  type ContentGeoCheck,
-  type ContentPublishJob,
-  type ContentSeoCheck,
   type ContentTopicStage,
   type TopicWithArticle,
 } from "@/lib/content/types";
 import { PostCanvas } from "@/components/content/post-canvas";
 
-type Tab = "post" | "scorecards" | "publish";
+type Tab = "script" | "brief";
 
 export function ArticleWorkspace({
   topic,
   article,
-  seo,
-  geo,
-  jobs,
-  wpConfigured,
   assignees,
 }: {
   topic: TopicWithArticle;
   article: ContentArticle;
-  seo: ContentSeoCheck | null;
-  geo: ContentGeoCheck | null;
-  jobs: ContentPublishJob[];
-  wpConfigured: boolean;
   assignees: ContentAssignee[];
 }) {
-  const [tab, setTab] = useState<Tab>("post");
+  const [tab, setTab] = useState<Tab>("script");
 
   return (
     <div className="flex flex-col gap-4">
       <WorkspaceHeader topic={topic} article={article} assignees={assignees} />
       <Tabs tab={tab} setTab={setTab} />
-      {tab === "post" ? (
+      {tab === "script" ? (
         <PostCanvas article={article} />
-      ) : tab === "scorecards" ? (
-        <ScorecardsView article={article} seo={seo} geo={geo} />
       ) : (
-        <PublishView
-          article={article}
-          jobs={jobs}
-          wpConfigured={wpConfigured}
-        />
+        <CreativeBriefView article={article} />
       )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Header — title, meta, stage, assignee, dates
+// Header — name, channel, stage, assignee, dates
 // ---------------------------------------------------------------------------
 
 function WorkspaceHeader({
@@ -115,53 +92,21 @@ function WorkspaceHeader({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [optimizing, setOptimizing] = useState(false);
-  const [title, setTitle] = useState(article.title);
-  const [meta, setMeta] = useState(article.meta_description);
+  const [title, setTitle] = useState(topic.title);
 
-  function optimize() {
-    setOptimizing(true);
-    startTransition(async () => {
-      const r = await optimizeArticleSeo({ article_id: article.id });
-      setOptimizing(false);
-      if (!r.ok) {
-        toast.error(r.error);
-        return;
-      }
-      const before = r.data.before;
-      const after = r.data.after;
-      const seoDelta =
-        before.seo === null ? after.seo : after.seo - before.seo;
-      const geoDelta =
-        before.geo === null ? after.geo : after.geo - before.geo;
-      toast.success(
-        `Optimized · SEO ${after.seo}${
-          before.seo !== null ? ` (${seoDelta >= 0 ? "+" : ""}${seoDelta})` : ""
-        } · GEO ${after.geo}${
-          before.geo !== null ? ` (${geoDelta >= 0 ? "+" : ""}${geoDelta})` : ""
-        }`,
-      );
-      router.refresh();
-    });
-  }
-
-  // Re-seed local state when the article changes upstream.
-  useEffect(() => setTitle(article.title), [article.title]);
-  useEffect(() => setMeta(article.meta_description), [article.meta_description]);
-
-  const titleLen = title.length;
-  const metaLen = meta.length;
-  const titleOk = titleLen >= 50 && titleLen <= 70;
-  const metaOk = metaLen >= 150 && metaLen <= 160;
+  // Re-seed local state when the card changes upstream.
+  useEffect(() => setTitle(topic.title), [topic.title]);
 
   function save() {
     startTransition(async () => {
-      const r = await updateArticle(article.id, {
-        title,
-        meta_description: meta,
-      });
-      if (!r.ok) {
-        toast.error(r.error);
+      // Keep the card name and the article title in sync so the board
+      // and the workspace agree.
+      const [t, a] = await Promise.all([
+        updateTopic(topic.id, { title }),
+        updateArticle(article.id, { title }),
+      ]);
+      if (!t.ok || !a.ok) {
+        toast.error((!t.ok && t.error) || (!a.ok && a.error) || "Save failed");
         return;
       }
       toast.success("Saved");
@@ -177,6 +122,18 @@ function WorkspaceHeader({
         return;
       }
       toast.success(`Moved to ${STAGE_LABELS[stage]}`);
+      router.refresh();
+    });
+  }
+
+  function changeChannel(channel: AdChannel) {
+    startTransition(async () => {
+      const r = await updateTopic(topic.id, { channel });
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success("Channel updated");
       router.refresh();
     });
   }
@@ -202,42 +159,32 @@ function WorkspaceHeader({
         toast.error(r.error);
         return;
       }
-      toast.success(field === "due_date" ? "Due date saved" : "Publish date saved");
+      toast.success(field === "due_date" ? "Draft due saved" : "Launch date saved");
       router.refresh();
     });
   }
 
-  const dirty = title !== article.title || meta !== article.meta_description;
+  const dirty = title !== topic.title;
 
   return (
     <div className="rounded-card border border-border bg-surface p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {topic.target_keyword
-            ? `Keyword: ${topic.target_keyword}`
-            : "No target keyword"}
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-haven-coral">
+          <Megaphone className="h-3.5 w-3.5" />
+          {CHANNEL_LABELS[topic.channel]}
+          {article.ad_format ? (
+            <span className="text-muted-foreground"> · {article.ad_format}</span>
+          ) : null}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={optimize}
-            disabled={pending || optimizing}
-            title="Apply a full SEO/GEO pass: title, meta, structure, voice, CTA, sign-off."
-          >
-            <Wand2 className="h-3.5 w-3.5" />
-            {optimizing ? "Optimizing…" : "Optimize for SEO"}
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={save}
-            disabled={pending || !dirty}
-          >
-            <Save className="h-3.5 w-3.5" />
-            Save
-          </Button>
-        </div>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={save}
+          disabled={pending || !dirty}
+        >
+          <Save className="h-3.5 w-3.5" />
+          Save
+        </Button>
       </div>
 
       <input
@@ -245,40 +192,45 @@ function WorkspaceHeader({
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         className="w-full bg-transparent font-heading text-display-2 font-bold leading-tight text-foreground outline-none placeholder:text-muted-foreground"
-        placeholder="Article title"
+        placeholder="Ad name"
       />
-      <div className="mt-1 flex items-center gap-2 text-[11px]">
-        <span
-          className={cn(
-            "font-semibold",
-            titleOk ? "text-emerald-600" : "text-amber-600",
-          )}
-        >
-          {titleLen} / 50–70 chars
-        </span>
-      </div>
 
-      <textarea
-        value={meta}
-        onChange={(e) => setMeta(e.target.value)}
-        rows={2}
-        className="mt-3 w-full resize-none rounded-md border border-border bg-surface-alt/30 p-2 text-[13px] leading-5 text-foreground outline-none focus:border-haven-coral/40"
-        placeholder="Meta description (150–160 chars)"
-      />
-      <div className="mt-1 flex items-center gap-2 text-[11px]">
-        <span
-          className={cn(
-            "font-semibold",
-            metaOk ? "text-emerald-600" : "text-amber-600",
-          )}
-        >
-          {metaLen} / 150–160 chars
-        </span>
-      </div>
-
-      {/* Strategy metadata strip — assignee, stage, dates. Kept on the
-          header so the editor below stays focused on the post. */}
-      <div className="mt-4 grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Strategy metadata strip — channel, stage, assignee, dates. */}
+      <div className="mt-4 grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-5">
+        <MetaField
+          label="Channel"
+          icon={Radio}
+          control={
+            <select
+              value={topic.channel}
+              onChange={(e) => changeChannel(e.target.value as AdChannel)}
+              className="h-8 w-full rounded-md border border-border bg-surface px-2 text-[12px] font-semibold"
+            >
+              {Object.entries(CHANNEL_LABELS).map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          }
+        />
+        <MetaField
+          label="Stage"
+          icon={Megaphone}
+          control={
+            <select
+              value={topic.stage}
+              onChange={(e) => moveStage(e.target.value as ContentTopicStage)}
+              className="h-8 w-full rounded-md border border-border bg-surface px-2 text-[12px] font-semibold"
+            >
+              {STAGE_ORDER.map((s) => (
+                <option key={s} value={s}>
+                  {STAGE_LABELS[s]}
+                </option>
+              ))}
+            </select>
+          }
+        />
         <MetaField
           label="Assignee"
           icon={UserRound}
@@ -298,24 +250,7 @@ function WorkspaceHeader({
           }
         />
         <MetaField
-          label="Stage"
-          icon={Sparkles}
-          control={
-            <select
-              value={topic.stage}
-              onChange={(e) => moveStage(e.target.value as ContentTopicStage)}
-              className="h-8 w-full rounded-md border border-border bg-surface px-2 text-[12px] font-semibold"
-            >
-              {STAGE_ORDER.map((s) => (
-                <option key={s} value={s}>
-                  {STAGE_LABELS[s]}
-                </option>
-              ))}
-            </select>
-          }
-        />
-        <MetaField
-          label="Due"
+          label="Draft due"
           icon={CalendarClock}
           control={
             <input
@@ -327,7 +262,7 @@ function WorkspaceHeader({
           }
         />
         <MetaField
-          label="Publish target"
+          label="Launch date"
           icon={CalendarClock}
           control={
             <input
@@ -379,9 +314,8 @@ function Tabs({
     label: string;
     icon: ComponentType<{ className?: string }>;
   }[] = [
-    { id: "post", label: "Post", icon: FileText },
-    { id: "scorecards", label: "SEO & GEO", icon: Sparkles },
-    { id: "publish", label: "Publish", icon: Cloud },
+    { id: "script", label: "Script", icon: FileText },
+    { id: "brief", label: "Creative brief", icon: ClipboardList },
   ];
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-border pb-1">
@@ -410,29 +344,45 @@ function Tabs({
 }
 
 // ---------------------------------------------------------------------------
-// Scorecards
+// Creative brief
 // ---------------------------------------------------------------------------
 
-function ScorecardsView({
-  article,
-  seo,
-  geo,
-}: {
-  article: ContentArticle;
-  seo: ContentSeoCheck | null;
-  geo: ContentGeoCheck | null;
-}) {
+function CreativeBriefView({ article }: { article: ContentArticle }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [hook, setHook] = useState(article.hook);
+  const [primaryText, setPrimaryText] = useState(article.primary_text);
+  const [cta, setCta] = useState(article.cta);
+  const [adFormat, setAdFormat] = useState(article.ad_format);
+  const [budget, setBudget] = useState(article.budget);
 
-  function rerun() {
+  useEffect(() => setHook(article.hook), [article.hook]);
+  useEffect(() => setPrimaryText(article.primary_text), [article.primary_text]);
+  useEffect(() => setCta(article.cta), [article.cta]);
+  useEffect(() => setAdFormat(article.ad_format), [article.ad_format]);
+  useEffect(() => setBudget(article.budget), [article.budget]);
+
+  const dirty =
+    hook !== article.hook ||
+    primaryText !== article.primary_text ||
+    cta !== article.cta ||
+    adFormat !== article.ad_format ||
+    budget !== article.budget;
+
+  function save() {
     startTransition(async () => {
-      const r = await runArticleScorers(article.id);
+      const r = await updateArticle(article.id, {
+        hook,
+        primary_text: primaryText,
+        cta,
+        ad_format: adFormat,
+        budget,
+      });
       if (!r.ok) {
         toast.error(r.error);
         return;
       }
-      toast.success("Scorers re-run");
+      toast.success("Creative brief saved");
       router.refresh();
     });
   }
@@ -441,227 +391,86 @@ function ScorecardsView({
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between rounded-card border border-border bg-surface p-3">
         <div className="text-[12px] text-muted-foreground">
-          Local SEO + GEO scorers. Re-run after edits to refresh the
-          scorecard. Last run is shown below.
+          The creative brief — hook, primary text, CTA, format, and budget.
+          These show on the card and travel with the script.
         </div>
-        <Button variant="primary" size="sm" onClick={rerun} disabled={pending}>
-          <Wand2 className="h-3.5 w-3.5" />
-          {pending ? "Running…" : "Run scorers"}
+        <Button variant="primary" size="sm" onClick={save} disabled={pending || !dirty}>
+          <Save className="h-3.5 w-3.5" />
+          {pending ? "Saving…" : "Save brief"}
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ScoreCard title="SEO" score={seo?.score ?? null} checks={seo?.checks ?? []} />
-        <ScoreCard
-          title="GEO / AI ranking"
-          score={geo?.score ?? null}
-          checks={geo?.checks ?? []}
-        />
+      <div className="grid grid-cols-1 gap-4 rounded-card border border-border bg-surface p-5 lg:grid-cols-2">
+        <BriefField label="Hook">
+          <textarea
+            value={hook}
+            onChange={(e) => setHook(e.target.value)}
+            rows={2}
+            placeholder="The first 3 seconds — what stops the scroll?"
+            className="w-full resize-none rounded-md border border-border bg-surface-alt/30 p-2 text-[13px] leading-5 text-foreground outline-none focus:border-haven-coral/40"
+          />
+        </BriefField>
+        <BriefField label="Call to action">
+          <input
+            type="text"
+            value={cta}
+            onChange={(e) => setCta(e.target.value)}
+            placeholder="e.g. Book direct — see October dates"
+            className="h-9 w-full rounded-md border border-border bg-surface-alt/30 px-2 text-[13px] text-foreground outline-none focus:border-haven-coral/40"
+          />
+        </BriefField>
+        <BriefField label="Primary text / caption" full>
+          <textarea
+            value={primaryText}
+            onChange={(e) => setPrimaryText(e.target.value)}
+            rows={4}
+            placeholder="The body copy that runs with the creative."
+            className="w-full resize-y rounded-md border border-border bg-surface-alt/30 p-2 text-[13px] leading-6 text-foreground outline-none focus:border-haven-coral/40"
+          />
+        </BriefField>
+        <BriefField label="Format">
+          <select
+            value={adFormat}
+            onChange={(e) => setAdFormat(e.target.value)}
+            className="h-9 w-full rounded-md border border-border bg-surface px-2 text-[13px] text-foreground"
+          >
+            <option value="">— Not set —</option>
+            {AD_FORMATS.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </select>
+        </BriefField>
+        <BriefField label="Budget">
+          <input
+            type="text"
+            value={budget}
+            onChange={(e) => setBudget(e.target.value)}
+            placeholder="e.g. $50/day"
+            className="h-9 w-full rounded-md border border-border bg-surface-alt/30 px-2 text-[13px] text-foreground outline-none focus:border-haven-coral/40"
+          />
+        </BriefField>
       </div>
     </div>
   );
 }
 
-function ScoreCard({
-  title,
-  score,
-  checks,
+function BriefField({
+  label,
+  full,
+  children,
 }: {
-  title: string;
-  score: number | null;
-  checks: ContentCheck[];
+  label: string;
+  full?: boolean;
+  children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col rounded-card border border-border bg-surface">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="font-heading text-base font-bold text-foreground">{title}</div>
-        <ScoreDial score={score} />
-      </div>
-      <div className="flex flex-col">
-        {checks.length === 0 ? (
-          <div className="px-4 py-6 text-center text-[12px] text-muted-foreground">
-            Run the scorers to populate this card.
-          </div>
-        ) : (
-          checks.map((c) => <CheckRow key={c.id} check={c} />)
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ScoreDial({ score }: { score: number | null }) {
-  if (score === null)
-    return (
-      <span className="text-[11px] text-muted-foreground">Not scored yet</span>
-    );
-  const tone =
-    score >= 85
-      ? "text-emerald-600"
-      : score >= 65
-        ? "text-amber-600"
-        : "text-haven-coral";
-  return (
-    <span className={cn("font-heading text-2xl font-bold", tone)}>{score}</span>
-  );
-}
-
-function CheckRow({ check }: { check: ContentCheck }) {
-  const Icon = check.ok
-    ? CheckCircle2
-    : check.severity === "blocker"
-      ? AlertTriangle
-      : Info;
-  const tone = check.ok
-    ? "text-emerald-600"
-    : check.severity === "blocker"
-      ? "text-haven-coral"
-      : "text-amber-600";
-  return (
-    <div className="flex items-start gap-2.5 border-b border-border/60 px-4 py-2.5 last:border-b-0">
-      <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", tone)} />
-      <div className="flex-1">
-        <div className="text-[13px] font-semibold text-foreground">
-          {check.label}
-        </div>
-        {check.detail || check.hint ? (
-          <div className="mt-0.5 text-[11.5px] text-muted-foreground">
-            {check.detail ?? check.hint}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Publish
-// ---------------------------------------------------------------------------
-
-function PublishView({
-  article,
-  jobs,
-  wpConfigured,
-}: {
-  article: ContentArticle;
-  jobs: ContentPublishJob[];
-  wpConfigured: boolean;
-}) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-
-  function queue() {
-    startTransition(async () => {
-      const r = await queueWordPressDraft(article.id);
-      if (!r.ok) {
-        toast.error(r.error);
-        return;
-      }
-      if (
-        r.data.status === "credentials_missing" ||
-        r.data.status === "blocked"
-      ) {
-        toast.warning(`Job ${r.data.status.replace("_", " ")}`);
-      } else {
-        toast.success("WordPress draft created");
-      }
-      router.refresh();
-    });
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-card border border-border bg-surface p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="font-heading text-base font-bold text-foreground">
-              WordPress draft
-            </div>
-            <p className="mt-1 text-[12.5px] text-muted-foreground">
-              Creates a DRAFT post on havenvacationrentals.com. Never
-              publishes directly. If credentials are missing the job is
-              recorded with status <code>credentials_missing</code> and the
-              article stays here in Haven OS.
-            </p>
-            <div className="mt-2 text-[11px]">
-              <span className="text-muted-foreground">WordPress: </span>
-              <span
-                className={
-                  wpConfigured ? "text-emerald-600" : "text-amber-600"
-                }
-              >
-                {wpConfigured ? "configured" : "credentials missing"}
-              </span>
-            </div>
-          </div>
-          <Button variant="primary" onClick={queue} disabled={pending}>
-            <Cloud className="h-4 w-4" />
-            {pending ? "Working…" : "Queue WordPress draft"}
-          </Button>
-        </div>
-      </div>
-
-      <div className="rounded-card border border-border bg-surface">
-        <div className="border-b border-border px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Publish history
-        </div>
-        {jobs.length === 0 ? (
-          <div className="px-4 py-8 text-center text-[12px] text-muted-foreground">
-            No publish jobs yet.
-          </div>
-        ) : (
-          jobs.map((j) => (
-            <div
-              key={j.id}
-              className="flex items-start justify-between gap-3 border-b border-border/60 px-4 py-3 last:border-b-0"
-            >
-              <div>
-                <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
-                  <StatusBadge status={j.status} />
-                  <span>{new Date(j.created_at).toLocaleString()}</span>
-                </div>
-                {j.error_message ? (
-                  <div className="mt-1 line-clamp-2 text-[11.5px] text-haven-coral">
-                    {j.error_message}
-                  </div>
-                ) : null}
-              </div>
-              {j.wp_draft_url ? (
-                <a
-                  href={j.wp_draft_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-1 text-[11.5px] font-semibold text-haven-coral hover:underline"
-                >
-                  Open in WP
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              ) : null}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: ContentPublishJob["status"] }) {
-  const tone =
-    status === "completed"
-      ? "bg-emerald-100 text-emerald-800"
-      : status === "credentials_missing"
-        ? "bg-amber-100 text-amber-800"
-        : status === "blocked" || status === "failed"
-          ? "bg-haven-coral/15 text-haven-coral-700"
-          : "bg-surface-alt text-foreground/80";
-  return (
-    <span
-      className={cn(
-        "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-        tone,
-      )}
-    >
-      {status.replace("_", " ")}
-    </span>
+    <label className={cn("flex flex-col gap-1.5", full && "lg:col-span-2")}>
+      <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      {children}
+    </label>
   );
 }

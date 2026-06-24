@@ -1,9 +1,15 @@
 /**
- * Haven OS — Content Studio server actions.
+ * Haven OS — Paid Advertising (Content Studio) server actions.
  *
- * Owns the full CRUD over content_topics, content_articles, research,
- * scorecards, agent messages, and publish jobs. ClickUp is no longer
- * involved — this module is the source of truth for the workflow.
+ * App-native CRUD over content_spaces, content_topics, and
+ * content_articles. Each topic is an ad idea on the Kanban; its article
+ * carries the ad script (body) plus a creative brief (hook, primary
+ * text, CTA, format, budget).
+ *
+ * This is a project space, not a blog: there is no SEO/GEO scoring,
+ * research log, agent chat, or WordPress publishing. (The underlying
+ * scorecard/publish tables remain in the schema for history but are not
+ * surfaced.)
  *
  * All client-callable mutations return { ok, data } | { ok, error }.
  */
@@ -15,43 +21,19 @@ import { createClient } from "@/lib/supabase/server";
 import { requireAdminOrAbove } from "@/lib/auth/permissions";
 import {
   mapLegacyStage,
+  type AdChannel,
   type ContentArticle,
   type ContentArticleVersion,
-  type ContentAgentMessage,
   type ContentAgentRole,
-  type ContentAgentSuggestion,
   type ContentAssignee,
-  type ContentCheck,
-  type ContentGeoCheck,
-  type ContentPillar,
   type ContentPriority,
-  type ContentPublishJob,
-  type ContentPublishStatus,
-  type ContentResearchSource,
-  type ContentSeoCheck,
   type ContentSpace,
   type ContentTopic,
   type ContentTopicStage,
   type Result,
   type TopicWithArticle,
 } from "./types";
-import { countWords, readingTimeMin, runGeoChecks, runSeoChecks } from "./scoring";
-import { runLocalAgent } from "./agent-prompt";
-import {
-  createWordPressDraft,
-  markdownToHtml,
-  readWpEnv,
-} from "./wordpress";
-import {
-  detectIntent,
-  deriveTopicSeed,
-  generateLocalTopicIdeas,
-  normalizeDraftBody,
-  parseTopicDraft,
-  type TopicDraft,
-  type TopicIdea,
-} from "./topic-intent";
-import { applyFullSeoOptimization } from "./agent-prompt";
+import { countWords, readingTimeMin } from "./util";
 
 async function db() {
   const supabase = await createClient();
@@ -77,7 +59,7 @@ function rowToTopic(r: Record<string, unknown>): ContentTopic {
     space_id: r.space_id as string,
     title: r.title as string,
     working_title: (r.working_title as string | null) ?? null,
-    pillar: r.pillar as ContentPillar,
+    channel: (r.channel as AdChannel | null) ?? "meta",
     stage: mapLegacyStage(r.stage as string | null),
     priority: r.priority as ContentPriority,
     target_keyword: (r.target_keyword as string | null) ?? null,
@@ -105,83 +87,20 @@ function rowToArticle(r: Record<string, unknown>): ContentArticle {
     body_md: (r.body_md as string) ?? "",
     outline_md: (r.outline_md as string) ?? "",
     brief_md: (r.brief_md as string) ?? "",
+    hook: (r.hook as string) ?? "",
+    primary_text: (r.primary_text as string) ?? "",
+    cta: (r.cta as string) ?? "",
+    ad_format: (r.ad_format as string) ?? "",
+    budget: (r.budget as string) ?? "",
     word_count: (r.word_count as number) ?? 0,
     reading_time_min: (r.reading_time_min as number) ?? 0,
     seo_score: (r.seo_score as number | null) ?? null,
     geo_score: (r.geo_score as number | null) ?? null,
     wp_post_id: (r.wp_post_id as string | null) ?? null,
     wp_draft_url: (r.wp_draft_url as string | null) ?? null,
-    last_publish_status:
-      (r.last_publish_status as ContentPublishStatus | null) ?? null,
+    last_publish_status: null,
     created_at: r.created_at as string,
     updated_at: r.updated_at as string,
-  };
-}
-
-function rowToResearch(r: Record<string, unknown>): ContentResearchSource {
-  return {
-    id: r.id as string,
-    topic_id: r.topic_id as string,
-    url: (r.url as string | null) ?? null,
-    title: (r.title as string | null) ?? null,
-    publisher: (r.publisher as string | null) ?? null,
-    published_on: (r.published_on as string | null) ?? null,
-    finding: r.finding as string,
-    data_point: (r.data_point as string | null) ?? null,
-    is_verified: !!r.is_verified,
-    added_by: (r.added_by as string | null) ?? null,
-    created_at: r.created_at as string,
-  };
-}
-
-function rowToAgentMessage(r: Record<string, unknown>): ContentAgentMessage {
-  return {
-    id: r.id as string,
-    article_id: r.article_id as string,
-    role: r.role as ContentAgentRole,
-    content: r.content as string,
-    suggestion:
-      (r.suggestion as ContentAgentSuggestion | null) ?? null,
-    applied: !!r.applied,
-    author_id: (r.author_id as string | null) ?? null,
-    created_at: r.created_at as string,
-  };
-}
-
-function rowToPublishJob(r: Record<string, unknown>): ContentPublishJob {
-  return {
-    id: r.id as string,
-    article_id: r.article_id as string,
-    status: r.status as ContentPublishStatus,
-    target: (r.target as string) ?? "wordpress",
-    attempt: (r.attempt as number) ?? 0,
-    result: (r.result as Record<string, unknown>) ?? {},
-    error_message: (r.error_message as string | null) ?? null,
-    wp_post_id: (r.wp_post_id as string | null) ?? null,
-    wp_draft_url: (r.wp_draft_url as string | null) ?? null,
-    requested_by: (r.requested_by as string | null) ?? null,
-    created_at: r.created_at as string,
-    updated_at: r.updated_at as string,
-  };
-}
-
-function rowToSeoCheck(r: Record<string, unknown>): ContentSeoCheck {
-  return {
-    id: r.id as string,
-    article_id: r.article_id as string,
-    score: r.score as number,
-    checks: (r.checks as ContentCheck[]) ?? [],
-    created_at: r.created_at as string,
-  };
-}
-
-function rowToGeoCheck(r: Record<string, unknown>): ContentGeoCheck {
-  return {
-    id: r.id as string,
-    article_id: r.article_id as string,
-    score: r.score as number,
-    checks: (r.checks as ContentCheck[]) ?? [],
-    created_at: r.created_at as string,
   };
 }
 
@@ -194,7 +113,7 @@ export async function getDefaultSpace(): Promise<ContentSpace | null> {
   const { data } = await supabase
     .from("content_spaces")
     .select("*")
-    .eq("slug", "haven-homeowner-blog")
+    .eq("slug", "paid-advertising")
     .maybeSingle();
   return data ? rowToSpace(data) : null;
 }
@@ -210,7 +129,7 @@ export async function listSpaces(): Promise<ContentSpace[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Topics
+// Assignees
 // ---------------------------------------------------------------------------
 
 function rowToAssignee(r: Record<string, unknown>): ContentAssignee {
@@ -241,9 +160,9 @@ async function fetchAssigneeMap(
 }
 
 /**
- * People who can be assigned a content topic. Pulled from profiles —
- * any signed-in app user can own a topic. Sorted by name; missing
- * names fall back to email so the picker stays readable.
+ * People who can own an ad card. Pulled from profiles — any signed-in
+ * app user can own a card. Sorted by name; missing names fall back to
+ * email so the picker stays readable.
  */
 export async function listContentAssignees(): Promise<ContentAssignee[]> {
   const supabase = await db();
@@ -254,6 +173,10 @@ export async function listContentAssignees(): Promise<ContentAssignee[]> {
   if (error || !data) return [];
   return (data as Record<string, unknown>[]).map(rowToAssignee);
 }
+
+// ---------------------------------------------------------------------------
+// Topics (ad cards)
+// ---------------------------------------------------------------------------
 
 export async function listTopics(spaceId: string): Promise<TopicWithArticle[]> {
   const supabase = await db();
@@ -318,12 +241,13 @@ export async function getTopic(topicId: string): Promise<TopicWithArticle | null
 export type CreateTopicInput = {
   space_id: string;
   title: string;
-  pillar?: ContentPillar;
+  channel?: AdChannel;
   priority?: ContentPriority;
-  target_keyword?: string;
-  secondary_keywords?: string[];
   angle?: string;
   hypothesis?: string;
+  ad_format?: string;
+  budget?: string;
+  hook?: string;
   due_date?: string | null;
   publish_target?: string | null;
   owner_id?: string | null;
@@ -340,10 +264,8 @@ export async function createTopic(
       .insert({
         space_id: input.space_id,
         title: input.title,
-        pillar: input.pillar ?? "market_data",
+        channel: input.channel ?? "meta",
         priority: input.priority ?? "medium",
-        target_keyword: input.target_keyword ?? null,
-        secondary_keywords: input.secondary_keywords ?? [],
         angle: input.angle ?? null,
         hypothesis: input.hypothesis ?? null,
         due_date: input.due_date ?? null,
@@ -357,13 +279,14 @@ export async function createTopic(
     if (error) return { ok: false, error: error.message };
     const topic = rowToTopic(data);
 
-    // Seed an empty article so the workspace opens cleanly.
+    // Seed an empty script + brief so the workspace opens cleanly.
     await supabase.from("content_articles").insert({
       topic_id: topic.id,
       title: input.title,
-      brief_md: "",
-      outline_md: "",
       body_md: "",
+      hook: input.hook ?? "",
+      ad_format: input.ad_format ?? "",
+      budget: input.budget ?? "",
     });
 
     revalidatePath(CONTENT_PATH, "layout");
@@ -383,11 +306,9 @@ export async function createTopic(
 export type UpdateTopicInput = Partial<{
   title: string;
   working_title: string | null;
-  pillar: ContentPillar;
+  channel: AdChannel;
   stage: ContentTopicStage;
   priority: ContentPriority;
-  target_keyword: string | null;
-  secondary_keywords: string[];
   angle: string | null;
   hypothesis: string | null;
   due_date: string | null;
@@ -421,7 +342,7 @@ export async function archiveTopic(topicId: string): Promise<Result<true>> {
     (await updateTopic(topicId, { stage: "archived" })) as Result<unknown>
   ).ok
     ? { ok: true, data: true }
-    : { ok: false, error: "Failed to archive topic" };
+    : { ok: false, error: "Failed to archive ad" };
 }
 
 export async function setTopicStage(
@@ -432,9 +353,9 @@ export async function setTopicStage(
 }
 
 /**
- * Reassign a topic. `null` clears the owner so the topic shows up in
- * "Needs owner" filters. Profile id must already exist in the
- * profiles table; the FK on content_topics.owner_id enforces that.
+ * Reassign an ad card. `null` clears the owner so the card shows up in
+ * "Needs owner" filters. Profile id must already exist in the profiles
+ * table; the FK on content_topics.owner_id enforces that.
  */
 export async function setTopicOwner(
   topicId: string,
@@ -444,13 +365,8 @@ export async function setTopicOwner(
 }
 
 /**
- * Hard-delete a topic and everything attached to it (article, versions,
- * research, scorecards, agent messages, publish jobs all cascade via
- * the FK on content_articles -> topic_id and the topic-scoped FKs).
- *
- * Surfaced from the pipeline as a confirmed action — Jack asked for an
- * easier way to drop ideas out of the backlog. `archiveTopic` remains
- * available for reversible removal.
+ * Hard-delete an ad card and everything attached to it (article,
+ * versions all cascade via the FK on content_articles -> topic_id).
  */
 export async function deleteTopic(topicId: string): Promise<Result<true>> {
   try {
@@ -469,7 +385,7 @@ export async function deleteTopic(topicId: string): Promise<Result<true>> {
 }
 
 // ---------------------------------------------------------------------------
-// Articles
+// Articles (the ad script + creative brief)
 // ---------------------------------------------------------------------------
 
 export async function getArticleByTopic(
@@ -496,12 +412,12 @@ export async function getArticle(articleId: string): Promise<ContentArticle | nu
 
 export type UpdateArticleInput = Partial<{
   title: string;
-  meta_description: string;
-  slug: string | null;
-  hero_image_url: string | null;
   body_md: string;
-  outline_md: string;
-  brief_md: string;
+  hook: string;
+  primary_text: string;
+  cta: string;
+  ad_format: string;
+  budget: string;
 }>;
 
 async function persistVersion(
@@ -596,630 +512,48 @@ export async function listArticleVersions(
 }
 
 // ---------------------------------------------------------------------------
-// Research
+// Import an existing script
 // ---------------------------------------------------------------------------
-
-export async function listResearch(topicId: string): Promise<ContentResearchSource[]> {
-  const supabase = await db();
-  const { data } = await supabase
-    .from("content_research_sources")
-    .select("*")
-    .eq("topic_id", topicId)
-    .order("created_at", { ascending: false });
-  return (data ?? []).map(rowToResearch);
-}
-
-export type CreateResearchInput = {
-  topic_id: string;
-  finding: string;
-  url?: string;
-  title?: string;
-  publisher?: string;
-  data_point?: string;
-  published_on?: string | null;
-  is_verified?: boolean;
-};
-
-export async function createResearch(
-  input: CreateResearchInput,
-): Promise<Result<ContentResearchSource>> {
-  try {
-    const userId = await requireAdminOrAbove();
-    const supabase = await db();
-    const { data, error } = await supabase
-      .from("content_research_sources")
-      .insert({
-        topic_id: input.topic_id,
-        finding: input.finding,
-        url: input.url ?? null,
-        title: input.title ?? null,
-        publisher: input.publisher ?? null,
-        data_point: input.data_point ?? null,
-        published_on: input.published_on ?? null,
-        is_verified: input.is_verified ?? false,
-        added_by: userId,
-      })
-      .select("*")
-      .single();
-    if (error) return { ok: false, error: error.message };
-    revalidatePath(CONTENT_PATH, "layout");
-    return { ok: true, data: rowToResearch(data) };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-export async function deleteResearch(id: string): Promise<Result<true>> {
-  try {
-    await requireAdminOrAbove();
-    const supabase = await db();
-    const { error } = await supabase
-      .from("content_research_sources")
-      .delete()
-      .eq("id", id);
-    if (error) return { ok: false, error: error.message };
-    revalidatePath(CONTENT_PATH, "layout");
-    return { ok: true, data: true };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Scoring
-// ---------------------------------------------------------------------------
-
-export async function runArticleScorers(articleId: string): Promise<
-  Result<{ seo: ContentSeoCheck; geo: ContentGeoCheck }>
-> {
-  try {
-    await requireAdminOrAbove();
-    const supabase = await db();
-    const article = await getArticle(articleId);
-    if (!article) return { ok: false, error: "Article not found" };
-
-    const { data: topicRow } = await supabase
-      .from("content_topics")
-      .select("*")
-      .eq("id", article.topic_id)
-      .maybeSingle();
-    if (!topicRow) return { ok: false, error: "Topic not found" };
-    const topic = rowToTopic(topicRow);
-
-    const sources = await listResearch(article.topic_id);
-
-    const seo = runSeoChecks({ article, topic, sources });
-    const geo = runGeoChecks({ article, topic, sources });
-
-    const { data: seoRow, error: seoErr } = await supabase
-      .from("content_seo_checks")
-      .insert({ article_id: articleId, score: seo.score, checks: seo.checks })
-      .select("*")
-      .single();
-    if (seoErr) return { ok: false, error: seoErr.message };
-
-    const { data: geoRow, error: geoErr } = await supabase
-      .from("content_geo_checks")
-      .insert({ article_id: articleId, score: geo.score, checks: geo.checks })
-      .select("*")
-      .single();
-    if (geoErr) return { ok: false, error: geoErr.message };
-
-    await supabase
-      .from("content_articles")
-      .update({ seo_score: seo.score, geo_score: geo.score })
-      .eq("id", articleId);
-
-    revalidatePath(CONTENT_PATH, "layout");
-    return {
-      ok: true,
-      data: {
-        seo: rowToSeoCheck(seoRow),
-        geo: rowToGeoCheck(geoRow),
-      },
-    };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-export async function getLatestScores(articleId: string): Promise<{
-  seo: ContentSeoCheck | null;
-  geo: ContentGeoCheck | null;
-}> {
-  const supabase = await db();
-  const [{ data: seo }, { data: geo }] = await Promise.all([
-    supabase
-      .from("content_seo_checks")
-      .select("*")
-      .eq("article_id", articleId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    supabase
-      .from("content_geo_checks")
-      .select("*")
-      .eq("article_id", articleId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
-  return {
-    seo: seo ? rowToSeoCheck(seo) : null,
-    geo: geo ? rowToGeoCheck(geo) : null,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Agent chat
-// ---------------------------------------------------------------------------
-
-export async function listAgentMessages(
-  articleId: string,
-): Promise<ContentAgentMessage[]> {
-  const supabase = await db();
-  const { data } = await supabase
-    .from("content_agent_messages")
-    .select("*")
-    .eq("article_id", articleId)
-    .order("created_at", { ascending: true });
-  return (data ?? []).map(rowToAgentMessage);
-}
-
-async function insertAgentMessage(
-  articleId: string,
-  role: ContentAgentRole,
-  content: string,
-  suggestion: ContentAgentSuggestion | null,
-  authorId: string | null,
-): Promise<ContentAgentMessage | null> {
-  const supabase = await db();
-  const { data } = await supabase
-    .from("content_agent_messages")
-    .insert({
-      article_id: articleId,
-      role,
-      content,
-      suggestion,
-      author_id: authorId,
-    })
-    .select("*")
-    .single();
-  return data ? rowToAgentMessage(data) : null;
-}
-
-export async function sendAgentPrompt(input: {
-  article_id: string;
-  prompt: string;
-}): Promise<
-  Result<{ user_message: ContentAgentMessage; agent_message: ContentAgentMessage }>
-> {
-  try {
-    const userId = await requireAdminOrAbove();
-    const article = await getArticle(input.article_id);
-    if (!article) return { ok: false, error: "Article not found" };
-
-    const supabase = await db();
-    const { data: topicRow } = await supabase
-      .from("content_topics")
-      .select("*")
-      .eq("id", article.topic_id)
-      .maybeSingle();
-    if (!topicRow) return { ok: false, error: "Topic not found" };
-    const topic = rowToTopic(topicRow);
-    const sources = await listResearch(article.topic_id);
-
-    const userMessage = await insertAgentMessage(
-      article.id,
-      "user",
-      input.prompt,
-      null,
-      userId,
-    );
-    if (!userMessage) return { ok: false, error: "Failed to record prompt" };
-
-    // Local fallback. The managed agent dispatcher would replace this.
-    const reply = runLocalAgent({
-      prompt: input.prompt,
-      article,
-      topic,
-      sources,
-    });
-
-    const agentMessage = await insertAgentMessage(
-      article.id,
-      "agent",
-      reply.message,
-      reply.suggestion,
-      null,
-    );
-    if (!agentMessage)
-      return { ok: false, error: "Failed to record agent reply" };
-
-    // Auto-apply for unambiguous edits like hyperlink insertion. The
-    // chat shows the summary and the article on the right updates
-    // immediately, no extra click required.
-    let finalAgentMessage = agentMessage;
-    if (
-      reply.auto_apply &&
-      reply.suggestion &&
-      reply.suggestion.kind !== "note"
-    ) {
-      const applyRes = await applySuggestionToArticle({
-        article,
-        suggestion: reply.suggestion,
-      });
-      if (applyRes.ok) {
-        await supabase
-          .from("content_agent_messages")
-          .update({ applied: true })
-          .eq("id", agentMessage.id);
-        finalAgentMessage = { ...agentMessage, applied: true };
-      }
-    }
-
-    revalidatePath(CONTENT_PATH, "layout");
-    return {
-      ok: true,
-      data: { user_message: userMessage, agent_message: finalAgentMessage },
-    };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
 
 /**
- * Build an UpdateArticleInput from an agent suggestion + the current
- * article state. Pure function — does not touch the database. Used by
- * both `applyAgentSuggestion` (manual click) and the auto-apply path
- * inside `sendAgentPrompt` (e.g. hyperlink insertion).
+ * Derive a short working title from a pasted script: the first heading,
+ * else the first non-empty line, capped so it stays card-friendly.
  */
-function buildPatchFromSuggestion(
-  article: ContentArticle,
-  sug: ContentAgentSuggestion,
-): UpdateArticleInput | null {
-  switch (sug.kind) {
-    case "set_title":
-      return { title: sug.title };
-    case "set_meta":
-      return { meta_description: sug.meta_description };
-    case "replace_body":
-      return { body_md: sug.body_md };
-    case "append_section":
-      return {
-        body_md:
-          article.body_md.trimEnd() +
-          "\n\n## " +
-          sug.heading +
-          "\n\n" +
-          sug.body_md +
-          "\n",
-      };
-    case "rewrite_paragraph":
-      return {
-        body_md: article.body_md.includes(sug.before)
-          ? article.body_md.replace(sug.before, sug.after)
-          : article.body_md,
-      };
-    case "note":
-      return null;
+function deriveTitle(body: string): string {
+  for (const raw of body.split("\n")) {
+    const line = raw.replace(/^#{1,6}\s+/, "").trim();
+    if (line) return line.length > 80 ? `${line.slice(0, 77)}...` : line;
   }
-}
-
-async function applySuggestionToArticle(input: {
-  article: ContentArticle;
-  suggestion: ContentAgentSuggestion;
-}): Promise<Result<ContentArticle>> {
-  const patch = buildPatchFromSuggestion(input.article, input.suggestion);
-  if (!patch) return { ok: false, error: "Note suggestions are not applied" };
-  return updateArticle(input.article.id, patch, {
-    source: "agent",
-    note: `Applied suggestion ${input.suggestion.kind}`,
-  });
-}
-
-export async function applyAgentSuggestion(
-  messageId: string,
-): Promise<Result<ContentArticle>> {
-  try {
-    await requireAdminOrAbove();
-    const supabase = await db();
-    const { data: msgRow } = await supabase
-      .from("content_agent_messages")
-      .select("*")
-      .eq("id", messageId)
-      .maybeSingle();
-    if (!msgRow) return { ok: false, error: "Message not found" };
-    const message = rowToAgentMessage(msgRow);
-    if (!message.suggestion)
-      return { ok: false, error: "Message has no suggestion to apply" };
-
-    const article = await getArticle(message.article_id);
-    if (!article) return { ok: false, error: "Article not found" };
-
-    const updated = await applySuggestionToArticle({
-      article,
-      suggestion: message.suggestion,
-    });
-    if (!updated.ok) return updated;
-
-    await supabase
-      .from("content_agent_messages")
-      .update({ applied: true })
-      .eq("id", messageId);
-
-    revalidatePath(CONTENT_PATH, "layout");
-    return { ok: true, data: updated.data };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Publish jobs (WordPress draft only)
-// ---------------------------------------------------------------------------
-
-export async function listPublishJobs(
-  articleId: string,
-): Promise<ContentPublishJob[]> {
-  const supabase = await db();
-  const { data } = await supabase
-    .from("content_publish_jobs")
-    .select("*")
-    .eq("article_id", articleId)
-    .order("created_at", { ascending: false });
-  return (data ?? []).map(rowToPublishJob);
-}
-
-export async function queueWordPressDraft(
-  articleId: string,
-): Promise<Result<ContentPublishJob>> {
-  try {
-    const userId = await requireAdminOrAbove();
-    const supabase = await db();
-
-    const article = await getArticle(articleId);
-    if (!article) return { ok: false, error: "Article not found" };
-
-    const env = readWpEnv();
-    const initialStatus: ContentPublishStatus = env
-      ? "in_progress"
-      : "credentials_missing";
-
-    const { data: jobRow, error } = await supabase
-      .from("content_publish_jobs")
-      .insert({
-        article_id: articleId,
-        status: initialStatus,
-        target: "wordpress",
-        attempt: 1,
-        requested_by: userId,
-      })
-      .select("*")
-      .single();
-    if (error) return { ok: false, error: error.message };
-    let job = rowToPublishJob(jobRow);
-
-    if (!env) {
-      await supabase
-        .from("content_articles")
-        .update({ last_publish_status: "credentials_missing" })
-        .eq("id", articleId);
-      revalidatePath(CONTENT_PATH, "layout");
-      return { ok: true, data: job };
-    }
-
-    // Execute synchronously — the action is admin-only and explicit.
-    const html = markdownToHtml(article.body_md);
-    const wpResult = await createWordPressDraft({
-      title: article.title,
-      content: html,
-      excerpt: article.meta_description,
-      slug: article.slug ?? undefined,
-    });
-
-    if (wpResult.ok) {
-      const { data: updated } = await supabase
-        .from("content_publish_jobs")
-        .update({
-          status: "completed",
-          wp_post_id: wpResult.post_id,
-          wp_draft_url: wpResult.draft_url,
-          result: { post_id: wpResult.post_id },
-        })
-        .eq("id", job.id)
-        .select("*")
-        .single();
-      if (updated) job = rowToPublishJob(updated);
-
-      await supabase
-        .from("content_articles")
-        .update({
-          wp_post_id: wpResult.post_id,
-          wp_draft_url: wpResult.draft_url,
-          last_publish_status: "completed",
-        })
-        .eq("id", articleId);
-
-      // Move the topic forward.
-      await supabase
-        .from("content_topics")
-        .update({ stage: "complete" })
-        .eq("id", article.topic_id);
-    } else {
-      const status: ContentPublishStatus =
-        wpResult.reason === "credentials_missing"
-          ? "credentials_missing"
-          : "blocked";
-      const { data: updated } = await supabase
-        .from("content_publish_jobs")
-        .update({
-          status,
-          error_message: wpResult.error,
-          result: { reason: wpResult.reason },
-        })
-        .eq("id", job.id)
-        .select("*")
-        .single();
-      if (updated) job = rowToPublishJob(updated);
-
-      await supabase
-        .from("content_articles")
-        .update({ last_publish_status: status })
-        .eq("id", articleId);
-    }
-
-    revalidatePath(CONTENT_PATH, "layout");
-    return { ok: true, data: job };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-export type WordPressEnvStatus = {
-  configured: boolean;
-  url: string | null;
-};
-
-export async function getWordPressEnvStatus(): Promise<WordPressEnvStatus> {
-  const env = readWpEnv();
-  return {
-    configured: !!env,
-    url: env?.url ?? null,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Conversational topic creation + research
-// ---------------------------------------------------------------------------
-
-/**
- * One-shot result for the chat box on /content. The UI renders one of:
- *   - kind: "created" → render link to the new topic
- *   - kind: "ideas"   → render list with one-click "Add to backlog"
- *   - kind: "message" → render a chat-style assistant reply
- */
-export type StudioChatResult =
-  | {
-      kind: "created";
-      topic: TopicWithArticle;
-      draft: TopicDraft;
-      message: string;
-    }
-  | {
-      kind: "imported";
-      topic: TopicWithArticle;
-      draft: TopicDraft;
-      message: string;
-      word_count: number;
-    }
-  | {
-      kind: "ideas";
-      ideas: TopicIdea[];
-      message: string;
-    }
-  | {
-      kind: "needs_target";
-      reason: "optimize_seo";
-      message: string;
-    }
-  | {
-      kind: "message";
-      message: string;
-    };
-
-/**
- * Tool: create_topic_from_conversation
- *
- * Build a topic + seeded article from a free-form Jack message and
- * persist it. Brief and key-points are written into the article's
- * brief_md so the workspace opens with usable scaffolding.
- */
-export async function createTopicFromConversation(input: {
-  space_id: string;
-  message: string;
-}): Promise<Result<{ topic: TopicWithArticle; draft: TopicDraft }>> {
-  try {
-    const userId = await requireAdminOrAbove();
-    const draft = parseTopicDraft(input.message);
-    const supabase = await db();
-
-    const { data: topicRow, error: topicErr } = await supabase
-      .from("content_topics")
-      .insert({
-        space_id: input.space_id,
-        title: draft.title,
-        pillar: draft.pillar,
-        priority: draft.priority,
-        target_keyword: draft.target_keyword,
-        secondary_keywords: draft.secondary_keywords,
-        angle: draft.angle,
-        hypothesis: draft.hypothesis,
-        created_by: userId,
-        owner_id: userId,
-      })
-      .select("*")
-      .single();
-    if (topicErr) return { ok: false, error: topicErr.message };
-    const topic = rowToTopic(topicRow);
-
-    const briefMd = buildBriefMarkdown(draft);
-    await supabase.from("content_articles").insert({
-      topic_id: topic.id,
-      title: draft.title,
-      brief_md: briefMd,
-      outline_md: "",
-      body_md: "",
-    });
-
-    revalidatePath(CONTENT_PATH, "layout");
-    const full = await getTopic(topic.id);
-    return {
-      ok: true,
-      data: {
-        topic: full ?? { ...topic, article: null, owner: null },
-        draft,
-      },
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
+  return "Untitled ad";
 }
 
 /**
- * Tool: create_topic_from_pasted_draft
- *
- * Jack pastes an existing draft (markdown or plain text). We derive a
- * topic skeleton from the draft (title, pillar, keyword, etc.), persist
- * it, and seed the article with the pasted body so the right-hand
- * canvas opens with rich post content immediately.
+ * Paste an existing ad script (markdown or plain text). Creates a card
+ * in the Draft column and seeds the script body so the workspace opens
+ * with the content ready to customize.
  */
 export async function createTopicFromPastedDraft(input: {
   space_id: string;
   body: string;
   title_hint?: string | null;
 }): Promise<
-  Result<{ topic: TopicWithArticle; draft: TopicDraft; word_count: number }>
+  Result<{ topic: TopicWithArticle; title: string; word_count: number }>
 > {
   try {
     const userId = await requireAdminOrAbove();
     const supabase = await db();
 
-    const body = normalizeDraftBody(input.body);
-    if (!body || countWords(body) < 20) {
+    const body = (input.body ?? "").trim();
+    if (!body || countWords(body) < 10) {
       return {
         ok: false,
-        error: "The pasted draft is too short to import. Paste at least a few sentences.",
+        error: "The pasted script is too short to import. Paste at least a few lines.",
       };
     }
 
-    const seed = (input.title_hint?.trim() || deriveTopicSeed(body)).trim();
-    const draft = parseTopicDraft(seed);
+    const title = (input.title_hint?.trim() || deriveTitle(body)).slice(0, 120);
 
-    // Strip a leading H1 if present — the topic title carries it.
+    // Strip a leading H1 if present — the card title carries it.
     let working = body;
     const h1Match = /^#\s+(.+)\n+/.exec(working);
     if (h1Match) {
@@ -1231,13 +565,9 @@ export async function createTopicFromPastedDraft(input: {
       .from("content_topics")
       .insert({
         space_id: input.space_id,
-        title: draft.title,
-        pillar: draft.pillar,
-        priority: draft.priority,
-        target_keyword: draft.target_keyword,
-        secondary_keywords: draft.secondary_keywords,
-        angle: draft.angle,
-        hypothesis: draft.hypothesis,
+        title,
+        channel: "meta",
+        priority: "medium",
         stage: "draft",
         created_by: userId,
         owner_id: userId,
@@ -1247,12 +577,9 @@ export async function createTopicFromPastedDraft(input: {
     if (topicErr) return { ok: false, error: topicErr.message };
     const topic = rowToTopic(topicRow);
 
-    const briefMd = buildBriefMarkdown(draft);
     await supabase.from("content_articles").insert({
       topic_id: topic.id,
-      title: draft.title,
-      brief_md: briefMd,
-      outline_md: "",
+      title,
       body_md: working,
       word_count: wc,
       reading_time_min: readingTimeMin(wc),
@@ -1264,7 +591,7 @@ export async function createTopicFromPastedDraft(input: {
       ok: true,
       data: {
         topic: full ?? { ...topic, article: null, owner: null },
-        draft,
+        title,
         word_count: wc,
       },
     };
@@ -1274,309 +601,4 @@ export async function createTopicFromPastedDraft(input: {
       error: err instanceof Error ? err.message : String(err),
     };
   }
-}
-
-/**
- * Tool: optimize_article_seo
- *
- * Apply an opinionated SEO/GEO pass to an existing article (mutates
- * title, meta, body in-place via updateArticle, and re-runs the
- * scorers). Returns before/after scores plus a summary of changes.
- */
-export async function optimizeArticleSeo(input: {
-  article_id: string;
-}): Promise<
-  Result<{
-    article: ContentArticle;
-    seo: ContentSeoCheck;
-    geo: ContentGeoCheck;
-    summary: string[];
-    before: { seo: number | null; geo: number | null };
-    after: { seo: number; geo: number };
-  }>
-> {
-  try {
-    await requireAdminOrAbove();
-    const supabase = await db();
-
-    const article = await getArticle(input.article_id);
-    if (!article) return { ok: false, error: "Article not found" };
-
-    const { data: topicRow } = await supabase
-      .from("content_topics")
-      .select("*")
-      .eq("id", article.topic_id)
-      .maybeSingle();
-    if (!topicRow) return { ok: false, error: "Topic not found" };
-    const topic = rowToTopic(topicRow);
-    const sources = await listResearch(article.topic_id);
-
-    const before = { seo: article.seo_score, geo: article.geo_score };
-
-    const optimized = applyFullSeoOptimization({ article, topic });
-
-    const updateRes = await updateArticle(
-      article.id,
-      {
-        title: optimized.title,
-        meta_description: optimized.meta_description,
-        body_md: optimized.body_md,
-      },
-      { source: "agent", note: "Applied full SEO optimization pass" },
-    );
-    if (!updateRes.ok) return { ok: false, error: updateRes.error };
-
-    const updatedArticle = updateRes.data;
-
-    // Re-run scorers against the freshly optimized article.
-    const seo = runSeoChecks({ article: updatedArticle, topic, sources });
-    const geo = runGeoChecks({ article: updatedArticle, topic, sources });
-
-    const { data: seoRow } = await supabase
-      .from("content_seo_checks")
-      .insert({ article_id: article.id, score: seo.score, checks: seo.checks })
-      .select("*")
-      .single();
-    const { data: geoRow } = await supabase
-      .from("content_geo_checks")
-      .insert({ article_id: article.id, score: geo.score, checks: geo.checks })
-      .select("*")
-      .single();
-
-    await supabase
-      .from("content_articles")
-      .update({ seo_score: seo.score, geo_score: geo.score })
-      .eq("id", article.id);
-
-    // Move topic to "in_progress" if it's still in the early stages —
-    // running an SEO pass means real work has started.
-    if (topic.stage === "idea") {
-      await supabase
-        .from("content_topics")
-        .update({ stage: "in_progress" })
-        .eq("id", topic.id);
-    }
-
-    revalidatePath(CONTENT_PATH, "layout");
-
-    return {
-      ok: true,
-      data: {
-        article: { ...updatedArticle, seo_score: seo.score, geo_score: geo.score },
-        seo: seoRow ? rowToSeoCheck(seoRow) : { id: "_", article_id: article.id, score: seo.score, checks: seo.checks, created_at: new Date().toISOString() },
-        geo: geoRow ? rowToGeoCheck(geoRow) : { id: "_", article_id: article.id, score: geo.score, checks: geo.checks, created_at: new Date().toISOString() },
-        summary: optimized.summary,
-        before,
-        after: { seo: seo.score, geo: geo.score },
-      },
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-/**
- * Tool: generate_topic_ideas
- *
- * Returns N seasonally-shaped Smoky Mountain homeowner blog ideas. The
- * implementation is a deterministic local generator today; a managed
- * agent with web search can be plugged in here later without changing
- * the call sites.
- */
-export async function generateTopicIdeas(input: {
-  count?: number;
-}): Promise<Result<{ ideas: TopicIdea[] }>> {
-  try {
-    await requireAdminOrAbove();
-    const ideas = generateLocalTopicIdeas({ count: input.count });
-    return { ok: true, data: { ideas } };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-/**
- * Tool: add_suggested_topic_to_backlog
- *
- * One-click promote a generated idea to a real topic + seeded article.
- */
-export async function addSuggestedTopicToBacklog(input: {
-  space_id: string;
-  idea: TopicIdea;
-}): Promise<Result<TopicWithArticle>> {
-  try {
-    const userId = await requireAdminOrAbove();
-    const supabase = await db();
-    const { idea } = input;
-
-    const { data, error } = await supabase
-      .from("content_topics")
-      .insert({
-        space_id: input.space_id,
-        title: idea.title,
-        pillar: idea.pillar,
-        priority: idea.priority,
-        target_keyword: idea.target_keyword,
-        secondary_keywords: idea.secondary_keywords,
-        angle: idea.angle,
-        hypothesis: idea.hypothesis,
-        created_by: userId,
-        owner_id: userId,
-      })
-      .select("*")
-      .single();
-    if (error) return { ok: false, error: error.message };
-    const topic = rowToTopic(data);
-
-    await supabase.from("content_articles").insert({
-      topic_id: topic.id,
-      title: idea.title,
-      brief_md: buildBriefMarkdown(idea),
-      outline_md: "",
-      body_md: "",
-    });
-
-    revalidatePath(CONTENT_PATH, "layout");
-    const full = await getTopic(topic.id);
-    return { ok: true, data: full ?? { ...topic, article: null, owner: null } };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-/**
- * Studio-level chat dispatcher (separate from the per-article agent
- * chat). Routes a free-form Jack message to the right capability:
- *   - topic creation intent      → createTopicFromConversation
- *   - research / ideation intent → generateTopicIdeas
- *   - otherwise                  → instructional reply
- *
- * This is the entry point the UI calls. The agent prompt + tool list
- * lives in `agent-prompt.ts`; this dispatcher is the local fallback.
- */
-export async function runStudioChat(input: {
-  space_id: string;
-  message: string;
-}): Promise<Result<StudioChatResult>> {
-  try {
-    await requireAdminOrAbove();
-    const intent = detectIntent(input.message);
-
-    if (intent.kind === "paste_draft") {
-      const imported = await createTopicFromPastedDraft({
-        space_id: input.space_id,
-        body: intent.body,
-      });
-      if (!imported.ok) return imported;
-      return {
-        ok: true,
-        data: {
-          kind: "imported",
-          topic: imported.data.topic,
-          draft: imported.data.draft,
-          word_count: imported.data.word_count,
-          message: `Imported your draft as "${imported.data.draft.title}" (${imported.data.word_count} words). It's parsed into the post canvas on the right. Open it to optimize for SEO with one click.`,
-        },
-      };
-    }
-
-    if (intent.kind === "optimize_seo") {
-      // Studio-level chat doesn't have a single article context; the
-      // SEO pass needs to run inside the article workspace. Tell Jack
-      // to open a topic and re-run the action there.
-      return {
-        ok: true,
-        data: {
-          kind: "needs_target",
-          reason: "optimize_seo",
-          message:
-            "Open the topic you want to optimize and I'll run a full SEO pass on it from the article workspace. Or paste your draft here and I'll import it first.",
-        },
-      };
-    }
-
-    if (intent.kind === "create_topic") {
-      const created = await createTopicFromConversation({
-        space_id: input.space_id,
-        message: input.message,
-      });
-      if (!created.ok) return created;
-      return {
-        ok: true,
-        data: {
-          kind: "created",
-          topic: created.data.topic,
-          draft: created.data.draft,
-          message: `Added "${created.data.draft.title}" to the backlog as ${created.data.draft.pillar.replaceAll("_", " ")}. Brief and key points are pre-filled — open the workspace to refine.`,
-        },
-      };
-    }
-
-    if (intent.kind === "generate_ideas") {
-      const result = await generateTopicIdeas({ count: intent.count });
-      if (!result.ok) return result;
-      return {
-        ok: true,
-        data: {
-          kind: "ideas",
-          ideas: result.data.ideas,
-          message: `Pulled ${result.data.ideas.length} ideas tuned to the current season. One click adds any of them to the backlog.`,
-        },
-      };
-    }
-
-    return {
-      ok: true,
-      data: {
-        kind: "message",
-        message:
-          'Tell me what to write about, paste a draft, or ask me to research ideas. Examples: "write about gap nights in Pigeon Forge", "research ideas for May", or paste a draft you already have and I\'ll import it.',
-      },
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-function buildBriefMarkdown(draft: TopicDraft | TopicIdea): string {
-  const lines: string[] = [];
-  lines.push("## Brief");
-  lines.push("");
-  lines.push(draft.brief);
-  lines.push("");
-  lines.push("## Angle");
-  lines.push("");
-  lines.push(draft.angle);
-  lines.push("");
-  lines.push("## Hypothesis");
-  lines.push("");
-  lines.push(draft.hypothesis);
-  lines.push("");
-  if (draft.key_points.length > 0) {
-    lines.push("## Key points to cover");
-    lines.push("");
-    for (const point of draft.key_points) {
-      lines.push(`- ${point}`);
-    }
-    lines.push("");
-  }
-  lines.push("## Keywords");
-  lines.push("");
-  lines.push(`- Primary: ${draft.target_keyword}`);
-  if (draft.secondary_keywords.length > 0) {
-    lines.push(`- Secondary: ${draft.secondary_keywords.join(", ")}`);
-  }
-  return lines.join("\n");
 }

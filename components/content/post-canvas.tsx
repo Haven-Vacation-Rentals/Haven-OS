@@ -58,7 +58,7 @@ import {
   type PostBlock,
 } from "@/lib/content/markdown";
 import type { ContentArticle } from "@/lib/content/types";
-import { countWords } from "@/lib/content/scoring";
+import { countWords } from "@/lib/content/util";
 
 type Mode = "post" | "source";
 
@@ -624,7 +624,7 @@ function BlockEditor({
         as="p"
         value={block.text}
         onChange={(text) => onUpdate({ text } as Partial<PostBlock>)}
-        placeholder="Write a paragraph in Jack's voice — operator credibility, no buzzwords."
+        placeholder="Write the next line of the script — VO, on-screen text, or scene direction."
         className="text-[15.5px] leading-7 text-foreground"
         multiline
       />
@@ -637,7 +637,7 @@ function BlockEditor({
           as="div"
           value={block.text}
           onChange={(text) => onUpdate({ text } as Partial<PostBlock>)}
-          placeholder="Operator takeaway / pull quote"
+          placeholder="Callout — key beat, on-screen text, or note to the editor"
           className="text-[14.5px] italic leading-7 text-foreground"
           multiline
         />

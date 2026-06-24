@@ -8,9 +8,9 @@ import { Button } from "@/components/ui/button";
 import { createTopicFromPastedDraft } from "@/lib/content/actions";
 
 /**
- * Paste an existing markdown/plain-text draft. The action derives the
- * topic skeleton (title, pillar, keyword) and seeds the article body so
- * the workspace opens with rich post content immediately.
+ * Paste an existing ad script (markdown or plain text). The action
+ * derives a card title and seeds the script body so the workspace opens
+ * ready to customize.
  */
 export function PasteDraftDialog({
   open,
@@ -28,7 +28,7 @@ export function PasteDraftDialog({
 
   if (!open) return null;
   const wc = body.trim() ? body.trim().split(/\s+/).filter(Boolean).length : 0;
-  const enoughContent = wc >= 20;
+  const enoughContent = wc >= 10;
 
   function close() {
     onOpenChange(false);
@@ -48,7 +48,7 @@ export function PasteDraftDialog({
         toast.error(r.error);
         return;
       }
-      toast.success(`Imported "${r.data.draft.title}" (${r.data.word_count} words)`);
+      toast.success(`Imported "${r.data.title}" (${r.data.word_count} words)`);
       close();
       router.push(`/content/${r.data.topic.id}` as never);
       router.refresh();
@@ -65,12 +65,11 @@ export function PasteDraftDialog({
             </span>
             <div>
               <h3 className="font-heading text-base font-bold text-foreground">
-                Import an existing draft
+                Import an existing script
               </h3>
               <p className="mt-0.5 text-[12px] text-muted-foreground">
-                Paste markdown or plain text. The studio derives a title,
-                pillar, and target keyword, and seeds the post canvas with
-                the body.
+                Paste markdown or plain text. The studio derives a card
+                title and seeds the script editor with the body.
               </p>
             </div>
           </div>
@@ -100,14 +99,14 @@ export function PasteDraftDialog({
 
           <label className="flex flex-col gap-1">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Draft content {wc > 0 ? `· ${wc} words` : ""}
+              Script {wc > 0 ? `· ${wc} words` : ""}
             </span>
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={14}
               autoFocus
-              placeholder="Paste your draft here. Markdown is fine — headings, lists, paragraphs."
+              placeholder="Paste your script here. Markdown is fine — headings, scene beats, lists."
               className="min-h-[280px] w-full resize-y rounded-md border border-border bg-surface-alt/30 px-3 py-2 font-mono text-[12.5px] leading-6 text-foreground outline-none focus:border-haven-coral/40"
             />
           </label>
@@ -116,8 +115,8 @@ export function PasteDraftDialog({
         <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-3">
           <span className="text-[11px] text-muted-foreground">
             {enoughContent
-              ? "Ready to import — title, pillar, and keyword will be derived."
-              : "Paste at least 20 words to import."}
+              ? "Ready to import — a card title will be derived from the script."
+              : "Paste at least 10 words to import."}
           </span>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={close}>

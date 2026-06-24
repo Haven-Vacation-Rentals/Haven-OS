@@ -108,7 +108,7 @@ export async function dispatchMcp(
         },
         serverInfo: SERVER_INFO,
         instructions:
-          "Haven OS — internal operating system for Haven Vacation Rentals. Tools wrap Tasks, Lost Items, and Content Studio. Calls are scoped to the personal access token's owner; the token cannot do anything the owner cannot do.",
+          "Haven OS — internal operating system for Haven Vacation Rentals. Tools wrap Tasks, Lost Items, and Paid Advertising (the paid-ads project tracker). Calls are scoped to the personal access token's owner; the token cannot do anything the owner cannot do.",
       });
     }
 

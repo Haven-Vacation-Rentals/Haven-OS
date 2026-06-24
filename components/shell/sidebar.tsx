@@ -109,7 +109,7 @@ function buildSections(flags: {
       items: [
         { label: "Client Pitches", href: "/sales/pitches", icon: Megaphone },
         { label: "Lead Forms", href: "/gtm/lead-magnets", icon: Magnet },
-        { label: "Content Studio", href: "/content", icon: PenSquare },
+        { label: "Paid Ads", href: "/content", icon: PenSquare },
       ],
     });
   }
