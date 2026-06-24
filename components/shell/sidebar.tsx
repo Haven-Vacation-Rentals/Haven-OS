@@ -20,6 +20,7 @@ import {
   Magnet,
   PackageSearch,
   Coins,
+  Star,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -63,6 +64,11 @@ function buildSections(flags: {
       label: "Lost Items",
       href: "/operations/lost-items",
       icon: PackageSearch,
+    },
+    {
+      label: "Reviews",
+      href: "/operations/reviews",
+      icon: Star,
     },
     {
       label: "Operations Costs",
