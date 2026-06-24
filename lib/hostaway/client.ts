@@ -118,13 +118,18 @@ async function request<T>(path: string, init: RequestInitLite = {}): Promise<T> 
 
 export type HostawayReview = {
   id: number;
+  accountId?: number | null;
   type: "guest-to-host" | "host-to-guest";
   status: string;
   rating: number | null; // typically 0–10; null if no numeric rating
   publicReview: string | null;
+  privateFeedback?: string | null;
+  revieweeResponse?: string | null;
+  reviewCategory?: unknown;
   listingMapId: number | null;
   listingName: string | null;
   reservationId: number | null;
+  channelId?: number | null;
   guestName: string | null;
   departureDate: string | null;
   arrivalDate: string | null;
@@ -148,6 +153,7 @@ export async function getReviews(params: {
   departureDateStart?: string; // Y-m-d
   departureDateEnd?: string; // Y-m-d
   type?: "guest-to-host" | "host-to-guest";
+  statuses?: string | string[];
   limit?: number;
   offset?: number;
   revalidate?: number | false;
@@ -156,6 +162,12 @@ export async function getReviews(params: {
   if (params.departureDateStart) qp.set("departureDateStart", params.departureDateStart);
   if (params.departureDateEnd) qp.set("departureDateEnd", params.departureDateEnd);
   qp.set("type", params.type ?? "guest-to-host");
+  if (params.statuses) {
+    const statuses = Array.isArray(params.statuses)
+      ? params.statuses
+      : [params.statuses];
+    for (const status of statuses) qp.append("statuses", status);
+  }
   qp.set("limit", String(params.limit ?? 500));
   qp.set("offset", String(params.offset ?? 0));
   // Sort by id desc so the most recently received reviews come first.
