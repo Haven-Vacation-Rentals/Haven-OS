@@ -116,6 +116,19 @@ async function request<T>(path: string, init: RequestInitLite = {}): Promise<T> 
 // Reviews
 // ---------------------------------------------------------------------------
 
+/**
+ * Per-category sub-score on a review (cleanliness, communication, etc.).
+ * Hostaway returns these on the same 0–10 scale as the overall `rating`.
+ * Category keys vary by channel (e.g. `cleanliness`, `communication`,
+ * `checkin`/`check_in`, `accuracy`, `location`, `value`), so consumers
+ * should normalize the key before grouping.
+ */
+export type HostawayReviewCategory = {
+  category?: string | null;
+  categoryName?: string | null;
+  rating?: number | null;
+};
+
 export type HostawayReview = {
   id: number;
   accountId?: number | null;
@@ -125,7 +138,7 @@ export type HostawayReview = {
   publicReview: string | null;
   privateFeedback?: string | null;
   revieweeResponse?: string | null;
-  reviewCategory?: unknown;
+  reviewCategory?: HostawayReviewCategory[] | null;
   listingMapId: number | null;
   listingName: string | null;
   reservationId: number | null;
