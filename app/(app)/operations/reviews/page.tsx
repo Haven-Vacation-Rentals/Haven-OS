@@ -2,15 +2,21 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import {
   AlertCircle,
+  BadgeCheck,
   Building2,
   CalendarDays,
+  DollarSign,
+  KeyRound,
+  MapPin,
+  MessageSquare,
   MessageSquareText,
   RefreshCw,
+  Sparkles,
   Star,
+  type LucideIcon,
 } from "lucide-react";
 import {
   HostawayError,
-  getReviews,
   getReviewsPage,
   isConfigured as isHostawayConfigured,
   type HostawayReview,
@@ -196,12 +202,10 @@ async function loadReviews({
   status,
   dateRange,
   sort,
-  allTime,
 }: {
   status: ReviewStatus;
   dateRange: ReviewFilters["dateRange"];
   sort: ReviewSort;
-  allTime: boolean;
 }): Promise<ReviewLoadResult> {
   if (!isHostawayConfigured()) {
     return {
@@ -223,9 +227,11 @@ async function loadReviews({
       limit: 500,
       revalidate: 60,
     } as const;
-    const reviews = allTime
-      ? await loadAllReviewPages(baseParams)
-      : await getReviews(baseParams);
+    // Always paginate. Hostaway caps a single page at 500 reviews, so any
+    // window busy enough to exceed that (e.g. a full month across the whole
+    // portfolio) would silently drop everything past the first 500 — which
+    // is exactly why Haven OS showed 500 while Hostaway reported 615.
+    const reviews = await loadAllReviewPages(baseParams);
     return {
       ok: true,
       reviews: reviews.filter((review) => review.type === "guest-to-host"),
@@ -244,6 +250,7 @@ async function loadAllReviewPages(
 ): Promise<HostawayReview[]> {
   const limit = params?.limit ?? 500;
   const reviews: HostawayReview[] = [];
+  const seen = new Set<number>();
   let offset = params?.offset ?? 0;
   let total: number | undefined;
   let previousFirstId: number | undefined;
@@ -254,7 +261,14 @@ async function loadAllReviewPages(
     const firstId = pageReviews[0]?.id;
     if (firstId !== undefined && firstId === previousFirstId) break;
     previousFirstId = firstId;
-    reviews.push(...pageReviews);
+    // Dedupe by id: sorting by a non-unique field (departureDate) means an
+    // unstable order at a page boundary could otherwise return the same
+    // review twice and push the totals above Hostaway's.
+    for (const review of pageReviews) {
+      if (seen.has(review.id)) continue;
+      seen.add(review.id);
+      reviews.push(review);
+    }
     total = page.count;
     offset += limit;
 
@@ -292,7 +306,6 @@ export default async function OperationsReviewsPage({
     status,
     dateRange: filters.dateRange,
     sort: filters.sort,
-    allTime: filters.window === "all",
   });
 
   const loadedReviews = result.ok ? result.reviews : [];
@@ -443,6 +456,8 @@ export default async function OperationsReviewsPage({
             />
           </div>
 
+          <CategoryScores scores={summary.categoryScores} />
+
           {reviews.length === 0 ? (
             <EmptyState />
           ) : (
@@ -529,6 +544,39 @@ function EmptyState() {
         Try widening the guest feedback history window or clearing filters.
       </p>
     </Card>
+  );
+}
+
+function CategoryScores({ scores }: { scores: CategoryScore[] }) {
+  // Hide the whole section if the loaded reviews carry no category data at
+  // all (e.g. a channel that doesn't break scores out) rather than showing
+  // a row of empty "—" cards.
+  if (!scores.some((score) => score.count > 0)) return null;
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-1">
+        <h2 className="font-heading text-base font-bold">Category scores</h2>
+        <span className="text-xs text-muted-foreground">
+          Average sub-scores for the selected range
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {scores.map((score) => (
+          <KpiCard
+            key={score.label}
+            label={score.label}
+            value={formatFiveStarRating(score.average, 2)}
+            icon={score.icon}
+            sub={
+              score.count > 0
+                ? `${formatTenPointRating(score.average, 2)}/10 · ${score.count} rated`
+                : "No category data"
+            }
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -640,12 +688,112 @@ function summarizeReviews(reviews: HostawayReview[]) {
 
   return {
     count: reviews.length,
-    averageRatingFive: formatFiveStarRating(average),
-    averageRatingTen: formatTenPointRating(average),
+    averageRatingFive: formatFiveStarRating(average, 2),
+    averageRatingTen: formatTenPointRating(average, 2),
     needsResponse: reviews.filter(needsResponse).length,
     belowFour: reviews.filter((review) => ratingFive(review.rating) < 4).length,
     uniqueListings: uniqueListingKeys.size,
+    categoryScores: aggregateCategoryScores(reviews),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Per-category sub-scores (Cleanliness, Check-in, Communication, …)
+// ---------------------------------------------------------------------------
+
+type CategoryScore = {
+  label: string;
+  icon: LucideIcon;
+  average: number | null; // raw 0–10 scale, like the overall rating
+  count: number; // reviews that carried a rating for this category
+};
+
+/**
+ * Canonical guest-to-host review categories, in the order Hostaway shows
+ * them. `keys` are normalized (lowercase, letters only) so channel spelling
+ * variants — "check_in", "checkin", "Check-in" — all collapse to one bucket.
+ */
+const REVIEW_CATEGORY_DEFS: ReadonlyArray<{
+  label: string;
+  icon: LucideIcon;
+  keys: readonly string[];
+}> = [
+  { label: "Cleanliness", icon: Sparkles, keys: ["cleanliness"] },
+  { label: "Check-in", icon: KeyRound, keys: ["checkin"] },
+  { label: "Communication", icon: MessageSquare, keys: ["communication"] },
+  { label: "Value", icon: DollarSign, keys: ["value"] },
+  { label: "Location", icon: MapPin, keys: ["location"] },
+  { label: "Accuracy", icon: BadgeCheck, keys: ["accuracy"] },
+];
+
+function normalizeCategoryKey(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z]/g, "");
+}
+
+function parseReviewCategories(
+  raw: HostawayReview["reviewCategory"],
+): Array<{ key: string; rating: number }> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ key: string; rating: number }> = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    // Treat each entry as untrusted JSON: the upstream shape isn't
+    // guaranteed, so read fields defensively rather than trusting the type.
+    const record = entry as Record<string, unknown>;
+    const name =
+      typeof record.category === "string"
+        ? record.category
+        : typeof record.categoryName === "string"
+          ? record.categoryName
+          : null;
+    if (!name) continue;
+    const rawRating = record.rating;
+    const rating =
+      typeof rawRating === "number"
+        ? rawRating
+        : typeof rawRating === "string" && rawRating.trim() !== ""
+          ? Number(rawRating)
+          : NaN;
+    if (!Number.isFinite(rating)) continue;
+    out.push({ key: normalizeCategoryKey(name), rating });
+  }
+  return out;
+}
+
+/**
+ * Average each category's raw 0–10 score across the supplied reviews.
+ * Only reviews that actually carry a rating for a category contribute to
+ * that category's average, so a channel that omits (say) "value" doesn't
+ * drag its average down.
+ */
+function aggregateCategoryScores(reviews: HostawayReview[]): CategoryScore[] {
+  const totals = new Map<string, { sum: number; count: number }>();
+  for (const review of reviews) {
+    for (const { key, rating } of parseReviewCategories(review.reviewCategory)) {
+      const acc = totals.get(key) ?? { sum: 0, count: 0 };
+      acc.sum += rating;
+      acc.count += 1;
+      totals.set(key, acc);
+    }
+  }
+
+  return REVIEW_CATEGORY_DEFS.map((def) => {
+    let sum = 0;
+    let count = 0;
+    for (const key of def.keys) {
+      const acc = totals.get(key);
+      if (acc) {
+        sum += acc.sum;
+        count += acc.count;
+      }
+    }
+    return {
+      label: def.label,
+      icon: def.icon,
+      average: count > 0 ? sum / count : null,
+      count,
+    };
+  });
 }
 
 function RatingDisplay({ rating }: { rating: number | null }) {
@@ -782,12 +930,12 @@ function compareDates(
   return direction === "asc" ? aValue - bValue : bValue - aValue;
 }
 
-function formatTenPointRating(rating: number | null): string {
-  return typeof rating === "number" ? rating.toFixed(1) : "—";
+function formatTenPointRating(rating: number | null, digits = 1): string {
+  return typeof rating === "number" ? rating.toFixed(digits) : "—";
 }
 
-function formatFiveStarRating(rating: number | null): string {
-  return typeof rating === "number" ? `${(rating / 2).toFixed(1)}/5` : "—";
+function formatFiveStarRating(rating: number | null, digits = 1): string {
+  return typeof rating === "number" ? `${(rating / 2).toFixed(digits)}/5` : "—";
 }
 
 function formatShortDate(value: string): string {
