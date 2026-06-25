@@ -227,10 +227,11 @@ async function loadReviews({
       limit: 500,
       revalidate: 60,
     } as const;
-    // Always paginate. Hostaway caps a single page at 500 reviews, so any
-    // window busy enough to exceed that (e.g. a full month across the whole
-    // portfolio) would silently drop everything past the first 500 — which
-    // is exactly why Haven OS showed 500 while Hostaway reported 615.
+    // Pull the full result set (Hostaway caps a single page at 500). The
+    // endpoint ignores the departureDate range params, so it returns the
+    // entire guest-to-host history — the date window is enforced
+    // client-side in filterReviews(). The params are kept as best-effort in
+    // case a future API version honors them and narrows the response.
     const reviews = await loadAllReviewPages(baseParams);
     return {
       ok: true,
@@ -827,6 +828,20 @@ function filterReviews(reviews: HostawayReview[], filters: ReviewFilters) {
   const guestNeedle = filters.guest.toLowerCase();
 
   return reviews.filter((review) => {
+    // Stay-window filter by departure date — the source of truth for the
+    // selected range. Hostaway's reviews endpoint ignores the departureDate
+    // range params we send (it returns the full guest-to-host history
+    // regardless), so without enforcing the window here the page counted
+    // every review ever instead of just the ones that departed in range.
+    // Dates are ISO "YYYY-MM-DD", so lexicographic comparison is chronological.
+    const { start, end } = filters.dateRange;
+    if (start || end) {
+      const departed = review.departureDate;
+      if (!departed) return false;
+      if (start && departed < start) return false;
+      if (end && departed > end) return false;
+    }
+
     if (listingNeedle) {
       const listingHaystack = [
         review.listingName,
