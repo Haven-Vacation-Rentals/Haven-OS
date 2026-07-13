@@ -1,0 +1,5 @@
+# ClickUp import working data — never commit.
+# snapshot/ holds the raw workspace export (tasks, comments, attachments
+# metadata, member emails); reports/ holds provisioning/import reports.
+snapshot/
+reports/
