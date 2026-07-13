@@ -15,6 +15,7 @@ This directory is the source of truth for replicating ClickUp inside HavenOS. Pe
 | `06-finance-or-onboarding-maintenance.md` | Finance, Owner Relations, Onboarding Team, Maintenance, Exterior, Insurance |
 | `07-tendwell-startups-private.md` | Tendwell Cleaning Co., Starting Up Start Ups, Dylan's Private |
 | `08-ai-spaces-future.md` | AI Workflows, AI Knowledge Base, Stay Automated, Future Clickup Projects (test space) |
+| `09-automations-and-templates.md` | Confirmed automations (from Dylan) + full reconstructed task templates for the four template-driven lists |
 
 Sensitive content policy: credential lists (Passwords folder, My Passwords) are documented **structure-only** — no task names or values. Confidential leadership items, applicant/employee names, and personal to-do content are redacted from these committed files. Property door codes / wifi fields exist in the Property Detail Master schema and are flagged for restricted handling.
 
@@ -75,7 +76,7 @@ Ordered roughly by how much of the workspace depends on them:
 
 1. **Relationship custom field** (`list_relationship`) — used pervasively as foreign keys: PDM ↔ HOA/Cleaning Vendors/Pest/Pool vendors, Invoice System ↔ Vendor Contacts, Tendwell Property ↔ Cleaner List, Reviews ↔ Properties. HavenOS `custom_field_type` has no relationship type today.
 2. **Space/folder-level shared field definitions** — ClickUp shares field IDs across lists (Department 14-option set, 428-option property labels, folder-level fields). HavenOS fields are list-scoped only; migration needs space-scoped defs to avoid duplicating definitions per list.
-3. **Automations engine** — status-change department routing (Company Tickets, Onboarding/Offboarding pushes), due-date rules (lead pipelines), status flips (Insurance active→expired), recurring tasks (already partially supported). Exact rules pending screenshots (API doesn't expose them).
+3. **Automations engine** — see `09-automations-and-templates.md` for confirmed rules: date-based priority escalation (Dylan's To Do List, Company Tickets), apply-template-on-create (4 lists, templates fully reconstructed), plus observed candidates (department routing, Insurance active→expired flip, email ingestion). Dylan confirmed the workspace-level Automations manager does NOT show the rules in use — remaining rules come from him directly, not screenshots.
 4. **Forms** — many intake lists are ClickUp Forms (hiring applications, Damaged Linen, Linen Count, Reviews <5⭐, damage claims, vendor W-9, employee info). HavenOS has bespoke intake pages (lost-items, clean-transition); needs a generic form-builder → list pipeline or one intake page per surviving form.
 5. **Email-to-list ingestion** — Escalation (Hostaway charge-fail emails), Tendwell Invoicing, Pool Cleaning reports. Decide replacement (forwarding address → `/api` ingest).
 6. **Formula + rollup fields** — Tendwell Profit/Margin formulas, `automatic_progress` rollups on Rocks/L10/Onboarding.
@@ -96,25 +97,33 @@ Ordered roughly by how much of the workspace depends on them:
 
 ## Users & permissions
 
-- **56 ClickUp members** (full list retrievable via API; names + emails captured for import mapping). HavenOS auto-provisions `profiles` on Google OAuth (domain-restricted) with `user`/`admin`/`super_admin` roles; per-space access maps to existing `space_members` / `list_members` + `user_has_list_access()`.
-- Import mapping: ClickUp assignee → HavenOS profile by email; unmatched → placeholder surfaced for manual mapping.
-- Decisions needed: which members become HavenOS users (several non-domain accounts exist: a shared `clickuphaven` gmail, the Listingly agent bot, door-scale/personal emails); Google OAuth is domain-restricted, so non-domain people need domain accounts or an invite mechanism.
-- **ClickUp ACLs are not exposed by the API** — per-space/folder/list sharing must come from screenshots. Defaults to apply regardless: Passwords vault, V/I + Dylan/Jo/Christine L10, HR, Finance, Tendwell, and PDM access-code fields all restricted.
+- **DECIDED (Dylan, 2026-07-13): all 56 ClickUp members get HavenOS accounts.** Global roles: **Dylan Robinson, Jack Zoppa, Jo Leona, Jonathan Francisco III → admin** (owner emails may remain super_admin per existing `permissions.ts` behavior); **everyone else → member** (`user`).
+- Import mapping: ClickUp assignee → HavenOS profile by email; unmatched (ex-employees appearing in history) → recorded in `import_meta`, surfaced for manual mapping. Non-domain accounts (shared `clickuphaven` gmail, Listingly bot, door-scale/personal emails) need domain accounts or an invite mechanism before they can sign in (Google OAuth is domain-restricted).
+- **ClickUp ACLs are not exposed by the API** — per-space/folder/list sharing must come from screenshots for any space that isn't open-to-all. Defaults to apply regardless: Passwords vault, V/I + Dylan/Jo/Christine L10, HR, Finance, Tendwell, and PDM access-code fields restricted to the four admins (or narrower) at launch, then widened per Dylan.
 
 ## Migration plan (proposed phases)
 
-1. **Phase 0 — inputs & decisions:** permission/automation/view/form screenshots; confirm SKIP list; decide history depth (comments/attachments/closed tasks); confirm user roster.
+1. **Phase 0 — inputs & decisions:** mostly complete (see "Decisions locked"); remaining: SKIP-list confirmation, per-space sharing screenshots, view/form screenshots.
 2. **Phase 1 — schema:** new migrations for the gap features needed by live systems (relationship fields, space-level field defs, forms, rating/attachment field types, restricted fields).
 3. **Phase 2 — importer:** idempotent ClickUp-API → Supabase importer (spaces/folders/lists/statuses/field defs/tasks/subtasks/checklists, `external_id` on every row, re-runnable for delta sync during parallel-run).
 4. **Phase 3 — module merges:** PDM → `properties` (external_id already aligned with the ClickUp task IDs; see the CSV export in repo root), Onboarding Properties → `/onboarding`, HR → `/hr`, SOPs + ClickUp Docs (27 docs) → a DB-backed knowledge base, Reviews/Left-Items → existing operations modules.
 5. **Phase 4 — behavior:** rebuild automations + forms + email ingestion; finish Board/Calendar/saved views.
 6. **Phase 5 — cutover:** parallel-run with delta sync, team validation per department, ClickUp to read-only, seat reduction.
 
-## Open decisions (for Dylan)
+## Decisions locked (Dylan, 2026-07-13)
 
-1. Confirm the SKIP/ARCHIVE lists above (anything marked dead you still want?).
-2. How much history: open tasks only, or closed tasks + comments + attachments too?
-3. Insurance COI tracker: rebuild as a renewals feature, or drop?
-4. Tendwell & Stay Automated: restricted spaces in HavenOS, or out of scope?
-5. User roster: who gets a HavenOS account (and what happens to non-domain accounts)?
-6. Passwords: vault module in HavenOS (per explicit request) — confirm who can access which vault list.
+1. **History:** migrate ALL closed tasks, plus comments and attachment history, for all tasks.
+2. **Insurance COI tracker:** rebuild it.
+3. **Tendwell & Stay Automated:** in scope — migrate.
+4. **Users:** all 56 ClickUp members get HavenOS accounts.
+5. **Roles:** everyone `member`, except Dylan Robinson, Jack Zoppa, Jo Leona, Jonathan Francisco III → `admin`.
+6. **Passwords:** migrate remaining entries into a restricted vault (per explicit request).
+7. **Automations:** rebuild per `09-automations-and-templates.md` (workspace Automations manager doesn't show the live rules; Dylan supplies them directly).
+
+## Still open (for Dylan)
+
+1. Confirm the SKIP/ARCHIVE triage above (anything marked dead you still want live?).
+2. Per-space **sharing screenshots** for any space/folder/list that is NOT open to the whole team (Sharing & Permissions dialog) — this is the only permissions input still missing.
+3. **Views**: screenshots of the default view (grouping/columns/filters) for the daily-driver lists.
+4. **Forms**: form-builder screenshots for the active ClickUp Forms (hiring applications, Damaged Linen, Linen Count, Reviews <5⭐, damage claims).
+5. Any additional automations beyond `09-automations-and-templates.md`.
