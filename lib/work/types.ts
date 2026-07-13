@@ -28,7 +28,14 @@ export type CustomFieldType =
   | "email"
   | "phone"
   | "people"
-  | "labels";
+  | "labels"
+  // ClickUp-import additions (0046)
+  | "relationship"
+  | "rating"
+  | "attachment"
+  | "location"
+  | "formula"
+  | "progress";
 
 /** All distinct action strings that can appear in task_activity.action */
 export type ActivityAction =
@@ -68,6 +75,8 @@ export interface Space {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Original ClickUp id when imported (0046). */
+  clickup_id?: string | null;
 }
 
 export interface SpaceMember {
@@ -92,6 +101,8 @@ export interface Folder {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Original ClickUp id when imported (0046). */
+  clickup_id?: string | null;
 }
 
 export interface List {
@@ -107,6 +118,8 @@ export interface List {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Original ClickUp id when imported (0046). */
+  clickup_id?: string | null;
 }
 
 export interface ListMember {
@@ -145,16 +158,25 @@ export interface Status {
   color: string;
   category: TaskStatusCategory;
   order: number;
+  /** Original ClickUp id when imported (0046). */
+  clickup_id?: string | null;
 }
 
 export interface CustomFieldDef {
   id: string;
-  list_id: string;
+  /**
+   * Scope anchor — exactly one of list_id / folder_id / space_id is set
+   * (0046). List-scoped defs (the pre-import default) have list_id set.
+   */
+  list_id: string | null;
+  folder_id?: string | null;
+  space_id?: string | null;
   name: string;
   field_type: CustomFieldType;
   config: Record<string, unknown>;
   order: number;
   created_at: string;
+  clickup_id?: string | null;
 }
 
 /** Alias for CustomFieldDef — used in spec references to FieldDef */
@@ -217,6 +239,10 @@ export interface Task {
   recurrence_rule: RecurrenceRule | null;
   /** How many times this recurring series has rolled over. */
   recurrence_count: number;
+  /** Original ClickUp id when imported (0046). */
+  clickup_id?: string | null;
+  /** ClickUp import provenance (0046). Null/absent for native tasks. */
+  import_meta?: ImportMeta | null;
 }
 
 export interface Comment {
@@ -226,6 +252,10 @@ export interface Comment {
   body: string;
   created_at: string;
   updated_at: string;
+  /** Original ClickUp id when imported (0046). */
+  clickup_id?: string | null;
+  /** ClickUp import provenance (0046). Null/absent for native comments. */
+  import_meta?: ImportMeta | null;
 }
 
 // --- ClickUp-parity entities -------------------------------------------------
@@ -236,6 +266,8 @@ export interface Checklist {
   name: string;
   order: number;
   created_at: string;
+  /** Original ClickUp id when imported (0046). */
+  clickup_id?: string | null;
 }
 
 export interface ChecklistItem {
@@ -247,6 +279,8 @@ export interface ChecklistItem {
   order: number;
   created_at: string;
   completed_at: string | null;
+  /** Original ClickUp id when imported (0046). */
+  clickup_id?: string | null;
 }
 
 export interface TimeEntry {
@@ -258,6 +292,8 @@ export interface TimeEntry {
   ended_at: string | null;
   duration_ms: number | null;
   created_at: string;
+  /** Original ClickUp id when imported (0046). */
+  clickup_id?: string | null;
 }
 
 export interface TaskActivity {
@@ -279,6 +315,97 @@ export interface TaskAttachment {
   file_size: number;
   mime_type: string | null;
   storage_path: string;
+  created_at: string;
+  /** Original ClickUp id when imported (0046). */
+  clickup_id?: string | null;
+}
+
+// --- ClickUp import & feature-gap entities (migration 0046) ------------------
+
+/**
+ * ClickUp import provenance stored in tasks.import_meta / comments.import_meta.
+ * All keys optional; open-ended for lossy artifacts the importer can't map.
+ */
+export interface ImportMeta {
+  /** Original creator when the ClickUp user has no HavenOS profile. */
+  creator_name?: string;
+  creator_email?: string;
+  /** Original ClickUp URL for the record. */
+  clickup_url?: string;
+  [key: string]: unknown;
+}
+
+export type TaskDependencyType = "waiting_on" | "blocking" | "linked";
+
+export interface TaskDependency {
+  id: string;
+  task_id: string;
+  depends_on_task_id: string;
+  /**
+   * waiting_on → task_id waits on depends_on_task_id
+   * blocking   → task_id blocks depends_on_task_id
+   * linked     → undirected link
+   */
+  type: TaskDependencyType;
+  created_by: string | null;
+  created_at: string;
+}
+
+/** One node of a task template's subtask tree (task_templates.definition). */
+export interface TaskTemplateNode {
+  title: string;
+  /** Default assignees, resolved to profiles by email at apply time. */
+  assignee_emails?: string[];
+  /** Due date offset in days from the moment the template is applied. */
+  due_offset_days?: number;
+  children?: TaskTemplateNode[];
+}
+
+export interface TaskTemplate {
+  id: string;
+  list_id: string;
+  name: string;
+  /** Subtask tree instantiated on task creation ({} until populated). */
+  definition: TaskTemplateNode[] | Record<string, unknown>;
+  clickup_id: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AutomationTrigger =
+  | "task_created"
+  | "start_date_arrived"
+  | "due_date_arrived"
+  | "status_changed";
+
+export type AutomationAction =
+  | "apply_template"
+  | "set_priority"
+  | "move_status"
+  | "notify";
+
+export interface AutomationRule {
+  id: string;
+  list_id: string;
+  trigger: AutomationTrigger;
+  action: AutomationAction;
+  /**
+   * Action payload, e.g. {priority: "high"}, {template_id: "…"},
+   * {status_name: "expired"}, {notify: ["…"]}.
+   */
+  config: Record<string, unknown>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Per-space tag definition. tasks.tags stays a free text[], matched by name. */
+export interface SpaceTag {
+  id: string;
+  space_id: string;
+  name: string;
+  color: string | null;
   created_at: string;
 }
 
